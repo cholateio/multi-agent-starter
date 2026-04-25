@@ -1,0 +1,40 @@
+{
+  "_comment": "v3 settings template. Hooks are commented-out by default — uncomment to enable. See USAGE.md section 5 for what each hook does and when to enable. Permission allow patterns in '_permissionsExample' below speed up subagent work; copy them into 'permissions.allow' if you want to enable.",
+
+  "_hooksDisabledByDefault_uncomment_to_enable": {
+    "hooks": {
+      "UserPromptSubmit": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/classify-task.sh",
+              "timeout": 5
+            }
+          ]
+        }
+      ],
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/verify-final-review.sh",
+              "timeout": 10
+            }
+          ]
+        }
+      ]
+    }
+  },
+
+  "_permissionsExample_copy_to_real_permissions_if_desired": {
+    "allow": [
+      "Bash(./.claude/scripts/gemini_exec.sh *)",
+      "Bash(timeout *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ]
+  }
+}
