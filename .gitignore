@@ -1,0 +1,22 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Secrets (paranoid prevention)
+.env
+.env.*
+!.env.example
+
+# Claude Code temporary files
+/tmp/claude-*
+
+# Project-level state
+docs/plans/*.md
+!docs/plans/.gitkeep
+docs/decisions/*.md
+!docs/decisions/.gitkeep
