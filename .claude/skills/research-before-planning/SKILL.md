@@ -4,13 +4,18 @@ description: Use BEFORE engaging superpowers brainstorming/writing-plans when
   the task is `large_task` and involves unfamiliar libraries, security/auth,
   performance-critical paths, or novel architecture. Spawns gemini-research-scout
   to gather external resources, then hands off to superpowers with research as
-  context.
+  context. Full profile only (depends on the Gemini scout).
 ---
 
 # Research Before Planning
 
 This skill runs ONCE before brainstorming/planning, ONLY for tasks that
 benefit from external research. Most tasks skip this step.
+
+> **Profile note:** this skill is part of the **full** profile only — it
+> depends on the Gemini research scout. In `solo` profile (`KIT_PROFILE=solo`)
+> the scout is not available; do lightweight inline research yourself or
+> proceed without, and tell the user research was skipped.
 
 ## When this skill triggers
 
@@ -29,6 +34,8 @@ Trigger when ALL of these are true:
 - `small_task` / `bug_fix` / `medium_task` within known patterns
 - Tasks where the user said "skip research" or "use what we already have"
 - The codebase already has clear conventions for the tech in question
+- The active profile is `solo` — Gemini scout is unavailable; do lightweight
+  inline research yourself or proceed without
 
 ## Workflow
 

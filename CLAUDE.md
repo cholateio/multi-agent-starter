@@ -1,17 +1,17 @@
 # [PROJECT NAME]
 
-> CLAUDE.md template (v3). Replace [PLACEHOLDERS] with project-specific
-> content on first use. The "Multi-Agent Workflow Rules" section is
-> generic and rarely needs editing.
+> CLAUDE.md (kit v3.1, profile-aware). Fill the [PLACEHOLDERS] below on first
+> use - or just run `claude` and paste the bootstrap prompt from PROMPTING.md
+> (section 0) and let it fill them for you.
+> The "Multi-Agent Workflow Rules" half is generic and rarely needs editing.
 
 ## Project goal
 
-[一段話描述這個專案是什麼、核心目的。
- 例：「給小型團隊用的 expense tracking SaaS。優先考量易於 self-host。」]
+[一句話描述這個專案是什麼、核心目的。
+ 例：「給小型團隊用的 expense tracking SaaS，優先 self-host。」]
 
 ## Stack
 
-[實際 stack 列出。例：]
 - Language: [e.g. Python 3.12 / TypeScript 5.4 / Go 1.22]
 - Framework: [e.g. FastAPI / Next.js 14 / none]
 - Datastore: [e.g. PostgreSQL 16 / SQLite / none]
@@ -20,213 +20,157 @@
 
 ## File layout
 
-[新專案首次架構決策後填入。既有專案直接貼 `tree -L 2` 結果。]
-
-```
-<project-root>/
-├── CLAUDE.md
-├── docs/
-│   ├── decisions/    ← ADRs
-│   └── plans/        ← saved plans from superpowers
-├── plans/            ← (alternative location for superpowers plans)
-├── .claude/          ← multi-agent workflow infrastructure
-└── [your actual source dirs]
-```
+[新專案首次架構決策後填入；既有專案貼 `tree -L 2`。]
 
 ## Coding standards
 
-[實際 standards 列出。例：]
-- [e.g. "Functions: single responsibility, <=50 lines"]
-- [e.g. "No `any` types — use `unknown` + type guards"]
-- [e.g. "Error handling: Result type, never raw exceptions across module boundaries"]
+[實際 standards。例：functions single-responsibility / no `any` / Result types。]
 
 ## Project-specific constraints
 
-[此專案特殊規則。對既有專案這是最重要的段落。例：]
-- [e.g. "src/legacy/payment/ — 不可修改，會破壞舊金流整合"]
-- [e.g. "All DB writes 必須走 src/db/ 的 repository pattern"]
-- [e.g. "Public API surface 在 api/v1/ — breaking change 需要 versioning"]
-
-[新專案初期可留空，由實際使用累積補充。]
+[此專案特殊規則 - 對既有專案這是最重要的段落。例：
+ - `src/legacy/payment/` 不可修改，會破壞舊金流
+ - 所有 DB writes 必須走 repository pattern
+ 新專案可留空，由使用累積。]
 
 ---
 
 # Multi-Agent Workflow Rules
 
-> 以下為通用協作規則。除非專案有特殊需求，否則不需要編輯。
+> 通用協作規則。除非專案特殊，否則不需編輯。
 
-## 三方協作概念
+## Active profile (KIT_PROFILE)
 
-This project orchestrates three external AI capabilities:
+This kit runs in one of two profiles, selected per-machine by the
+`KIT_PROFILE` environment variable (default `full`):
 
-- **Gemini CLI** (research scout): 蒐集網路資源、整合外部資訊。**只做研究，不寫 code、不 review**。
-- **Superpowers** (architect + worker): brainstorm、寫 plan、執行 plan。Claude 的主要規劃和實作流程。
-- **Codex Plugin** (reviewer): 跨模型 code review、adversarial challenge。**只做 review，不寫 code**。
+| Profile | Research | Plan + execute | Reviewer (the isolation guarantee) |
+|---------|----------|----------------|------------------------------------|
+| `full`  | Gemini scout | Superpowers | **Codex Plugin** - different model = real isolation |
+| `solo`  | none (your own search) | Superpowers | **fresh-context Claude subagent** - state/time isolation ONLY, NOT model isolation |
 
-Main Claude orchestrates these three based on task type.
+Wherever these rules say **"run a review"**, resolve it by the active profile:
 
-## Task-size classification (重要)
+- **full** -> invoke the Codex Plugin: `/codex:review` (and
+  `/codex:adversarial-review` for high-stakes work).
+- **solo** -> spawn a fresh-context subagent to review the diff with clean
+  state, AND say plainly to the user: *"solo profile: cross-model isolation is
+  OFF - this is a same-model self-review (state/time isolation only)."*
+  Never present a solo self-review as if it were cross-model review.
 
-The task classifier hook (`.claude/hooks/classify-task.sh`) may inject a
-`TASK_CLASSIFICATION` hint into context. Honor it.
+If you cannot determine the active profile, ask the user before reviewing.
 
-If no hint is present, classify yourself using these rules:
+## Three-capability orchestration
+
+- **Gemini** (research scout, full only): web research / external info. Never
+  writes code, never reviews.
+- **Superpowers** (architect + worker): brainstorm, writing-plans,
+  executing-plans. The primary planning/implementation flow in both profiles.
+- **Reviewer** (per active profile, see table above): cross-model review in
+  full, fresh-context self-review in solo. Never writes code.
+
+Main Claude orchestrates these based on task type.
+
+## Spec-driven entry (if a blueprint exists)
+
+If `docs/specs/` contains a spec/blueprint:
+
+- Treat it as the **authoritative requirements source**.
+- **Skip brainstorming** - scope was already converged externally.
+- Still run writing-plans to derive a codebase-aware plan.
+- **Still review the spec itself** (prefer adversarial) before implementing.
+  The spec is an external artifact written by another author/model, so the
+  isolation principle applies to it exactly as it applies to a plan.
+
+## Task-size classification
+
+A `classify-task.sh` hook may inject a `TASK_CLASSIFICATION` hint. Honor it.
+Otherwise classify yourself:
 
 | Signal | Classification |
-|--------|---------------|
-| User said "just do it" / "quick" / "small" | `small_task` |
-| User said "full workflow" / "review the plan" | `explicit_full` |
-| Estimated change < 30 lines, single file, single concern | `small_task` |
-| UI tweak / CSS / copy edit / formatting | `small_task` |
-| Bug fix without business logic change | `small_task` |
-| New feature, single file, < 100 lines | `medium_task` |
-| New feature, multiple files OR new dependencies | `large_task` |
-| Refactor, schema migration, auth/payment changes | `large_task` |
+|--------|----------------|
+| "just do it" / "quick" / "small" | `small_task` |
+| "full workflow" / "review the plan" | `explicit_full` |
+| < 30 lines, single file, single concern | `small_task` |
+| UI / CSS / copy / formatting | `small_task` |
+| bug fix without business-logic change | `small_task` |
+| new feature, single file, < 100 lines | `medium_task` |
+| new feature, multiple files OR new deps | `large_task` |
+| refactor, schema migration, auth/payment | `large_task` |
 
-### What to run for each classification
+### What to run for each
 
-**small_task**: Just do it.
-- Skip research-before-planning, superpowers brainstorming, superpowers writing-plans
-- Make the change directly
-- After change: brief summary
-- NO automatic codex review (unless task touched business logic — see "Final review trigger" below)
-
-**medium_task**: Light workflow.
-- Skip research (unless task involves a new external API/library)
-- Use superpowers:writing-plans (skip brainstorming for clarity-low cases)
-- Run `/codex:review` on the plan
-- User approves
-- Implement
-- Final review per the rules below
-
-**large_task**: Full workflow.
-- Trigger `research-before-planning` skill if task involves: external libraries,
-  security, performance-critical paths, novel architecture
-- Use superpowers:brainstorming → writing-plans
-- Run `/codex:review` on the plan (and `/codex:adversarial-review` if high-stakes)
-- User approves
-- superpowers:executing-plans with phase-level review (see below)
-- Final review
+- **small_task**: just do it; skip planning; brief summary. No review unless it
+  touched business logic (see Final review trigger).
+- **medium_task**: superpowers:writing-plans -> run a review on the plan ->
+  user approves -> implement -> final review.
+- **large_task**: research-before-planning if it involves new libs / security /
+  perf-critical / novel architecture -> superpowers:brainstorming ->
+  writing-plans -> review the plan (adversarial if high-stakes) -> user approves
+  -> executing-plans with phase-level review -> final review.
 
 ### Phase-level review during executing-plans
 
-When superpowers completes a phase, decide whether to run `/codex:review`:
-
-**MUST review** (no exceptions):
-- Phase touched: auth, authorization, session management
-- Phase touched: payment, billing, money calculations
-- Phase touched: data migration, schema changes
-- Phase modified anything in "Project-specific constraints"
-
-**Recommend review (default to yes, ask if unclear)**:
-- Phase touched: business logic that users will perceive
-- Phase touched: algorithms, state machines, concurrency
-- Phase touched: input validation, security boundaries
-- Phase ≥ 100 lines
-
-**Skip review**:
-- Phase only changed: UI / styling / docs
-- Phase only changed: simple glue code, CRUD, type definitions
-- Phase < 50 lines and no business logic
+- **MUST review**: auth / authz / session; payment / billing / money;
+  data migration / schema; anything in "Project-specific constraints".
+- **Recommend (default yes)**: user-visible business logic; algorithms / state
+  machines / concurrency; input validation / security boundaries; phase >= 100 lines.
+- **Skip**: UI / styling / docs; simple glue / CRUD / type defs; < 50 lines, no
+  business logic.
 
 ### Final review trigger
 
-Before declaring the entire task complete, evaluate:
-
-```
-Did this session modify business-logic-bearing files (.py, .ts, .js, .go, .rs, etc.)
-that haven't been reviewed by /codex:review yet?
-```
-
-If YES → run `/codex:review` on the full change set before summarizing.
-
-The Stop hook (`.claude/hooks/verify-final-review.sh`) enforces this — if you
-forget, the hook will block your turn-end and remind you.
+Before declaring the task complete, ask: *did this session modify
+business-logic-bearing files that haven't been reviewed yet?* If yes -> run a
+review (per active profile) on the full change set before summarizing. The Stop
+hook (`verify-final-review.sh`) enforces this when enabled.
 
 ## Cross-model isolation principle
 
-The PRIMARY question is "is the reviewer a different model than the writer?",
+PRIMARY question: **"is the reviewer a different model than the writer?"** -
 not "which specialist fits this task?".
 
-- **Code written by main Claude → reviewed by Codex Plugin**: real isolation ✓
-- **Code written by codex (via /codex:rescue) → NOT reviewed by codex again**:
-  same model = no isolation. Defer to user judgment or accept the original.
-- **Plan written by main Claude/superpowers → reviewed by Codex Plugin**: ✓
+- **full**: writer (main Claude) != reviewer (Codex) -> real isolation.
+- **solo**: writer and reviewer are both Claude -> model isolation is OFF; you
+  only get state/time isolation from the fresh subagent. Say so to the user.
 
-### Anti-pattern warning
+### Anti-pattern (never do this)
 
-NEVER do "same model writes + same model reviews". This was a documented
-mistake from earlier kit versions. Codex writing code AND codex reviewing
-code provides almost no isolation value.
-
-## When to engage research-before-planning
-
-Trigger when ANY of these apply for a `large_task`:
-
-- Task involves a library/framework you've not seen used in this codebase
-- Task involves security-sensitive territory (auth, crypto, secrets)
-- Task involves performance-critical paths (you'd benefit from current benchmarks)
-- Task involves novel architecture (you'd benefit from seeing how others did it)
-
-DO NOT trigger for:
-- Tasks within established patterns of this codebase (existing project)
-- `small_task` or `medium_task` (overhead not justified)
-- Tasks where the user already provided clear technical direction
+Same model writes + same model reviews, presented as isolation. In full, never
+review codex-written code (e.g. from `/codex:rescue`) with codex again - that's
+zero isolation. Defer to user judgment or have main Claude review it.
 
 ## When to STOP and ask the user
 
-Stop and ask the user (do NOT auto-proceed) when:
-
-- Research-scout findings suggest a meaningfully better approach than the
-  current plan assumed → reconfirm direction
-- `/codex:review` flagged a `critical` or `high` issue you can't resolve
-  from your context
-- `/codex:adversarial-review` challenged a fundamental premise of the plan
-- Phase will modify > [PROJECT-SPECIFIC LINE THRESHOLD, default 100] lines
-- About to delete or rewrite > 30 existing lines
-- Touches anything in "Project-specific constraints"
-- Codex/Gemini are unavailable (quota/auth) — ask whether to proceed without
-  cross-model review or wait
+- Research findings suggest a meaningfully better approach than the plan assumed.
+- A review flagged a `critical`/`high` issue you can't resolve from context.
+- Adversarial review challenged a fundamental premise.
+- Phase will modify > [default 100] lines, or delete/rewrite > 30 existing lines.
+- Touches anything in "Project-specific constraints".
+- (full) Codex/Gemini unavailable - ask whether to proceed or wait.
 
 ## Service unavailability handling
 
-When a tool fails (codex quota exhausted, gemini API error, etc.):
+When a tool fails: report clearly (never silently skip), categorize (quota /
+auth / network) with the fix, and ask the user: skip / wait+retry / (research
+only) proceed without it.
 
-1. **Report clearly to the user** — never silently skip
-2. **Categorize the failure**:
-   - Quota exhausted → suggest waiting or skipping this review
-   - Auth issue → tell user to check `codex login` / `GEMINI_API_KEY`
-   - Network → suggest retry
-3. **Ask the user explicitly**:
-   - (a) Skip this review and proceed (less safe — explain implication)
-   - (b) Wait and retry in N minutes
-   - (c) For research scout failures only: proceed without research
-     (acceptable — research is nice-to-have, not gate)
+**full profile:** do NOT auto-fall-back from `/codex:review` to Claude
+self-review silently - that breaks the isolation guarantee; the user must
+explicitly accept it (which is effectively a temporary switch to solo).
+**solo profile:** self-review is the declared default, not a silent fallback -
+but still state that isolation is reduced.
 
-Critical: do NOT auto-fall-back from `/codex:review` to "Claude self-review"
-silently. That breaks the isolation guarantee. The user must explicitly accept
-this fallback.
+## Inventory (profile-gated)
 
-## Skills available
+- Skill `research-before-planning` - full only (uses gemini scout).
+- Subagent `gemini-research-scout` - full only.
+- Hook `classify-task.sh` (UserPromptSubmit) - both profiles.
+- Hook `verify-final-review.sh` (Stop) - both; reads `KIT_PROFILE` to decide
+  which review path to enforce.
 
-- `research-before-planning` — pre-brainstorming research via gemini scout
+## NOT available (intentionally)
 
-(Most workflow logic is in CLAUDE.md and hooks, not skills, in v3.)
-
-## Subagents available
-
-- `gemini-research-scout` — wraps gemini CLI for web research only
-
-## Hooks active (see `.claude/settings.json`)
-
-- `classify-task.sh` (UserPromptSubmit): auto-tags task size
-- `verify-final-review.sh` (Stop): blocks turn-end if business logic
-  unreviewed
-
-## What main Claude does NOT have available (intentionally)
-
-- `codex-coder` / `codex-reviewer` subagents — replaced by official
-  Codex Plugin (`/codex:review`, `/codex:rescue`, etc.)
-- Bash wrapper for codex — Codex Plugin handles delegation
-- A `plan-with-review` skill — superpowers' writing-plans replaces it,
-  combined with auto-trigger of `/codex:review` on the resulting plan
+`codex-coder`/`codex-reviewer` subagents, bash wrappers for codex, or a
+`plan-with-review` skill - all replaced by the official Codex Plugin (full) and
+superpowers writing-plans.
