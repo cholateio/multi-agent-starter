@@ -1,0 +1,25 @@
+# 通用短版 .gitignore(init.sh 鋪出時會改名為 .gitignore)。
+# stack-specific 的規則(例:*.pyc、.next/、target/)由 scaffolder 或 AI 依專案補上。
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editors(.vscode/ 不 ignore,常有共享設定)
+.idea/
+*.swp
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# 常見依賴/build 產物
+node_modules/
+dist/
+build/
+__pycache__/
+.venv/
+
+# Logs
+*.log
