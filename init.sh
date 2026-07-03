@@ -1,29 +1,46 @@
 #!/usr/bin/env bash
-# init.sh - bootstrap a project with the multi-agent kit (install-tier only)
+# init.sh - bootstrap or update a project with the multi-agent kit
 #
 # Usage:
-#   init.sh <target-dir> [--existing] [--profile full|solo]
+#   init.sh <target-dir> [--update] [--profile full|solo]
 #
-# Copies ONLY the install-tier (.claude/, CLAUDE.md, PROMPTING.md) out of the
-# kit repo into <target-dir>. The kit's own docs (README / ARCHITECTURE /
-# ADOPTION / USAGE / LICENSE) stay in the kit repo on purpose - they don't
-# belong inside your project, and shipping them is what makes "which files can
-# I touch?" confusing. After this runs, your project contains exactly two kinds
-# of files: the CLAUDE.md you fill in, and the .claude/ infra you leave alone.
+# Install mode (default): init.sh <target-dir>
+#   Mode (new/existing) is auto-detected from whether <target-dir> is empty.
+#   Copies ONLY the install-tier out of the kit repo - .claude/, CLAUDE.md,
+#   README.md, .gitignore, docs/specs/, and mise.toml (only if this machine
+#   has mise) - no-clobber: existing files in the target are never
+#   overwritten. The kit's own docs (README / ARCHITECTURE / tests /
+#   VERSION) stay in the kit repo on purpose - they don't belong inside your
+#   project, and shipping them is what makes "which files can I touch?"
+#   confusing.
+#
+# Update mode: init.sh <target-dir> --update
+#   Re-deploys the kit-owned files under
+#   .claude/{rules,hooks,scripts,agents,skills}/ into an existing kit
+#   project, add-or-overwrite. Never touches .claude/settings.json or your
+#   CLAUDE.md. Flags orphaned kit-owned files and legacy monolithic
+#   CLAUDE.md for you to handle by hand. No backups are made - use
+#   `git diff` / `git checkout -- <path>` to review or revert.
+#
+# --existing has been removed as of v3.2: mode is auto-detected now, just
+# run init.sh <dir>.
 
 set -euo pipefail
 
 # --- locate the kit (this script lives at the kit root) ---
 KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KIT_VERSION="$(cat "$KIT_ROOT/VERSION" 2>/dev/null || echo "0.0.0")"
+KIT_SHA="$(git -C "$KIT_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 # --- parse args ---
 TARGET=""
-EXISTING=0
+UPDATE=0
 PROFILE="${KIT_PROFILE:-full}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --existing)  EXISTING=1; shift ;;
+    --update)    UPDATE=1; shift ;;
+    --existing)  echo "--existing 已移除:v3.2 起自動偵測,直接執行 init.sh <dir>" >&2; exit 2 ;;
     --profile)   PROFILE="${2:-full}"; shift 2 ;;
     --profile=*) PROFILE="${1#*=}"; shift ;;
     -h|--help)   grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -33,7 +50,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$TARGET" ]; then
-  echo "usage: init.sh <target-dir> [--existing] [--profile full|solo]" >&2
+  echo "usage: init.sh <target-dir> [--update] [--profile full|solo]" >&2
   exit 2
 fi
 if [ "$PROFILE" != "full" ] && [ "$PROFILE" != "solo" ]; then
@@ -41,33 +58,156 @@ if [ "$PROFILE" != "full" ] && [ "$PROFILE" != "solo" ]; then
   exit 2
 fi
 
-# --- resolve target ---
-if [ "$EXISTING" -eq 1 ]; then
-  [ -d "$TARGET" ] || { echo "--existing given but '$TARGET' is not a directory" >&2; exit 1; }
-else
-  mkdir -p "$TARGET"
+# --- shared helpers ---
+chk() {  # $1 label  $2 test-expr  $3 fix
+  if eval "$2" >/dev/null 2>&1; then
+    printf '  [ ok ] %s\n' "$1"
+  else
+    printf '  [FIX] %s\n         -> %s\n' "$1" "$3"
+  fi
+}
+
+write_kit_version() {  # writes .claude/kit-version - kit-owned, overwritten every run
+  mkdir -p "$TARGET/.claude"
+  printf 'v%s %s %s\n' "$KIT_VERSION" "$KIT_SHA" "$(date +%F)" > "$TARGET/.claude/kit-version"
+}
+
+if [ "$UPDATE" -eq 1 ]; then
+  # ============================ update mode ============================
+  if [ ! -d "$TARGET" ] || [ ! -d "$TARGET/.claude" ]; then
+    echo "error: 不是 kit 專案,先跑 init.sh $TARGET" >&2
+    exit 1
+  fi
+  TARGET="$(cd "$TARGET" && pwd)"
+
+  echo "kit:     $KIT_ROOT"
+  echo "target:  $TARGET"
+  echo "mode:    update"
+  echo
+
+  # dirty working tree: soft warning only, never blocks
+  if [ -d "$TARGET/.git" ] && [ -n "$(git -C "$TARGET" status --porcelain 2>/dev/null)" ]; then
+    echo "warning: 建議先 commit 再 update,方便 git diff 檢視變更"
+    echo
+  fi
+
+  # version transition
+  if [ -f "$TARGET/.claude/kit-version" ]; then
+    FROM="$(cut -d' ' -f1 "$TARGET/.claude/kit-version" 2>/dev/null || echo pre-v3.2)"
+  else
+    FROM="pre-v3.2"
+  fi
+  echo "update: $FROM → v$KIT_VERSION"
+  echo
+
+  # --- overwrite the kit-owned set: rules, hooks, scripts, agents, skills ---
+  # add-or-overwrite: this is how a v3.1 project picks up rules/kit-workflow.md.
+  # .claude/settings.json is deliberately NOT in this set.
+  KIT_OWNED_DIRS="rules hooks scripts agents skills"
+  updated=0
+  unchanged=0
+  warnings=0
+  updated_list=()
+
+  for d in $KIT_OWNED_DIRS; do
+    [ -d "$KIT_ROOT/.claude/$d" ] || continue
+    while IFS= read -r -d '' f; do
+      rel="${f#"$KIT_ROOT/"}"
+      dst="$TARGET/$rel"
+      if [ -f "$dst" ] && cmp -s "$f" "$dst"; then
+        unchanged=$((unchanged + 1))
+      else
+        mkdir -p "$(dirname "$dst")"
+        cp "$f" "$dst"
+        updated=$((updated + 1))
+        updated_list+=("$rel")
+      fi
+    done < <(find "$KIT_ROOT/.claude/$d" -type f -print0)
+  done
+
+  echo "updated:"
+  for u in "${updated_list[@]:-}"; do [ -n "$u" ] && echo "  + $u"; done
+  echo
+
+  # --- orphan detection (informational only; never deletes or modifies) ---
+  orphans=()
+  for d in $KIT_OWNED_DIRS; do
+    [ -d "$TARGET/.claude/$d" ] || continue
+    while IFS= read -r -d '' f; do
+      rel="${f#"$TARGET/"}"
+      [ -e "$KIT_ROOT/$rel" ] || orphans+=("$rel")
+    done < <(find "$TARGET/.claude/$d" -type f -print0)
+  done
+  if [ "${#orphans[@]}" -gt 0 ]; then
+    echo "非 kit 檔(你自己的,或 kit 已淘汰):"
+    for o in "${orphans[@]}"; do echo "  - $o"; done
+    warnings=$((warnings + 1))
+    echo
+  fi
+
+  if [ -f "$TARGET/PROMPTING.md" ]; then
+    echo "kit 已不再提供 PROMPTING.md,可自行刪除"
+    warnings=$((warnings + 1))
+    echo
+  fi
+
+  # --- settings.json: never overwritten, just flagged ---
+  if [ -f "$KIT_ROOT/.claude/settings.json" ] && [ -f "$TARGET/.claude/settings.json" ] \
+     && ! cmp -s "$KIT_ROOT/.claude/settings.json" "$TARGET/.claude/settings.json"; then
+    echo "settings.json 與 kit 模板不同(不會覆蓋,如需新設定請手動合併):"
+    diff -u "$TARGET/.claude/settings.json" "$KIT_ROOT/.claude/settings.json" || true
+    warnings=$((warnings + 1))
+    echo
+  fi
+
+  # --- legacy monolithic CLAUDE.md detection ---
+  if [ -f "$TARGET/CLAUDE.md" ] && grep -q "Multi-Agent Workflow Rules" "$TARGET/CLAUDE.md"; then
+    cat <<'EOF'
+偵測到舊版單體 CLAUDE.md。把下面這句貼給 claude 完成遷移:
+「刪除 CLAUDE.md 裡『Multi-Agent Workflow Rules』標題起的整段(規則已移至
+.claude/rules/kit-workflow.md),保留上半的專案內容。」
+EOF
+    warnings=$((warnings + 1))
+    echo
+  fi
+
+  write_kit_version
+  echo "updated $updated, unchanged $unchanged, warnings $warnings"
+  echo "檢視或還原本次 update 的變更: git diff / git checkout -- <path>"
+  exit 0
 fi
+
+# ============================== install mode ==============================
+mkdir -p "$TARGET"
 TARGET="$(cd "$TARGET" && pwd)"
 
-MODE="$([ "$EXISTING" -eq 1 ] && echo existing || echo new)"
+if [ -z "$(ls -A "$TARGET" 2>/dev/null)" ]; then
+  MODE=new
+else
+  MODE=existing
+fi
+
 echo "kit:     $KIT_ROOT"
 echo "target:  $TARGET"
 echo "profile: $PROFILE   mode: $MODE"
 echo
 
-# --- copy install-tier (never the kit's own docs) ---
+# --- copy install-tier, no-clobber (never the kit's own docs) ---
 copied=()
 skipped=()
 
-copy_no_clobber() {  # $1 = path relative to kit root
-  local rel="$1"
-  local src="$KIT_ROOT/$rel"
-  local dst="$TARGET/$rel"
+copy_as_no_clobber() {  # $1 = src path rel to KIT_ROOT   $2 = dst path rel to TARGET
+  local src="$KIT_ROOT/$1"
+  local dst="$TARGET/$2"
   [ -e "$src" ] || return 0
-  if [ -e "$dst" ]; then skipped+=("$rel"); return 0; fi
+  if [ -e "$dst" ]; then skipped+=("$2"); return 0; fi
   mkdir -p "$(dirname "$dst")"
   cp -R "$src" "$dst"
-  copied+=("$rel")
+  copied+=("$2")
+}
+
+copy_no_clobber() {  # $1 = path relative to kit root (same path in target)
+  copy_as_no_clobber "$1" "$1"
 }
 
 # .claude/ : copy file-by-file so existing files are never overwritten
@@ -80,13 +220,28 @@ fi
 # CLAUDE.md : never overwrite (existing projects often have their own)
 if [ -e "$TARGET/CLAUDE.md" ]; then
   cp "$KIT_ROOT/CLAUDE.md" "$TARGET/CLAUDE.md.from-kit"
-  skipped+=("CLAUDE.md  (kept yours; template -> CLAUDE.md.from-kit, merge the Workflow Rules half)")
+  skipped+=("CLAUDE.md  (kept yours; template -> CLAUDE.md.from-kit, merge manually)")
 else
   copy_no_clobber "CLAUDE.md"
 fi
 
-# PROMPTING.md : the cheat sheet
-copy_no_clobber "PROMPTING.md"
+# project templates : README / gitignore, renamed on the way in
+copy_as_no_clobber "templates/README.md" "README.md"
+copy_as_no_clobber "templates/gitignore" ".gitignore"
+
+# docs/specs/ : spec-driven entry point (kit-workflow.md looks here)
+if [ -d "$TARGET/docs/specs" ]; then
+  skipped+=("docs/specs/  (already exists)")
+else
+  mkdir -p "$TARGET/docs/specs"
+  : > "$TARGET/docs/specs/.gitkeep"
+  copied+=("docs/specs/.gitkeep")
+fi
+
+# mise.toml : only if this machine uses mise; silent (no message at all) otherwise
+if command -v mise >/dev/null 2>&1; then
+  copy_as_no_clobber "templates/mise.toml" "mise.toml"
+fi
 
 echo "copied:"
 for c in "${copied[@]:-}"; do [ -n "$c" ] && echo "  + $c"; done
@@ -100,23 +255,28 @@ echo
 if [ -d "$TARGET/.git" ]; then
   echo "git:     already a repo, left as-is"
 else
-  if ( cd "$TARGET" && git init -q && git add -A && git commit -q -m "chore: add multi-agent kit (install-tier)" ); then
-    echo "git:     initialised + initial commit"
+  if ! git -C "$TARGET" init -q -b main >/dev/null 2>&1; then
+    # older git without `init -b` support
+    git -C "$TARGET" init -q
+    git -C "$TARGET" symbolic-ref HEAD refs/heads/main
+  fi
+
+  if git -C "$TARGET" config user.name >/dev/null 2>&1 && git -C "$TARGET" config user.email >/dev/null 2>&1; then
+    git -C "$TARGET" add -A
+    git -C "$TARGET" commit -q -m "chore: add multi-agent kit (install-tier)"
+    echo "git:     initialised (branch main) + initial commit"
   else
-    echo "git:     init failed (not fatal) - run 'git init' yourself"
+    echo "git:     initialised (branch main); commit skipped - git identity not set"
+    chk "git user.name configured"  "git -C \"$TARGET\" config user.name"  'git config --global user.name "Your Name"'
+    chk "git user.email configured" "git -C \"$TARGET\" config user.email" 'git config --global user.email "you@example.com"'
   fi
 fi
 echo
 
-# --- environment check (informational; never blocks) ---
-chk() {  # $1 label  $2 test-expr  $3 fix
-  if eval "$2" >/dev/null 2>&1; then
-    printf '  [ ok ] %s\n' "$1"
-  else
-    printf '  [FIX] %s\n         -> %s\n' "$1" "$3"
-  fi
-}
+# --- kit-version marker (kit-owned; written on both install and update) ---
+write_kit_version
 
+# --- environment check (informational; never blocks) ---
 echo "environment check ($PROFILE profile):"
 chk "claude CLI installed" "command -v claude" \
     "install Claude Code: https://docs.claude.com/en/docs/claude-code/getting-started"
@@ -136,13 +296,14 @@ echo
 echo "next:"
 echo "  cd $TARGET && claude"
 echo
-echo "  then paste the section-0 bootstrap from PROMPTING.md:"
-if [ "$EXISTING" -eq 1 ]; then
-  echo "    請先探索整個 repo，把你看到的架構、慣例、以及不該碰的區域"
-  echo "    寫進 CLAUDE.md 的對應段落。先不要改任何其他檔案。"
+echo "  then paste this bootstrap prompt:"
+if [ "$MODE" = "new" ]; then
+  echo "    這個專案是 [一句話],stack 用 [語言/框架]。"
+  echo "    請填好 CLAUDE.md 的 goal / stack / file layout(constraints 留空)和 README.md 的佔位符。"
 else
-  echo "    這個專案是 [一句話]，stack 用 [語言/框架]。"
-  echo "    請把 CLAUDE.md 的 goal / stack / file layout 填好，constraints 先留空。"
+  echo "    請先探索整個 repo,把架構、慣例、以及「不該碰的區域」寫進 CLAUDE.md,並填 README.md 的佔位符;"
+  echo "    若架構值得記錄,建 docs/ARCHITECTURE.md(大綱:分層、data flow、要改 X 先看 Y、歷史遺留)。"
+  echo "    先不要改任何其他檔案。"
 fi
 if [ "$PROFILE" = "full" ]; then
   echo
