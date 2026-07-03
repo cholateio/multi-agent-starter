@@ -1,4 +1,4 @@
-# Multi-Agent Starter Kit (v3.1)
+# Multi-Agent Starter Kit (v3.2)
 
 讓 **Claude Code + Superpowers + Codex Plugin + Gemini CLI** 乾淨分工地一起工作的起手包。
 你只負責描述任務、approve plan；AI 之間自己協作——你不再當人肉訊息路由器。
@@ -31,13 +31,16 @@
 > **你 clone 這個 kit 一次，它就留在原地當工具。**
 > 每開一個專案，你用 kit 的 `init.sh` 把「安裝層」吐進去——不是把整個 kit 複製過去。
 
-「安裝層」只有三樣東西，也是你專案裡唯一會出現的 kit 檔案：
+「安裝層」現在長這樣，也是你專案裡會出現的 kit 產物：
 
 | 檔案 | 是什麼 | 你要做的事 |
 |------|--------|-----------|
 | `CLAUDE.md` | 給 AI 的專案規則 | **要填**（goal / stack / constraints） |
-| `PROMPTING.md` | 給你的一頁速查 | 隨用隨補 |
-| `.claude/` | 跑這套流程的基礎建設 | **別碰**（hooks / scripts / 設定） |
+| `README.md` | 給人看的專案速查 | AI 幫你填好佔位符（30 秒重啟、環境變數、部署…） |
+| `.gitignore` | 標準忽略規則 | 不用管 |
+| `docs/specs/` | 放功能藍圖 / spec 的地方 | 有 spec-driven 開發時放進去，沒有就留空 |
+| `.claude/` | 跑這套流程的基礎建設（`rules/kit-workflow.md`、hooks / scripts / agents / skills、`kit-version`） | **別碰**（要客製改 kit repo，再 `--update` 鋪回） |
+| `mise.toml` | 工具版本鎖定 | 只有這台機器裝了 mise 才會出現；沒裝的機器不會生成、也不會提它 |
 
 kit 自己的文件（這份 README、`ARCHITECTURE.md`）**永遠留在 kit repo**，不會被複製進你的專案——就像你的 app 不需要 React 的 `CONTRIBUTING.md`。這就是為什麼你以後打開專案不會再被一堆文件搞混「哪些能改」。
 
@@ -96,29 +99,30 @@ export GEMINI_API_KEY="AIza..."          # full 才需要；Windows 另跑 setx
 cd ~/projects/my-thing && claude
 ```
 
-`init.sh` 會一次做完：只複製安裝層、`git init` + 初始 commit、跑環境檢查（每個缺項附修法）、印出你的下一步。
+`init.sh` 看目錄是不是空的來自動判斷新/既有專案（**`--existing` flag 已移除**，不用也不能再指定），一次做完：只複製安裝層、`git init` + 初始 commit、跑環境檢查（每個缺項附修法）、在結尾印出對應的 bootstrap prompt。
 
-進到 claude 後，貼 `PROMPTING.md` 第 0 段「新專案」那句，讓 AI 幫你把 `CLAUDE.md` 填好：
+進到 claude 後，把 `init.sh` 結尾印出的那句貼上去，讓 AI 幫你把 `CLAUDE.md` 和 `README.md` 的佔位符填好（新專案印出的長這樣）：
 
 ```
-這個專案是 [一句話：要做什麼]，stack 用 [語言/框架]。
-請把 CLAUDE.md 的 goal / stack / file layout 填好，constraints 先留空。
+這個專案是 [一句話],stack 用 [語言/框架]。
+請填好 CLAUDE.md 的 goal / stack / file layout(constraints 留空)和 README.md 的佔位符。
 ```
 
 ### 既有專案
 
 ```bash
-~/.multi-agent-kit/init.sh ~/code/legacy-app --existing
+~/.multi-agent-kit/init.sh ~/code/legacy-app
 cd ~/code/legacy-app && claude
 ```
 
-`init.sh --existing` 是**非破壞性**的：絕不覆蓋你既有的 `CLAUDE.md` 或 `.claude/` 檔（已有 CLAUDE.md 時，範本另存成 `CLAUDE.md.from-kit` 讓你手動 merge 後半段的 Workflow Rules）。
+同一個指令、同一份安裝層——`init.sh` 偵測到目錄非空就自動切成既有專案模式，行為**非破壞性**：絕不覆蓋你既有的 `CLAUDE.md` 或 `.claude/` 檔（已有 CLAUDE.md 時，範本另存成 `CLAUDE.md.from-kit` 讓你手動挑要併入的專案內容；workflow rules 已經是獨立的 `.claude/rules/kit-workflow.md`，no-clobber 複製時會直接鋪進你的專案，不用再從 `CLAUDE.md.from-kit` 裡手動搬）。
 
-既有專案有一條黃金法則：**先讓 AI 學會這個專案，再讓它動手。** AI 不懂你的歷史與不成文慣例，貿然亂改會出事。所以第一句不是叫它寫 code，是叫它做 onboarding（`PROMPTING.md` §0「既有專案」那句）：
+既有專案有一條黃金法則：**先讓 AI 學會這個專案，再讓它動手。** AI 不懂你的歷史與不成文慣例，貿然亂改會出事。所以第一句不是叫它寫 code，是叫它做 onboarding——這正是 `init.sh` 在既有專案模式下結尾印出的那句：
 
 ```
-請先探索整個 repo，把你看到的架構、慣例、以及「不該碰的區域」
-寫進 CLAUDE.md 的對應段落。先不要改任何其他檔案。
+請先探索整個 repo,把架構、慣例、以及「不該碰的區域」寫進 CLAUDE.md,並填 README.md 的佔位符;
+若架構值得記錄,建 docs/ARCHITECTURE.md(大綱:分層、data flow、要改 X 先看 Y、歷史遺留)。
+先不要改任何其他檔案。
 ```
 
 接著三個動作別省：
@@ -129,11 +133,24 @@ cd ~/code/legacy-app && claude
 
 ---
 
+## 更新既有專案的 kit
+
+kit repo 更新後（`git pull ~/.multi-agent-kit`），已經跑過 `init.sh` 的專案不會自動跟上——要手動拉一次：
+
+```bash
+~/.multi-agent-kit/init.sh <dir> --update   # 覆蓋 kit-owned 檔、印遷移/孤兒提示
+~/.multi-agent-kit/init.sh <dir>            # （選擇性）no-clobber 補鋪新模板
+```
+
+所有權規則一句話：**`.claude/` 的 kit 檔不可在專案內改，要客製改 kit repo 再 `--update` 鋪回。**
+
+---
+
 ## 日常使用
 
 開工後你幾乎只做一件事：**approve plan**，其餘坐著看。
 
-要更精準地駕馭 AI，看 `PROMPTING.md` 那一頁就夠——它把「怎麼下指令」收斂成一個小文法：
+要更精準地駕馭 AI，其實就是下面這個小文法——這就是全部，沒有更多要背的：
 
 - **一句話描述任務**（大小由系統自己判，多數時候不用你指定）。
 - 想覆寫判斷時，**接一個修飾語**：`直接做` / `走完整流程` / `這會動到 X，請 review` / `請質疑這個設計`。
@@ -175,7 +192,7 @@ cd ~/code/legacy-app && claude
 - **研究階段卡住 / 「Input must be provided」** → 檢查 `echo $GEMINI_API_KEY`；Windows 用 `setx` 後重開所有 terminal；手動測 `./.claude/scripts/gemini_exec.sh "say hello"`。
 - **`claude` 在 Git Bash 立即退出** → 非 git 目錄誤入 print 模式：`git init`（`init.sh` 已代勞），或從 PowerShell 啟動。
 - **找不到 superpowers 寫的 plan** → 問「plan 存在哪？」；不同版本可能在 `plans/`、`docs/plans/`、`.claude/plans/`。
-- **Hook 沒生效 / 誤觸發** → `cat .claude/settings.json | grep -A20 '"hooks"'` 確認啟用；`echo '{"prompt":"add a button"}' | .claude/hooks/classify-task.sh` 測分類；不合用就直接編輯 `.sh`（純 bash 是 hooks 的好處）。
+- **Hook 沒生效 / 誤觸發** → `cat .claude/settings.json | grep -A20 '"hooks"'` 確認啟用；`echo '{"prompt":"add a button"}' | .claude/hooks/classify-task.sh` 測分類；要客製 hook 改 kit repo 的檔，再 `--update` 鋪回專案。
 
 ---
 
@@ -184,9 +201,11 @@ cd ~/code/legacy-app && claude
 | 路徑 | 角色 | 你要做的 |
 |------|------|---------|
 | `CLAUDE.md` | 專案設定 | 填 / 維護 |
-| `PROMPTING.md` | 你的速查 | 隨手補 |
+| `README.md` | 給人看的專案速查 | 填 / 維護 |
 | `.claude/settings.json` | 設定 | 可調（hooks / 權限） |
-| `.claude/hooks/`、`scripts/`、`agents/`、`skills/` | infra | 別碰（要改流程才動） |
+| `.claude/rules/kit-workflow.md` | kit-owned 工作流規則 | 別碰——`--update` 會直接覆蓋；要客製改 kit repo 再鋪回 |
+| `.claude/hooks/`、`scripts/`、`agents/`、`skills/` | infra，同樣 kit-owned | 別碰（要改流程就去改 kit repo，`--update` 鋪回） |
+| `.claude/kit-version` | kit 版本標記 | kit 自動寫入，別手動編輯 |
 
 ---
 
@@ -194,10 +213,9 @@ cd ~/code/legacy-app && claude
 
 | 檔案 | 給誰看 | 內容 |
 |------|--------|------|
-| `README.md` | 新人 / 你 | 你正在看的——裝機、開專案、操作、debug |
-| `PROMPTING.md` | 你（每天） | 一頁速查：怎麼跟 AI 溝通（會進專案） |
-| `CLAUDE.md` | AI（每個 session） | 協作工作流規則（會進專案） |
-| `ARCHITECTURE.md` | 想深入的人 | 為什麼這樣設計、v1→v3.1 的取捨 |
+| `README.md` | 新人 / 你 | 你正在看的——裝機、開專案、操作、debug（給專案用的範本在 `templates/README.md`，`init.sh` 複製時改名成專案的 `README.md`） |
+| `CLAUDE.md` | AI（每個 session） | 專案內容範本：goal / stack / constraints（會進專案；workflow 規則另外放在 `.claude/rules/kit-workflow.md`，同樣會進專案、但 kit-owned） |
+| `ARCHITECTURE.md` | 想深入的人 | 為什麼這樣設計、v1→v3.2 的取捨 |
 
 （`ADOPTION.md` 已併入本檔「既有專案」段、`USAGE.md` 已併入本檔「操作參考 / Debug」段，皆不再單獨維護。）
 
@@ -205,8 +223,9 @@ cd ~/code/legacy-app && claude
 
 ## 版本
 
-- **v3.1（現在）**：`KIT_PROFILE` profile 切換 + 一鍵 `init.sh` + 一頁 `PROMPTING.md` + 砍掉專案污染與冗長文件。
+- **v3.2（現在）**：檔案級所有權二分——`CLAUDE.md` 純專案內容、workflow 規則移到 kit-owned 的 `.claude/rules/kit-workflow.md` + `init.sh --update` 讓已鋪過 kit 的專案能回流拿新版 + `templates/`（README / gitignore / mise 範本）+ 那份「怎麼下指令」的一頁速查文件光榮退役（教學任務已完成，殘值併入 `templates/README.md`）。
+- **v3.1**：`KIT_PROFILE` profile 切換 + 一鍵 `init.sh` + 一頁「怎麼下指令」速查表 + 砍掉專案污染與冗長文件。
 - **v3**：官方 codex-plugin-cc 取代自製 codex/gemini wrapper。
 - **v2 / v1**：deprecated（自製 wrapper / PAL MCP）。
 
-今天起手就用 v3.1。
+今天起手就用 v3.2。
