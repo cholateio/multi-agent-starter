@@ -41,7 +41,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --update)    UPDATE=1; shift ;;
     --existing)  echo "--existing 已移除:v3.2 起自動偵測,直接執行 init.sh <dir>" >&2; exit 2 ;;
-    --profile)   PROFILE="${2:-full}"; shift 2 ;;
+    --profile)   [ $# -ge 2 ] || { echo "--profile needs a value" >&2; exit 2; }
+                 PROFILE="$2"; shift 2 ;;
     --profile=*) PROFILE="${1#*=}"; shift ;;
     -h|--help)   grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*)          echo "unknown option: $1" >&2; exit 2 ;;
@@ -72,6 +73,22 @@ write_kit_version() {  # writes .claude/kit-version - kit-owned, overwritten eve
   printf 'v%s %s %s\n' "$KIT_VERSION" "$KIT_SHA" "$(date +%F)" > "$TARGET/.claude/kit-version"
 }
 
+# enumerate_kit_files: NUL-terminated absolute paths of kit-owned files under
+# $1 (path relative to KIT_ROOT, e.g. ".claude" or ".claude/rules"). Prefers
+# `git ls-files` so only what the maintainer actually committed ships into a
+# project - not whatever else happens to be sitting on their disk (future
+# settings.local.json, plugin state, ...). Falls back to plain `find` when
+# KIT_ROOT isn't a git checkout (e.g. a tarball download).
+enumerate_kit_files() {  # $1 = path relative to KIT_ROOT
+  if git -C "$KIT_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$KIT_ROOT" ls-files -z -- "$1" | while IFS= read -r -d '' rel; do
+      printf '%s\0' "$KIT_ROOT/$rel"
+    done
+  else
+    find "$KIT_ROOT/$1" -type f -print0 2>/dev/null
+  fi
+}
+
 if [ "$UPDATE" -eq 1 ]; then
   # ============================ update mode ============================
   if [ ! -d "$TARGET" ] || [ ! -d "$TARGET/.claude" ]; then
@@ -94,6 +111,7 @@ if [ "$UPDATE" -eq 1 ]; then
   # version transition
   if [ -f "$TARGET/.claude/kit-version" ]; then
     FROM="$(cut -d' ' -f1 "$TARGET/.claude/kit-version" 2>/dev/null || echo pre-v3.2)"
+    [ -n "$FROM" ] || FROM="pre-v3.2"
   else
     FROM="pre-v3.2"
   fi
@@ -122,7 +140,7 @@ if [ "$UPDATE" -eq 1 ]; then
         updated=$((updated + 1))
         updated_list+=("$rel")
       fi
-    done < <(find "$KIT_ROOT/.claude/$d" -type f -print0)
+    done < <(enumerate_kit_files ".claude/$d")
   done
 
   echo "updated:"
@@ -214,7 +232,7 @@ copy_no_clobber() {  # $1 = path relative to kit root (same path in target)
 if [ -d "$KIT_ROOT/.claude" ]; then
   while IFS= read -r -d '' f; do
     copy_no_clobber "${f#"$KIT_ROOT/"}"
-  done < <(find "$KIT_ROOT/.claude" -type f -print0)
+  done < <(enumerate_kit_files ".claude")
 fi
 
 # CLAUDE.md : never overwrite (existing projects often have their own)
@@ -251,6 +269,11 @@ if [ "${#skipped[@]}" -gt 0 ]; then
 fi
 echo
 
+# --- kit-version marker (kit-owned; written on both install and update) ---
+# written BEFORE git init so a new project's initial commit includes it
+# instead of leaving it untracked.
+write_kit_version
+
 # --- git init (handles the Windows/Git-Bash 'claude exits in non-git dir' gotcha) ---
 if [ -d "$TARGET/.git" ]; then
   echo "git:     already a repo, left as-is"
@@ -262,9 +285,11 @@ else
   fi
 
   if git -C "$TARGET" config user.name >/dev/null 2>&1 && git -C "$TARGET" config user.email >/dev/null 2>&1; then
-    git -C "$TARGET" add -A
-    git -C "$TARGET" commit -q -m "chore: add multi-agent kit (install-tier)"
-    echo "git:     initialised (branch main) + initial commit"
+    if git -C "$TARGET" add -A && git -C "$TARGET" commit -q -m "chore: add multi-agent kit (install-tier)"; then
+      echo "git:     initialised (branch main) + initial commit"
+    else
+      echo "git:     commit failed (not fatal) - commit manually"
+    fi
   else
     echo "git:     initialised (branch main); commit skipped - git identity not set"
     chk "git user.name configured"  "git -C \"$TARGET\" config user.name"  'git config --global user.name "Your Name"'
@@ -272,9 +297,6 @@ else
   fi
 fi
 echo
-
-# --- kit-version marker (kit-owned; written on both install and update) ---
-write_kit_version
 
 # --- environment check (informational; never blocks) ---
 echo "environment check ($PROFILE profile):"
