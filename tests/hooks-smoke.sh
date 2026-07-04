@@ -82,6 +82,14 @@ baseline_head() { sed -n '1p' "$1" 2>/dev/null; }
 baseline_tree() { sed -n '2p' "$1" 2>/dev/null; }
 
 # ===========================================================================
+# H0 - hooks must be executable (Claude Code invokes them directly; run_hook
+# below uses `bash <hook>` and would mask a lost exec bit)
+# ===========================================================================
+for h in session-start.sh classify-task.sh verify-final-review.sh; do
+  if [ -x "$HOOKS/$h" ]; then pass "h0: exec bit on $h"; else fail "h0: exec bit on $h" "not executable"; fi
+done
+
+# ===========================================================================
 # H1 - session-start.sh
 # ===========================================================================
 SS="$HOOKS/session-start.sh"
