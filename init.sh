@@ -192,6 +192,14 @@ if [ "$UPDATE" -eq 1 ]; then
     echo
   fi
 
+  if [ -f "$TARGET/.claude/agents/gemini-research-scout.md" ] || [ -f "$TARGET/.claude/scripts/gemini_exec.sh" ]; then
+    echo "kit 已不再整合 gemini(研究改由 Claude 原生 research-scout 子代理完成):"
+    echo "  可刪除 .claude/agents/gemini-research-scout.md 與 .claude/scripts/gemini_exec.sh,"
+    echo "  settings.json 裡的 gemini_exec allow 行也可一併移除"
+    warnings=$((warnings + 1))
+    echo
+  fi
+
   # --- settings.json: never overwritten, just flagged ---
   if [ -f "$KIT_ROOT/.claude/settings.json" ] && [ -f "$TARGET/.claude/settings.json" ] \
      && ! cmp -s "$KIT_ROOT/.claude/settings.json" "$TARGET/.claude/settings.json"; then
@@ -342,10 +350,6 @@ chk "claude CLI installed" "command -v claude" \
 if [ "$PROFILE" = "full" ]; then
   chk "codex CLI installed"  "command -v codex" \
       "npm i -g @openai/codex && codex login"
-  chk "gemini CLI installed" "command -v gemini" \
-      "npm i -g @google/gemini-cli"
-  chk "GEMINI_API_KEY set"   '[ -n "${GEMINI_API_KEY:-}" ]' \
-      "export GEMINI_API_KEY=AIza...  (persist it; Windows: setx GEMINI_API_KEY ...)"
 fi
 chk "KIT_PROFILE set"        '[ -n "${KIT_PROFILE:-}" ]' \
     "export KIT_PROFILE=$PROFILE   (add to your shell profile so it sticks per-machine)"
