@@ -79,6 +79,12 @@ working_tree_hash() {
     local idx tree
     idx=$(mktemp "${TMPDIR:-/tmp}/claude-kit-idx.XXXXXX" 2>/dev/null) || return 0
     rm -f "$idx"
+    # Seed from HEAD so tracked-but-gitignored files stay tracked in the
+    # throwaway index — from an empty index `git add -A` would treat them
+    # as untracked and skip them, blinding the hash to their edits.
+    if git rev-parse --verify HEAD >/dev/null 2>&1; then
+        GIT_INDEX_FILE="$idx" git read-tree HEAD 2>/dev/null
+    fi
     GIT_INDEX_FILE="$idx" git add -A 2>/dev/null \
         && tree=$(GIT_INDEX_FILE="$idx" git write-tree 2>/dev/null) \
         && printf '%s\n' "$tree"
@@ -170,7 +176,10 @@ if [[ -z "$BUSINESS_FILES" ]]; then
     exit 0
 fi
 
-# A review counts if EITHER marker exists (see header)
+# A review counts if EITHER marker exists (see header). Markers are boolean
+# by design: they certify the tree state at THIS stop, so finding-fixes made
+# between review and turn-end ride along — the same trust boundary as a human
+# review flow. (/kit-review tells Claude to re-review substantial fix waves.)
 if [[ -f "$CODEX_MARKER" || -f "$SELF_MARKER" ]]; then
     rm -f "$CODEX_MARKER" "$SELF_MARKER"
     advance_baseline

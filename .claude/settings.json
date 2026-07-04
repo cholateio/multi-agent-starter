@@ -18,40 +18,38 @@
   },
 
   "_hooksDisabledByDefault_uncomment_to_enable": {
-    "hooks": {
-      "SessionStart": [
-        {
-          "hooks": [
-            {
-              "type": "command",
-              "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh",
-              "timeout": 5
-            }
-          ]
-        }
-      ],
-      "UserPromptSubmit": [
-        {
-          "hooks": [
-            {
-              "type": "command",
-              "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/classify-task.sh",
-              "timeout": 5
-            }
-          ]
-        }
-      ],
-      "Stop": [
-        {
-          "hooks": [
-            {
-              "type": "command",
-              "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/verify-final-review.sh",
-              "timeout": 10
-            }
-          ]
-        }
-      ]
-    }
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/classify-task.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/verify-final-review.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }

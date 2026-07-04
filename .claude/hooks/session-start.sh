@@ -42,6 +42,12 @@ working_tree_hash() {
     local idx tree
     idx=$(mktemp "${TMPDIR:-/tmp}/claude-kit-idx.XXXXXX" 2>/dev/null) || return 0
     rm -f "$idx"
+    # Seed from HEAD so tracked-but-gitignored files stay tracked in the
+    # throwaway index — from an empty index `git add -A` would treat them
+    # as untracked and skip them, blinding the hash to their edits.
+    if git rev-parse --verify HEAD >/dev/null 2>&1; then
+        GIT_INDEX_FILE="$idx" git read-tree HEAD 2>/dev/null
+    fi
     GIT_INDEX_FILE="$idx" git add -A 2>/dev/null \
         && tree=$(GIT_INDEX_FILE="$idx" git write-tree 2>/dev/null) \
         && printf '%s\n' "$tree"

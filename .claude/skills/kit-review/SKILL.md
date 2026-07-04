@@ -36,6 +36,11 @@ the Stop-hook gate learns about it (marker touched) so it won't re-block.
    - full: `touch /tmp/claude-codex-reviewed-<session_id>`
    - solo: `touch /tmp/claude-reviewed-<session_id>`
 
+   The marker certifies the working-tree state at the moment the turn ends —
+   small finding-fixes made between review and turn-end ride along with it.
+   If the fix wave after a review is substantial, re-run /kit-review instead
+   of riding the marker.
+
 ## Reviewer unavailable?
 
 full profile with codex missing / quota exhausted / auth broken: do NOT
