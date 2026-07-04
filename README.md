@@ -135,7 +135,7 @@ cd ~/code/legacy-app && claude
 
 ## 更新既有專案的 kit
 
-kit repo 更新後（`git pull ~/.multi-agent-kit`），已經跑過 `init.sh` 的專案不會自動跟上——要手動拉一次：
+kit repo 更新後（`git -C ~/.multi-agent-kit pull`），已經跑過 `init.sh` 的專案不會自動跟上——要手動拉一次：
 
 ```bash
 ~/.multi-agent-kit/init.sh <dir> --update   # 覆蓋 kit-owned 檔、印遷移/孤兒提示
