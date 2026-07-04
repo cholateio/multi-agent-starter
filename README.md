@@ -1,4 +1,4 @@
-# Multi-Agent Starter Kit (v3.2)
+# Multi-Agent Starter Kit (v3.3)
 
 讓 **Claude Code + Superpowers + Codex Plugin + Gemini CLI** 乾淨分工地一起工作的起手包。
 你只負責描述任務、approve plan；AI 之間自己協作——你不再當人肉訊息路由器。
@@ -173,15 +173,16 @@ kit repo 更新後（`git -C ~/.multi-agent-kit pull`），已經跑過 `init.sh
 
 ### Hooks（`.claude/settings.json`，預設關閉，opt-in）
 
-- `classify-task.sh`：自動分類任務大小，讓你少打「直接做」。
-- `verify-final-review.sh`：結束前若有未審的業務邏輯就 block（v3.1 起 profile-aware）。
-- **啟用**：把 settings.json 裡 `_hooksDisabledByDefault_uncomment_to_enable` 改名成 `hooks`，重啟 session。
-- **單次旁路 final review**：`touch /tmp/claude-skip-review-<session_id>`（session_id 在 block 訊息裡），或跟 Claude 說「這次跳過 review，我已確認」。
+- `session-start.sh`：session 開始時廣播 kit context（active profile、codex/gemini 可用性、這個 session 的 review marker 路徑），並記下 review gate 用的 git baseline。
+- `classify-task.sh`：只認你的明確修飾語（`直接做`→跳過流程、`完整流程`→全套），其他一律交給模型自判（v3.3 起移除關鍵字啟發式）。
+- `verify-final-review.sh`：結束前若有未審的業務邏輯就 block——v3.3 起連「已經 commit 的變更」也看得到（靠 session-start 記的 baseline），審過的內容則用 content hash 記住、不會重複煩你。
+- **啟用**：把 settings.json 裡 `_hooksDisabledByDefault_uncomment_to_enable` 改名成 `hooks`，重啟 session。**SessionStart 跟 Stop 要一起開**（Stop gate 靠 SessionStart 記的 baseline）。
+- **審完怎麼過 gate**：用 `/kit-review`——它會依 profile 跑對的 review 並 touch marker；要跳過就 `/kit-skip-review`（或手動 `touch /tmp/claude-skip-review-<session_id>`，路徑在 block 訊息裡）。
 - ⚠️ **不要**啟用 `/codex:setup --enable-review-gate`：它在每次 stop 自動 review，會造成 Claude/Codex loop 燒 quota。我們的 Stop hook 做同樣的事但更可控。
 
 ### 權限提示
 
-路徑含每次變動的 session UUID，「Don't ask again」對下次無效，選 `Yes` 即可。受不了就在 settings.json 的 `permissions.allow` 加 patterns（`Bash(timeout *)`、`Bash(git status *)`、`Bash(./.claude/scripts/gemini_exec.sh *)` 等）。
+v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow` 基線（`git status/diff/log/show`、`ls`、`timeout`、gemini_exec），裝完就少掉大部分權限彈窗；要收緊或放寬直接編輯專案裡的 settings.json（它是你的檔）。路徑含 session UUID 的提示照舊選 `Yes` 即可。
 
 ---
 
@@ -215,7 +216,7 @@ kit repo 更新後（`git -C ~/.multi-agent-kit pull`），已經跑過 `init.sh
 |------|--------|------|
 | `README.md` | 新人 / 你 | 你正在看的——裝機、開專案、操作、debug（給專案用的範本在 `templates/README.md`，`init.sh` 複製時改名成專案的 `README.md`） |
 | `CLAUDE.md` | AI（每個 session） | 專案內容範本：goal / stack / constraints（會進專案；workflow 規則另外放在 `.claude/rules/kit-workflow.md`，同樣會進專案、但 kit-owned） |
-| `ARCHITECTURE.md` | 想深入的人 | 為什麼這樣設計、v1→v3.2 的取捨 |
+| `ARCHITECTURE.md` | 想深入的人 | 為什麼這樣設計、v1→v3.3 的取捨 |
 
 （`ADOPTION.md` 已併入本檔「既有專案」段、`USAGE.md` 已併入本檔「操作參考 / Debug」段，皆不再單獨維護。）
 
@@ -223,9 +224,10 @@ kit repo 更新後（`git -C ~/.multi-agent-kit pull`），已經跑過 `init.sh
 
 ## 版本
 
-- **v3.2（現在）**：檔案級所有權二分——`CLAUDE.md` 純專案內容、workflow 規則移到 kit-owned 的 `.claude/rules/kit-workflow.md` + `init.sh --update` 讓已鋪過 kit 的專案能回流拿新版 + `templates/`（README / gitignore / mise 範本）+ 那份「怎麼下指令」的一頁速查文件光榮退役（教學任務已完成，殘值併入 `templates/README.md`）。
+- **v3.3（現在）**：harness 閉環——Stop review gate 修好三個洞（marker 無人寫、commit 盲區、rename 解析），SessionStart hook 廣播 profile/marker context + 記 baseline，`/kit-review`、`/kit-skip-review` 修飾語 skills，`solo-reviewer` 正式 agent 檔，classify-task 只留明確覆寫，settings 模板內建 read-only 權限基線。
+- **v3.2**：檔案級所有權二分——`CLAUDE.md` 純專案內容、workflow 規則移到 kit-owned 的 `.claude/rules/kit-workflow.md` + `init.sh --update` 讓已鋪過 kit 的專案能回流拿新版 + `templates/`（README / gitignore / mise 範本）+ 那份「怎麼下指令」的一頁速查文件光榮退役（教學任務已完成，殘值併入 `templates/README.md`）。
 - **v3.1**：`KIT_PROFILE` profile 切換 + 一鍵 `init.sh` + 一頁「怎麼下指令」速查表 + 砍掉專案污染與冗長文件。
 - **v3**：官方 codex-plugin-cc 取代自製 codex/gemini wrapper。
 - **v2 / v1**：deprecated（自製 wrapper / PAL MCP）。
 
-今天起手就用 v3.2。
+今天起手就用 v3.3。
