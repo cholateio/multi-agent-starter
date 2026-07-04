@@ -68,6 +68,19 @@ EOF
 chmod +x "$MISE_STUB_DIR/mise"
 MISE_PATH="$MISE_STUB_DIR:$TOOLBIN"
 
+# "no git" PATH: same fully self-contained toolbin as $TOOLBIN, but built
+# from the same tool list minus `git`, so init.sh (and only init.sh - not
+# the harness's own fixture setup via git_ctl, which keeps using $NOMISE_PATH)
+# sees a PATH with no git binary at all.
+NOGIT_TOOLBIN="$WORK/toolbin-nogit"
+mkdir -p "$NOGIT_TOOLBIN"
+for t in bash sh env mkdir cp rm cat date find cmp diff grep sed mktemp \
+         chmod ls dirname basename cut mv touch sort head wc rmdir tr; do
+  p="$(type -P "$t" 2>/dev/null || true)"
+  [ -n "$p" ] && ln -s "$p" "$NOGIT_TOOLBIN/$t"
+done
+NOGIT_PATH="$NOGIT_TOOLBIN"
+
 # ---------------------------------------------------------------------------
 # git isolation: GIT_CONFIG_NOSYSTEM + a controlled GIT_CONFIG_GLOBAL file so
 # the host's real ~/.gitconfig (gpgsign, aliases, credential helpers, ...)
@@ -153,6 +166,7 @@ init_run() {
   case "$pathmode" in
     nomise) p="$NOMISE_PATH" ;;
     mise)   p="$MISE_PATH" ;;
+    nogit)  p="$NOGIT_PATH" ;;
     *) echo "init_run: bad pathmode [$pathmode]" >&2; return 90 ;;
   esac
   OUT="$(GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$gitcfg" HOME="$FAKE_HOME" PATH="$p" "$INIT_SH" "$@" 2>&1)"
@@ -409,6 +423,25 @@ assert_file_exists "s7: README.md still deployed" "$S7/README.md"
 assert_file_exists "s7: CLAUDE.md still deployed" "$S7/CLAUDE.md"
 assert_file_exists "s7: kit-workflow.md still deployed" "$S7/.claude/rules/kit-workflow.md"
 scenario_end "scenario 7: missing git identity"
+
+# ===========================================================================
+# scenario 8 - git not installed at all: whole git section must be non-fatal,
+# install still completes (env check + bootstrap prompt still printed)
+# ===========================================================================
+scenario_start
+S8="$WORK/s8"
+init_run "$GIT_ID_CFG" nogit "$S8"
+assert_eq "s8: exit code 0" "$CODE" "0"
+assert_contains "s8: mode detected as new" "$OUT" "mode: new"
+assert_file_exists "s8: README.md exists" "$S8/README.md"
+assert_file_exists "s8: CLAUDE.md exists" "$S8/CLAUDE.md"
+assert_file_exists "s8: .claude/rules/kit-workflow.md exists" "$S8/.claude/rules/kit-workflow.md"
+assert_file_exists "s8: .claude/kit-version exists" "$S8/.claude/kit-version"
+assert_contains "s8: git-not-installed not-fatal line shown" "$OUT" "git:     not installed (not fatal)"
+assert_contains "s8: environment check still runs" "$OUT" "environment check ("
+assert_contains "s8: bootstrap prompt still shown" "$OUT" "then paste this bootstrap prompt:"
+assert_file_absent "s8: no .git dir created" "$S8/.git"
+scenario_end "scenario 8: git not installed"
 
 # ===========================================================================
 # bonus (cheap) - --existing was removed in v3.2, must fail with a hint
