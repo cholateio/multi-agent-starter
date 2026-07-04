@@ -220,6 +220,7 @@ assert_regex "s1: kit-version content format" "$(cat "$S1/.claude/kit-version" 2
 # working tree must be fully clean (nothing left untracked/uncommitted).
 PORCELAIN="$(git_ctl "$S1" status --porcelain 2>&1)"
 assert_eq "s1: git status is clean after install (kit-version committed)" "$PORCELAIN" ""
+assert_not_contains "s1: env check mentions no gemini" "$OUT" "gemini"
 scenario_end "scenario 1: new project install"
 
 # ===========================================================================
@@ -449,6 +450,26 @@ assert_contains "s8: environment check still runs" "$OUT" "environment check ("
 assert_contains "s8: bootstrap prompt still shown" "$OUT" "then paste this bootstrap prompt:"
 assert_file_absent "s8: no .git dir created" "$S8/.git"
 scenario_end "scenario 8: git not installed"
+
+# ===========================================================================
+# scenario 9 - --update prints a targeted migration hint for legacy gemini
+# files (and never deletes them)
+# ===========================================================================
+scenario_start
+S9="$WORK/s9"
+init_run "$GIT_ID_CFG" nomise "$S9"
+report "s9 setup: initial install succeeded" "$CODE" "install failed: $OUT"
+mkdir -p "$S9/.claude/scripts"
+printf '#!/usr/bin/env bash\necho legacy gemini wrapper\n' > "$S9/.claude/scripts/gemini_exec.sh"
+printf '# legacy gemini scout agent\n' > "$S9/.claude/agents/gemini-research-scout.md"
+init_run "$GIT_ID_CFG" nomise "$S9" --update
+assert_eq "s9: exit code 0" "$CODE" "0"
+assert_contains "s9: gemini migration hint shown" "$OUT" "kit 已不再整合 gemini"
+assert_contains "s9: gemini_exec.sh flagged as orphan" "$OUT" "  - .claude/scripts/gemini_exec.sh"
+assert_contains "s9: gemini scout flagged as orphan" "$OUT" "  - .claude/agents/gemini-research-scout.md"
+assert_file_exists "s9: gemini_exec.sh not deleted" "$S9/.claude/scripts/gemini_exec.sh"
+assert_file_exists "s9: gemini scout not deleted" "$S9/.claude/agents/gemini-research-scout.md"
+scenario_end "scenario 9: gemini migration hint on --update"
 
 # ===========================================================================
 # bonus (cheap) - --existing was removed in v3.2, must fail with a hint
