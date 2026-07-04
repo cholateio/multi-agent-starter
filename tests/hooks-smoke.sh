@@ -89,14 +89,14 @@ for h in session-start.sh classify-task.sh verify-final-review.sh; do
   if [ -x "$HOOKS/$h" ]; then pass "h0: exec bit on $h"; else fail "h0: exec bit on $h" "not executable"; fi
 done
 
-# The documented enable path is "rename the disabled key to hooks" — that only
-# works if the disabled block holds event keys DIRECTLY (no inner "hooks"
-# wrapper, which would double-nest and silently disable everything).
-if jq -e '._hooksDisabledByDefault_uncomment_to_enable | has("SessionStart") and has("UserPromptSubmit") and has("Stop") and (has("hooks") | not)' \
+# Hooks ship ENABLED (v3.5+): settings must hold the three kit events
+# DIRECTLY under "hooks" — a leftover disabled-key or an extra nesting level
+# would silently disable everything.
+if jq -e '.hooks | has("SessionStart") and has("UserPromptSubmit") and has("Stop")' \
      "$KIT_ROOT/.claude/settings.json" >/dev/null 2>&1; then
-  pass "h0: settings disabled-hooks block holds event keys directly"
+  pass "h0: settings ships kit hooks enabled with event keys directly"
 else
-  fail "h0: settings disabled-hooks block holds event keys directly" "rename-to-hooks would double-nest"
+  fail "h0: settings ships kit hooks enabled with event keys directly" "hooks key missing or missing an event"
 fi
 
 # ===========================================================================

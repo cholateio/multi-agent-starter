@@ -1,10 +1,10 @@
 ---
 name: research-before-planning
 description: Use BEFORE engaging superpowers brainstorming/writing-plans when
-  the task is `large_task` and involves unfamiliar libraries, security/auth,
-  performance-critical paths, or novel architecture. Spawns the research-scout
-  subagent to gather external resources, then hands off to superpowers with
-  research as context.
+  the task sits in the large/risky tier of the kit-workflow sizing rules and
+  involves unfamiliar libraries, security/auth, performance-critical paths,
+  or novel architecture. Spawns the research-scout subagent to gather
+  external resources, then hands off to superpowers with research as context.
 ---
 
 # Research Before Planning
@@ -15,7 +15,8 @@ benefit from external research. Most tasks skip this step.
 ## When this skill triggers
 
 Trigger when ALL of these are true:
-1. Task is classified as `large_task` (or `medium_task` involving new tech)
+1. Task sits in the large/risky tier of the kit-workflow sizing rules
+   (or a mid-size feature that introduces new tech)
 2. Task involves AT LEAST ONE of:
    - Unfamiliar library or framework (not yet seen in this codebase)
    - Security-sensitive territory (auth, crypto, secrets, payments)
@@ -26,7 +27,7 @@ Trigger when ALL of these are true:
 
 ## When this skill should NOT trigger
 
-- `small_task` / `bug_fix` / `medium_task` within known patterns
+- Small tasks, bug fixes, or mid-size work within known codebase patterns
 - Tasks where the user said "skip research" or "use what we already have"
 - The codebase already has clear conventions for the tech in question
 

@@ -1,4 +1,4 @@
-# Multi-Agent Starter Kit (v3.4)
+# Multi-Agent Starter Kit (v3.5)
 
 讓 **Claude Code + Superpowers + Codex Plugin** 乾淨分工地一起工作的起手包。
 你只負責描述任務、approve plan；AI 之間自己協作——你不再當人肉訊息路由器。
@@ -169,12 +169,12 @@ kit repo 更新後（`git -C ~/.multi-agent-kit pull`），已經跑過 `init.sh
 
 `/codex:rescue` 出來的 code **不要再用 codex review**——同模型寫 + 審 = 零 isolation；交給 main Claude 或人工。
 
-### Hooks（`.claude/settings.json`，預設關閉，opt-in）
+### Hooks（`.claude/settings.json`，v3.5 起預設開啟）
 
 - `session-start.sh`：session 開始時廣播 kit context（active profile、codex 可用性、這個 session 的 review marker 路徑），並記下 review gate 用的 git baseline。
 - `classify-task.sh`：只認你的明確修飾語（`直接做`→跳過流程、`完整流程`→全套），其他一律交給模型自判（v3.3 起移除關鍵字啟發式）。
 - `verify-final-review.sh`：結束前若有未審的業務邏輯就 block——v3.3 起連「已經 commit 的變更」也看得到（靠 session-start 記的 baseline），審過的內容則用 content hash 記住、不會重複煩你。
-- **啟用**：把 settings.json 裡 `_hooksDisabledByDefault_uncomment_to_enable` 改名成 `hooks`，重啟 session。**SessionStart 跟 Stop 要一起開**（Stop gate 靠 SessionStart 記的 baseline）。
+- **預設開啟**（v3.5 起；gate 的洞在 v3.3 已修完、有 smoke test 保護，opt-in 的前提不存在了）。要停用：把 settings.json 裡的 `hooks` 改名（例如 `_hooks_disabled`），重啟 session。**SessionStart 跟 Stop 要一起開/關**（Stop gate 靠 SessionStart 記的 baseline）。既有專案 `--update` 不會覆蓋你的 settings.json，想跟上就照它印出的 diff 手動合併。
 - **審完怎麼過 gate**：用 `/kit-review`——它會依 profile 跑對的 review 並 touch marker；要跳過就 `/kit-skip-review`（或手動 `touch /tmp/claude-skip-review-<session_id>`，路徑在 block 訊息裡）。
 - ⚠️ **不要**啟用 `/codex:setup --enable-review-gate`：它在每次 stop 自動 review，會造成 Claude/Codex loop 燒 quota。我們的 Stop hook 做同樣的事但更可控。
 
@@ -221,11 +221,12 @@ v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow
 
 ## 版本
 
-- **v3.4（現在）**：gemini 退役（使用者環境因素，非能力問題）——研究改由 Claude 原生 `research-scout` 子代理（WebSearch/WebFetch）承接、不再限 full profile，profile 從此只決定 reviewer；init.sh 收尾三小項（`--help` 只印檔頭、`--update` 補缺失 settings.json、smoke env 隔離）+ `--update` gemini 遷移提示。
+- **v3.5（現在）**：workflow sizing 防偏壓——kit-workflow.md 給小任務可操作判準（≤2 檔、無新依賴、不碰 auth/payment/schema/constraints → 直接做），並依 superpowers 自己的優先權規則（專案指示 > skills）明文解除小任務的 brainstorming/TDD 強制觸發、模糊時問一句而非默默走全套；hooks 預設開啟（v3.3 修完 gate 的洞後 opt-in 前提不存在）；清掉 research skill/agent 裡已廢除的 `large_task`/`small_task` 分類標籤。
+- **v3.4**：gemini 退役（使用者環境因素，非能力問題）——研究改由 Claude 原生 `research-scout` 子代理（WebSearch/WebFetch）承接、不再限 full profile，profile 從此只決定 reviewer；init.sh 收尾三小項（`--help` 只印檔頭、`--update` 補缺失 settings.json、smoke env 隔離）+ `--update` gemini 遷移提示。
 - **v3.3**：harness 閉環——Stop review gate 修好三個洞（marker 無人寫、commit 盲區、rename 解析），SessionStart hook 廣播 profile/marker context + 記 baseline，`/kit-review`、`/kit-skip-review` 修飾語 skills，`solo-reviewer` 正式 agent 檔，classify-task 只留明確覆寫，settings 模板內建 read-only 權限基線。
 - **v3.2**：檔案級所有權二分——`CLAUDE.md` 純專案內容、workflow 規則移到 kit-owned 的 `.claude/rules/kit-workflow.md` + `init.sh --update` 讓已鋪過 kit 的專案能回流拿新版 + `templates/`（README / gitignore / mise 範本）+ 那份「怎麼下指令」的一頁速查文件光榮退役（教學任務已完成，殘值併入 `templates/README.md`）。
 - **v3.1**：`KIT_PROFILE` profile 切換 + 一鍵 `init.sh` + 一頁「怎麼下指令」速查表 + 砍掉專案污染與冗長文件。
 - **v3**：官方 codex-plugin-cc 取代自製 codex/gemini wrapper。
 - **v2 / v1**：deprecated（自製 wrapper / PAL MCP）。
 
-今天起手就用 v3.4。
+今天起手就用 v3.5。

@@ -33,12 +33,23 @@ the Stop gate checks. `/kit-skip-review` only on explicit user request.
 A `TASK_CLASSIFICATION` hint appears only for explicit user overrides —
 `explicit_skip` / `explicit_full` — honor it. Otherwise use judgment:
 
-- Trivial / mechanical / docs → just do it, brief summary.
-- Real feature or multi-file change → plan first (superpowers
-  writing-plans), run a review on the plan, get user approval, implement.
+- Small (trivial / mechanical / docs, or a code change meeting ALL of:
+  ≤2 files, roughly ≤50 changed lines, no new dependency, no schema/data
+  migration, no auth/payment/security surface, no public API or behavior
+  contract change, nothing in the project CLAUDE.md "Project-specific
+  constraints") → just do it, verify yourself (run the tests), brief
+  summary. Do NOT invoke superpowers brainstorming / writing-plans / TDD
+  for these: this section is a project instruction and, by superpowers'
+  own precedence rule (project instructions > skills), it overrides those
+  skills' auto-trigger descriptions for small tasks.
+- Beyond the small criteria (feature-sized or multi-file work) → plan
+  first (superpowers writing-plans), run a review on the plan, get user
+  approval, implement.
 - Large or risky (new deps, refactor, migration, auth/payment, novel
   architecture) → research (research-scout subagent) + brainstorm before
   planning; adversarial review for the plan.
+- Genuinely ambiguous between small and feature-sized → ask the user one
+  sizing question instead of silently running the full flow.
 
 If `docs/specs/` contains a spec: it is the authoritative requirements
 source — skip brainstorming, still derive a codebase-aware plan, and still

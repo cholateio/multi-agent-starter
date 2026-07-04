@@ -1,10 +1,11 @@
 ---
 name: research-scout
-description: Use BEFORE brainstorming or planning when the task involves
-  unfamiliar libraries, security/auth, performance-critical paths, or novel
-  architecture. Does web research with WebSearch/WebFetch and returns a
-  structured research summary. Does NOT write code, does NOT review code —
-  research only. Works in every profile.
+description: Use BEFORE brainstorming or planning ONLY when the task sits
+  in the large/risky tier of the kit-workflow sizing rules — unfamiliar
+  libraries, security/auth, performance-critical paths, or novel
+  architecture. NOT for small tasks or bug fixes. Does web research with
+  WebSearch/WebFetch and returns a structured research summary. Does NOT
+  write code, does NOT review code — research only. Works in every profile.
 tools: WebSearch, WebFetch, Read
 model: sonnet
 ---
@@ -26,7 +27,7 @@ Spawn me when:
 
 DO NOT spawn me for:
 - Tasks within established patterns of this codebase
-- `small_task` or `bug_fix` (overhead not justified)
+- Small tasks or bug fixes (overhead not justified)
 - Tasks where the user already provided clear technical direction
 - Code review (that's the reviewer's job)
 - Writing code (that's main Claude's job)
