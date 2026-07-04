@@ -1,5 +1,21 @@
 {
-  "_comment": "v3.3 settings template. Hooks are commented-out by default — rename '_hooksDisabledByDefault_uncomment_to_enable' to 'hooks' and restart the session to enable. Enable SessionStart and Stop TOGETHER: the Stop gate reads the baseline that SessionStart records; without it, committed changes are invisible to the gate. Permission allow patterns in '_permissionsExample' below speed up subagent work; copy them into 'permissions.allow' if you want to enable.",
+  "_comment": "kit settings template (v3.3). permissions.allow ships ACTIVE with read-only commands so review/research subagents don't spam permission prompts — trim or extend to taste. Hooks stay commented-out by default: rename '_hooksDisabledByDefault_uncomment_to_enable' to 'hooks' and restart the session to enable. Enable SessionStart and Stop TOGETHER — the Stop gate reads the baseline that SessionStart records; without it, committed changes are invisible to the gate.",
+
+  "permissions": {
+    "allow": [
+      "Bash(./.claude/scripts/gemini_exec.sh *)",
+      "Bash(timeout *)",
+      "Bash(git status)",
+      "Bash(git status *)",
+      "Bash(git diff)",
+      "Bash(git diff *)",
+      "Bash(git log)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(ls)",
+      "Bash(ls *)"
+    ]
+  },
 
   "_hooksDisabledByDefault_uncomment_to_enable": {
     "hooks": {
@@ -37,15 +53,5 @@
         }
       ]
     }
-  },
-
-  "_permissionsExample_copy_to_real_permissions_if_desired": {
-    "allow": [
-      "Bash(./.claude/scripts/gemini_exec.sh *)",
-      "Bash(timeout *)",
-      "Bash(git status *)",
-      "Bash(git diff *)",
-      "Bash(git log *)"
-    ]
   }
 }
