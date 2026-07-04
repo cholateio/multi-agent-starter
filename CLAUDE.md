@@ -45,11 +45,11 @@
 | 情境 | 讀這裡 |
 |------|--------|
 | 卡關了 / 想宣告完成 / 猶豫要不要問 user | `.claude/docs/judgment-matrix.md` |
-| 要派工給 subagent | `/kit-dispatch` skill（四種模板） |
+| 要派工給 subagent | `/kit-dispatch` skill（五種模板） |
 | 要記教訓 / 想改 harness 檔案 | `docs/LESSONS.md`（append）/ kit-evolution 規則（自動已載入） |
 | 有 spec 的功能 | `docs/specs/`（spec 是需求的唯一權威來源） |
 | 專案歷史教訓 | `docs/LESSONS.md`（存在的話，動大手術前先掃一眼） |
 
-（review / isolation / 任務 sizing / 派工升降級的規則不在本檔——
-`.claude/rules/` 的 kit-workflow、kit-delegation、kit-evolution 已自動
-載入每個 session，直接遵守即可。）
+（review / isolation / 任務 sizing / 派工升降級 / 判斷層的規則不在
+本檔——`.claude/rules/` 的 kit-workflow、kit-delegation、kit-evolution、
+kit-judgment 已自動載入每個 session，直接遵守即可。）

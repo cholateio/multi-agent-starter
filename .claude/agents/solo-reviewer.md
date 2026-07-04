@@ -32,7 +32,11 @@ tree", or a list of files. If no scope was given, review
    violations of CLAUDE.md "Project-specific constraints" → regressions in
    neighboring code → style only if egregious.
 4. Verify every finding against the code before reporting — no speculative
-   findings.
+   findings. A warning raised because you could NOT verify correctness is
+   itself an error: it creates false work for the parent. Concerns you
+   cannot verify go in a separate "unverified" note, never as findings.
+5. If nothing survives verification, the correct report is "checked
+   X/Y/Z angles, no problems found" — not a padded list of maybes.
 
 ## Output format
 

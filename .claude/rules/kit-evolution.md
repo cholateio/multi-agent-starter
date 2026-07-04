@@ -18,6 +18,24 @@
 改軟——這是 harness 腐化的頭號路徑。所以規則檔的修改權不在執行規則的
 模型手上。
 
+## 規則變更紀律（kit repo 側，源自 fable-soul 的 capture loop）
+
+向 user 提案修改 kit 規則、或在 kit repo 動手改規則時：
+
+1. **先查覆蓋**：新失敗模式先搜現有 rules / kit-judgment 條目。已有
+   條目覆蓋 = 規則被無視，不是規則缺席——加強措辭或補藉口表列，
+   不新增重複條目。
+2. **RED-GREEN 收據**：prompt-level 規則（rules/、dispatch 模板判斷句）
+   的新增或改寫，需先確立失敗證據（RED：合成壓力場景重現，**或**
+   真實 session 的失敗紀錄——LESSONS / toollog / 外部已發表收據，
+   註明日期與模型），再驗證新措辭翻轉行為（GREEN）——場景與格式見
+   kit repo 的 `tests/evals.md`。兩種失敗證據都拿不出 = 不知道自己
+   在修什麼，不加。「這個措辭顯然沒問題」本身就是一句藉口。
+3. **逐字記錄**：捕捉到模型的失敗藉口時，LESSONS 的 Error 欄記逐字
+   原話——paraphrase 會丟失觸發詞。
+4. **總量預算**：`.claude/rules/` 是每個 session 的固定 context 稅，
+   總量上限由 kit repo 的 smoke test 把關；超標先精簡再新增。
+
 ## 教訓紀錄格式（docs/LESSONS.md，沒有就建立）
 
 每條教訓一律四行結構：

@@ -15,6 +15,11 @@ kit-delegation.md，本 skill 提供直接可抄的模板。**用法：選對模
 prompt。模型檔位選擇與升降級規則見 kit-delegation.md（review 類任務
 永不派給 sonnet/haiku）。
 
+> **為什麼判斷句寫死在模板裡（snapshot caveat，實測 2026-07-03）**：
+> subagent 只繼承 session **啟動時**的指令快照——session 中途更新的
+> rules / CLAUDE.md 到不了 subagent。對弱執行員，模板 prompt 是判斷
+> 規則唯一保證送達的載體。填模板時不要刪下面的判斷句與措辭紀律。
+
 ---
 
 ## 模板 1：深度搜尋與研究（Search & Research）
@@ -53,8 +58,12 @@ constraints 禁區抄進來】。
 - 測試輸出原文（最後 5 行）。
 - AC 逐條「達成/未達成 + 證據位置」。
 - 未解決事項與 TASTE-DECISION 標記（若有）。
+【措辭紀律】只有實跑過的才可寫「通過/完成」；沒跑過的一律寫
+「changed but not yet verified」。可驗證的主張禁用「應該/大概」
+修飾——能跑就跑。測試綠燈後又改過任何相關檔案 = 該綠燈作廢，
+重跑之後才准回報。
 禁止貼超過 20 行代碼。你的回報不算完成宣告——驗收由另一個
-fresh-context agent 執行。
+fresh-context agent 執行（模板 5）。
 ```
 
 ## 模板 3：架構重構（Refactoring）
@@ -75,6 +84,9 @@ fresh-context agent 執行。
 3. diff 總量 ≤【N】行；超過就停下回報，可能方向錯了（judgment-matrix R1.4）。
 【回報格式】≤25 行：改動清單（路徑:行號）、前後測試輸出對照、
 結構目標逐條驗證（附 grep 指令與結果）。禁大段代碼。
+【措辭紀律】貼進回報的「後」測試輸出必須晚於最後一次改動——改了
+就重跑，改動前的綠燈證明不了改動後的代碼。沒跑過的主張標
+unverified，不用「應該」。
 ```
 
 ## 模板 4：代碼與安全審查（Code Review）
@@ -93,12 +105,40 @@ fresh-context agent 執行。
 邊界條件與併發 → 對鄰近代碼的回歸影響 → 風格（僅限離譜者）。
 【驗收條件】
 - 每條 finding 先對照代碼實體驗證過才報（no speculative findings）。
-- 空手而回也要明說「已檢查 X/Y/Z 角度，未發現問題」。
+- 「因為無法驗證正確性」而發的警告本身就是錯誤——它替指揮官製造
+  假工作。驗證不了的疑慮標 unverified 另列，不計入 findings。
+- 空手而回也要明說「已檢查 X/Y/Z 角度，未發現問題」——驗證後
+  一無所獲時，「未發現」就是正確答案，不是湊一串 maybe。
 【回報格式】
 - 第一行 verdict：Approve / With fixes / Blocked + 一句理由。
 - Findings 清單：`P1|P2|P3 — 路徑:行號 — 何時會壞 — 修法提示`
   （P1 = 現在就會壞；P2 = 真缺陷、影響面窄；P3 = 值得修、不擋路）。
 - ≤30 行。禁止貼代碼區塊，行號足矣。
+```
+
+## 模板 5：驗收 Read-back（Acceptance Verification）
+
+> implementer ≠ verifier（kit-delegation）：實作 / 重構任務回報後，
+> 派一個 fresh-context agent 跑本模板。驗收 agent 與 implementer
+> 不得是同一個 subagent 對話。
+
+```text
+【任務】驗收下列工作是否真的完成。你是 fresh-context 驗收員：
+不信任 implementer 的回報，只信檔案實體與你親自實跑的結果。
+【背景】原始 AC：【逐條抄進來】。implementer 宣稱的改動：
+【路徑:行號清單】。測試指令：【指令】。
+【驗收步驟】
+1. Read 每個宣稱改過的檔案：存在、非空、內容與宣稱相符。
+2. 親自實跑測試取得輸出——不得引用 implementer 貼的輸出。
+3. AC 逐條對照：達成/未達成 + 證據位置。
+【必須主動檢查的造假模式】
+- 無證據的宣稱（說改了但檔案裡沒有）。
+- 被跳過的檢查（AC 有列、回報沒提）。
+- 發明的路徑 / 指令 / 數據（引用的東西實際不存在）。
+- 被弱化的斷言或被偷改的 AC（測試改鬆、AC 被重新詮釋）。
+【回報格式】≤20 行。第一行 verdict：PASS / FAIL + 一句理由。
+AC 逐條「達成/未達成 + 證據」；你自己跑的測試輸出原文（最後
+5 行）；命中的造假模式（若有）逐條點名。禁大段代碼。
 ```
 
 ---
@@ -107,5 +147,5 @@ fresh-context agent 執行。
 
 1. 回報進來先跑最低驗證：宣稱寫過的檔案 `ls`/Read 確認存在非空。
 2. 回報缺 AC 對照或缺測試原文 → **退回重報**，不腦補、不放行。
-3. 實作類任務接著派驗收（模板 4 或 fresh-context read-back），
-   implementer 的「完成」不算數（kit-delegation：implementer ≠ verifier）。
+3. 實作類任務接著派驗收（模板 5），implementer 的「完成」不算數
+   （kit-delegation：implementer ≠ verifier）。

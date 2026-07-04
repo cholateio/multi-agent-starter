@@ -82,7 +82,7 @@ CONTEXT="KIT_CONTEXT (multi-agent kit ${KIT_VERSION})
   - solo self-review done:    /tmp/claude-reviewed-${SESSION_ID}   (written by /kit-review)
   - user-approved gate skip:  /tmp/claude-skip-review-${SESSION_ID}   (written by /kit-skip-review, ONLY after an explicit user request)
 - Use /kit-review to run the profile-correct review (it records the evidence marker).
-- Workflow rules: .claude/rules/ (auto-loaded: kit-workflow, kit-delegation, kit-evolution)."
+- Workflow rules: .claude/rules/ (auto-loaded: kit-workflow, kit-delegation, kit-evolution, kit-judgment)."
 
 # RE-ANCHOR: compact/resume are when a drifting model is most dangerous —
 # the plan details and no-touch zones were just squeezed out of context.

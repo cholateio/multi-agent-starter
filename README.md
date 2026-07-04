@@ -206,7 +206,7 @@ v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow
 | `.claude/settings.json` | 設定 | 可調（hooks / 權限）——v4.0 起模型動它要先向你請示（protect-paths 彈窗），無人值守時動不了 |
 | `.claude/protected-paths` | 專案禁區清單（給 protect-paths hook 執法） | 填 / 維護；模型只能加嚴、不能放寬 |
 | `docs/LESSONS.md` | 踩坑教訓（Context/Error/Solution/Rule 四行格式） | 模型自行累積，超過 300 行會自我精簡（規則見 kit-evolution） |
-| `.claude/rules/`（workflow / delegation / evolution） | kit-owned 規則，每 session 自動載入 | 別碰——`--update` 會直接覆蓋；要客製改 kit repo 再鋪回 |
+| `.claude/rules/`（workflow / delegation / evolution / judgment） | kit-owned 規則，每 session 自動載入 | 別碰——`--update` 會直接覆蓋；要客製改 kit repo 再鋪回 |
 | `.claude/hooks/`、`scripts/`、`agents/`、`skills/`、`docs/` | infra，同樣 kit-owned | 別碰（v4.0 起 hook 物理執法；要改流程就去改 kit repo，`--update` 鋪回） |
 | `.claude/kit-version` | kit 版本標記 | kit 自動寫入，別手動編輯 |
 
@@ -218,7 +218,7 @@ v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow
 |------|--------|------|
 | `README.md` | 新人 / 你 | 你正在看的——裝機、開專案、操作、debug（給專案用的範本在 `templates/README.md`，`init.sh` 複製時改名成專案的 `README.md`） |
 | `CLAUDE.md` | AI（每個 session） | 專案內容範本：goal / stack / constraints（會進專案；workflow 規則另外放在 `.claude/rules/kit-workflow.md`，同樣會進專案、但 kit-owned） |
-| `ARCHITECTURE.md` | 想深入的人 | 為什麼這樣設計、v1→v4.0 的取捨 |
+| `ARCHITECTURE.md` | 想深入的人 | 為什麼這樣設計、v1→v4.1 的取捨 |
 | `docs/harness-diagnosis.md` | 想深入的人 | v4.0 防線的設計依據：三大弱模型失敗場景 → 三個物理痛點 → 阻斷方案，含誠實條款（這套 harness 的能力極限） |
 | `docs/handover-from-fable.md` | 未來的模型與你 | 一次性高階模型 session 留下的交接信：三件關鍵事 + 制度腐化路徑與偵測法 |
 
@@ -228,7 +228,8 @@ v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow
 
 ## 版本
 
-- **v4.0（現在）**：弱模型防線——判斷力外化 + 物理熔斷。兩支新 hook（`protect-paths` 禁區硬擋、`tool-breaker` 重試螺旋熔斷 + 埋點日誌）、Stop gate marker 證據化（空 touch 不過關、block 訊息不再印捷徑）、compact/resume RE-ANCHOR、三份新規則（kit-delegation 派工升降級、kit-evolution 自我更新邊界、judgment-matrix 判斷檢核表）、`/kit-dispatch` 派工模板 skill、CLAUDE.md 範本改版（constraints ↔ protected-paths 同步執法）。設計依據：`docs/harness-diagnosis.md`。
+- **v4.1（現在）**：判斷層採納（fable-soul 蒸餾，MIT）——第四份 auto-loaded 規則 `kit-judgment.md`（verified/unverified 二分、stale-green reset、量測代替 hedge、先確認再舉報等八條 + 藉口對照表 + Red Flags）、classify-task 每 prompt 注入一行 KIT_JUDGMENT digest（fable-soul 原案掛 Stop hook 進不了 model context，移到 UserPromptSubmit 修正）、派工模板 inline 判斷句 + 新模板 5 驗收 read-back（四種造假模式清單）、prose 層 proof surface（`tests/evals.md` 行為 eval + kit-evolution 規則變更紀律 + rules/ 20KB 總量預算）、`docs/instruction-audit.md` 例行規則審計。實測註記：fresh Haiku 4.5 + kit v4.0 快照下 RED 未重現（既有防線已扛住 fresh context），判斷層的目標條件是長 session 退化——證據承接 fable-soul 外部收據。
+- **v4.0**：弱模型防線——判斷力外化 + 物理熔斷。兩支新 hook（`protect-paths` 禁區硬擋、`tool-breaker` 重試螺旋熔斷 + 埋點日誌）、Stop gate marker 證據化（空 touch 不過關、block 訊息不再印捷徑）、compact/resume RE-ANCHOR、三份新規則（kit-delegation 派工升降級、kit-evolution 自我更新邊界、judgment-matrix 判斷檢核表）、`/kit-dispatch` 派工模板 skill、CLAUDE.md 範本改版（constraints ↔ protected-paths 同步執法）。設計依據：`docs/harness-diagnosis.md`。
 - **v3.5**：workflow sizing 防偏壓——kit-workflow.md 給小任務可操作判準（≤2 檔、無新依賴、不碰 auth/payment/schema/constraints → 直接做），並依 superpowers 自己的優先權規則（專案指示 > skills）明文解除小任務的 brainstorming/TDD 強制觸發、模糊時問一句而非默默走全套；hooks 預設開啟（v3.3 修完 gate 的洞後 opt-in 前提不存在）；清掉 research skill/agent 裡已廢除的 `large_task`/`small_task` 分類標籤。
 - **v3.4**：gemini 退役（使用者環境因素，非能力問題）——研究改由 Claude 原生 `research-scout` 子代理（WebSearch/WebFetch）承接、不再限 full profile，profile 從此只決定 reviewer；init.sh 收尾三小項（`--help` 只印檔頭、`--update` 補缺失 settings.json、smoke env 隔離）+ `--update` gemini 遷移提示。
 - **v3.3**：harness 閉環——Stop review gate 修好三個洞（marker 無人寫、commit 盲區、rename 解析），SessionStart hook 廣播 profile/marker context + 記 baseline，`/kit-review`、`/kit-skip-review` 修飾語 skills，`solo-reviewer` 正式 agent 檔，classify-task 只留明確覆寫，settings 模板內建 read-only 權限基線。

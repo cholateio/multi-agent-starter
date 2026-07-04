@@ -217,7 +217,7 @@ kit-workflow.md 同步瘦身成 landmines-only（~60 行）：留下的是模型
    紀律機制形同虛設。settings.json 歸使用者所有的原則不變：`--update`
    照舊不覆蓋既有 settings.json，只印 diff 讓使用者自己合併。
 
-### v4.0（當前）：弱模型防線——判斷力外化 + 物理熔斷
+### v4.0：弱模型防線——判斷力外化 + 物理熔斷
 
 背景與動機和前幾版不同：這一版**不是踩到痛點後的修補，而是一次預防性
 立法**——由 Fable 5（一次性的高階模型 session）在制度層面外化判斷力，
@@ -251,6 +251,38 @@ kit-workflow.md 同步瘦身成 landmines-only（~60 行）：留下的是模型
 5. **CLAUDE.md 範本改版**：弱模型需要極度明確的範本——佔位符全部附
    格式與範例、constraints 要求與 protected-paths 同步執法、加檔案路由
    表（何時讀哪份文件）。
+
+### v4.1（當前）：判斷層採納——fable-soul 蒸餾
+
+v4.0 防的是**結構性失敗**（context 經濟、迷航、重試螺旋、marker 造假）；
+v4.1 補**認知性失敗**（假完成措辭、過期驗證、湊數 findings、hedge 話術）。
+素材採自 fable-soul（MIT）——一份在弱模型上做過 RED-GREEN 行為測試的
+Fable 判斷蒸餾——但只收 kit 未覆蓋的機制，不照搬。核心產出：
+
+1. **`.claude/rules/kit-judgment.md`**（auto-loaded 第四檔）：八條機制
+   （目標≠指定修法、機制先於動手、verified/unverified 二分、stale-green
+   reset、證據勝過記憶、量測代替 hedge、給判斷不給菜單、先確認再舉報）
+   + 藉口對照表 + Red Flags。與 judgment-matrix 的分工寫死：R3（熔斷
+   提問）/R4（品味不拍板）觸發條件優先於本檔的「直接做」傾向。
+2. **per-turn digest**（classify-task.sh）：每個非空 prompt 注入一行
+   KIT_JUDGMENT 提醒——確定性 re-fire，不依賴模型記得自查。fable-soul
+   原案掛在 Stop hook，但 Stop 的 exit-0 stdout 進不了 model context
+   （transcript-only），實作無效；移到 UserPromptSubmit 才真的送達。
+3. **派工模板判斷句 inline**：snapshot caveat（subagent 只繼承 session
+   啟動時的指令快照，實測 2026-07-03）使模板成為弱執行員判斷規則唯一
+   保證送達的載體。模板 2/3 加措辭紀律（stale-green、hedge 禁令）、
+   模板 4 加「沒驗證的警告=錯誤」、新增模板 5 驗收 read-back（四種
+   造假模式清單：無證據宣稱、跳過的檢查、發明的路徑/數據、被弱化的
+   斷言）。
+4. **prose 層有了 proof surface**：`tests/evals.md`（行為 eval 套件，
+   0–2 評分）+ kit-evolution「規則變更紀律」（先查覆蓋、RED-GREEN
+   收據、逐字記藉口、rules/ 總量 20KB 預算由 smoke test 把關）。
+   誠實條款：2026-07-05 實測 **RED 全數未重現**——fresh Haiku 4.5 +
+   kit v4.0 快照已扛住這些場景；kit-judgment 的目標條件是長 session
+   退化後的模型（合成 eval 無法模擬），失敗證據承接 fable-soul 的
+   外部收據與本 kit 生產史（詳見 tests/evals.md 採納註記）。
+5. **`docs/instruction-audit.md`**：例行規則審計（每 minor 版本前跑）。
+   prose 有四層之後，「兩條規則打架」沒有物理偵測手段，只能例行審計。
 
 ## 三、角色設計
 

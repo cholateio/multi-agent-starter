@@ -207,6 +207,7 @@ assert_file_exists "s1: protect-paths hook deployed (v4.0)" "$S1/.claude/hooks/p
 assert_file_exists "s1: tool-breaker hook deployed (v4.0)" "$S1/.claude/hooks/tool-breaker.sh"
 assert_file_exists "s1: kit-delegation rules deployed (v4.0)" "$S1/.claude/rules/kit-delegation.md"
 assert_file_exists "s1: kit-evolution rules deployed (v4.0)" "$S1/.claude/rules/kit-evolution.md"
+assert_file_exists "s1: kit-judgment rules deployed (v4.1)" "$S1/.claude/rules/kit-judgment.md"
 assert_file_exists "s1: judgment-matrix deployed (v4.0)" "$S1/.claude/docs/judgment-matrix.md"
 assert_file_exists "s1: kit-dispatch skill deployed (v4.0)" "$S1/.claude/skills/kit-dispatch/SKILL.md"
 assert_file_absent "s1: gemini scout agent not deployed" "$S1/.claude/agents/gemini-research-scout.md"
@@ -538,6 +539,23 @@ else
   fail "s11: existing differing settings.json left untouched" "was overwritten"
 fi
 scenario_end "scenario 11: settings.json deploy-if-absent"
+
+# ===========================================================================
+# bonus (cheap) - rules/ growth budget (v4.1, from fable-soul)
+# .claude/rules/ is auto-loaded into EVERY session — a fixed context tax.
+# Cap chosen 2026-07-05 at 20480 bytes (then-current total: 16532). Before
+# raising it, slim the rules first (kit-evolution 規則變更紀律 #4); a
+# judgment layer that models skim is worse than a shorter one they read.
+# ===========================================================================
+scenario_start
+RULES_BYTES=$(cat "$KIT_ROOT/.claude/rules/"*.md 2>/dev/null | wc -c | tr -d ' ')
+RULES_CAP=20480
+if [ "${RULES_BYTES:-0}" -le "$RULES_CAP" ] 2>/dev/null; then
+  pass "budget: rules/ total ${RULES_BYTES}B within ${RULES_CAP}B cap"
+else
+  fail "budget: rules/ total within cap" "got ${RULES_BYTES}B > ${RULES_CAP}B — slim before adding (kit-evolution 規則變更紀律 #4)"
+fi
+scenario_end "bonus: rules growth budget"
 
 # ===========================================================================
 # bonus (cheap) - --existing was removed in v3.2, must fail with a hint
