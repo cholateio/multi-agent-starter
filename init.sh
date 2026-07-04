@@ -80,7 +80,11 @@ write_kit_version() {  # writes .claude/kit-version - kit-owned, overwritten eve
 # settings.local.json, plugin state, ...). Falls back to plain `find` when
 # KIT_ROOT isn't a git checkout (e.g. a tarball download).
 enumerate_kit_files() {  # $1 = path relative to KIT_ROOT
-  if git -C "$KIT_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  # Only trust ls-files when KIT_ROOT IS the git toplevel - if KIT_ROOT is a
+  # non-git directory nested inside some unrelated parent repo, rev-parse
+  # would otherwise succeed against that parent and `ls-files -- .claude`
+  # would silently return nothing, deploying zero kit files.
+  if [ "$(git -C "$KIT_ROOT" rev-parse --show-toplevel 2>/dev/null)" = "$KIT_ROOT" ]; then
     git -C "$KIT_ROOT" ls-files -z -- "$1" | while IFS= read -r -d '' rel; do
       printf '%s\0' "$KIT_ROOT/$rel"
     done
@@ -130,15 +134,34 @@ if [ "$UPDATE" -eq 1 ]; then
   for d in $KIT_OWNED_DIRS; do
     [ -d "$KIT_ROOT/.claude/$d" ] || continue
     while IFS= read -r -d '' f; do
+      [ -f "$f" ] || continue  # tracked-but-deleted-on-disk kit file - nothing to copy
       rel="${f#"$KIT_ROOT/"}"
       dst="$TARGET/$rel"
+      changed=0
       if [ -f "$dst" ] && cmp -s "$f" "$dst"; then
-        unchanged=$((unchanged + 1))
+        : # content already matches
       else
         mkdir -p "$(dirname "$dst")"
         cp "$f" "$dst"
+        changed=1
+      fi
+      # sync executability regardless of whether content changed - cp alone
+      # doesn't do this: it leaves an existing dst's mode untouched, so a
+      # kit-side chmod (e.g. a script going 644 -> 755) would otherwise never
+      # reach already-installed projects. [ -x ] keeps this portable (no
+      # `stat` flags, no GNU-only `chmod --reference`).
+      if [ -x "$f" ] && [ ! -x "$dst" ]; then
+        chmod +x "$dst"
+        changed=1
+      elif [ ! -x "$f" ] && [ -x "$dst" ]; then
+        chmod a-x "$dst"
+        changed=1
+      fi
+      if [ "$changed" -eq 1 ]; then
         updated=$((updated + 1))
         updated_list+=("$rel")
+      else
+        unchanged=$((unchanged + 1))
       fi
     done < <(enumerate_kit_files ".claude/$d")
   done

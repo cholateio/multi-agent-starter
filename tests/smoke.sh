@@ -252,6 +252,51 @@ assert_contains "s3: summary line shows updated 1" "$OUT" "updated 1, "
 scenario_end "scenario 3: --update restores mutated kit file"
 
 # ===========================================================================
+# scenario 3b - `--update` propagates executable-bit changes (mode sync)
+# ===========================================================================
+scenario_start
+S3B="$WORK/s3b"
+init_run "$GIT_ID_CFG" nomise "$S3B"
+report "s3b setup: initial install succeeded" "$CODE" "install failed: $OUT"
+GEMINI_DST="$S3B/.claude/scripts/gemini_exec.sh"
+assert_file_exists "s3b setup: gemini_exec.sh deployed" "$GEMINI_DST"
+
+# --- mode-only drift: content untouched, executable bit stripped ---
+chmod a-x "$GEMINI_DST"
+if [ -x "$GEMINI_DST" ]; then
+  fail "s3b setup: chmod a-x took effect" "still executable"
+else
+  pass "s3b setup: chmod a-x took effect"
+fi
+init_run "$GIT_ID_CFG" nomise "$S3B" --update
+assert_eq "s3b: exit code 0" "$CODE" "0"
+if [ -x "$GEMINI_DST" ]; then
+  pass "s3b: gemini_exec.sh executable again after mode-only --update"
+else
+  fail "s3b: gemini_exec.sh executable again after mode-only --update" "still not executable"
+fi
+assert_regex "s3b: summary shows updated >= 1 for mode-only fix" "$OUT" 'updated [1-9][0-9]*, '
+
+# --- combined: content tamper on one kit file + mode tamper on another ---
+printf 'MUTATED CONTENT - --update must restore this file\n' > "$S3B/.claude/rules/kit-workflow.md"
+chmod a-x "$GEMINI_DST"
+init_run "$GIT_ID_CFG" nomise "$S3B" --update
+assert_eq "s3b: combined exit code 0" "$CODE" "0"
+cmp -s "$KIT_ROOT/.claude/rules/kit-workflow.md" "$S3B/.claude/rules/kit-workflow.md"
+report "s3b: kit-workflow.md content restored" $? "content still differs from kit repo"
+if [ -x "$GEMINI_DST" ]; then
+  pass "s3b: gemini_exec.sh executable after combined content+mode --update"
+else
+  fail "s3b: gemini_exec.sh executable after combined content+mode --update" "still not executable"
+fi
+
+# --- idempotency: immediate second --update is a true no-op (updated 0) ---
+init_run "$GIT_ID_CFG" nomise "$S3B" --update
+assert_eq "s3b: idempotent update exit code 0" "$CODE" "0"
+assert_contains "s3b: idempotent update shows updated 0" "$OUT" "updated 0, "
+scenario_end "scenario 3b: --update propagates executable-bit changes"
+
+# ===========================================================================
 # scenario 4 - dirty working tree only warns on `--update`, never blocks
 # ===========================================================================
 scenario_start
