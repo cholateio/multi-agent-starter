@@ -1,6 +1,6 @@
 # [PROJECT NAME]
 
-> CLAUDE.md (kit v3.2, profile-aware). Fill the [PLACEHOLDERS] below on first
+> CLAUDE.md (kit v3.3, profile-aware). Fill the [PLACEHOLDERS] below on first
 > use - or just run `claude` and paste the bootstrap prompt printed at the end
 > of `init.sh` and let it fill them for you.
 > Multi-agent workflow rules are auto-loaded from `.claude/rules/kit-workflow.md`
