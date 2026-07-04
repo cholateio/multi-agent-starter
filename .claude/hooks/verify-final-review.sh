@@ -178,7 +178,7 @@ if [[ -f "$CODEX_MARKER" || -f "$SELF_MARKER" ]]; then
 fi
 
 # === Block the stop ===
-FILE_LIST=$(echo -e "$BUSINESS_FILES" | head -10 | sed 's/^/  - /')
+FILE_LIST=$(echo -e "$BUSINESS_FILES" | grep -v '^$' | head -10 | sed 's/^/  - /')
 
 if [[ "$PROFILE" == "solo" ]]; then
     REASON=$(cat <<EOF
