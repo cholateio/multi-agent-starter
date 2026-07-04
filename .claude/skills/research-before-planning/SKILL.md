@@ -2,20 +2,15 @@
 name: research-before-planning
 description: Use BEFORE engaging superpowers brainstorming/writing-plans when
   the task is `large_task` and involves unfamiliar libraries, security/auth,
-  performance-critical paths, or novel architecture. Spawns gemini-research-scout
-  to gather external resources, then hands off to superpowers with research as
-  context. Full profile only (depends on the Gemini scout).
+  performance-critical paths, or novel architecture. Spawns the research-scout
+  subagent to gather external resources, then hands off to superpowers with
+  research as context.
 ---
 
 # Research Before Planning
 
 This skill runs ONCE before brainstorming/planning, ONLY for tasks that
 benefit from external research. Most tasks skip this step.
-
-> **Profile note:** this skill is part of the **full** profile only — it
-> depends on the Gemini research scout. In `solo` profile (`KIT_PROFILE=solo`)
-> the scout is not available; do lightweight inline research yourself or
-> proceed without, and tell the user research was skipped.
 
 ## When this skill triggers
 
@@ -34,8 +29,6 @@ Trigger when ALL of these are true:
 - `small_task` / `bug_fix` / `medium_task` within known patterns
 - Tasks where the user said "skip research" or "use what we already have"
 - The codebase already has clear conventions for the tech in question
-- The active profile is `solo` — Gemini scout is unavailable; do lightweight
-  inline research yourself or proceed without
 
 ## Workflow
 
@@ -49,14 +42,14 @@ Good questions:
 - "Are there known issues with using libsodium for our use case (small server, low traffic)?"
 - "How do real-time collaborative editing apps handle conflict resolution today?"
 
-Bad questions (too vague — gemini won't be able to answer usefully):
+Bad questions (too vague — the scout won't be able to answer usefully):
 - "Tell me about authentication"
 - "What's the best framework"
 
 ### Step 2 — Spawn the scout
 
-Use `gemini-research-scout` subagent with the questions. Per
-gemini-research-scout.md, supply:
+Use the `research-scout` subagent with the questions. Per
+research-scout.md, supply:
 - Topic
 - Project context (1-3 sentences)
 - Your specific questions
@@ -85,7 +78,7 @@ Before handing off to superpowers, summarize to the user:
 ```
 ## Research findings (before planning)
 
-I asked gemini-research-scout to investigate: <topic>
+I asked research-scout to investigate: <topic>
 
 Key takeaways:
 - <takeaway 1>
@@ -103,7 +96,9 @@ Now proceeding to brainstorming/planning with these findings as context.
 
 ## Failure handling
 
-If `gemini-research-scout` returns an error:
+If `research-scout` reports its web tools are unavailable:
 - Tell the user: "Research scout unavailable: <reason>"
 - Ask: "Proceed with planning without research, or wait?"
 - Do NOT silently skip to planning without telling the user
+
+Research is NICE-TO-HAVE, not a gate.
