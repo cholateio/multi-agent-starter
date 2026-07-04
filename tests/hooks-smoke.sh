@@ -117,6 +117,9 @@ assert_contains "h1: context announces full profile" "$CTX" "Active profile: ful
 assert_contains "h1: context carries codex marker path" "$CTX" "/tmp/claude-codex-reviewed-${SID1}"
 assert_contains "h1: context carries self marker path" "$CTX" "/tmp/claude-reviewed-${SID1}"
 assert_contains "h1: context carries skip marker path" "$CTX" "/tmp/claude-skip-review-${SID1}"
+assert_contains "h1: full context names codex reviewer" "$CTX" "reviewer=codex("
+assert_not_contains "h1: full context has no researcher field" "$CTX" "researcher="
+assert_not_contains "h1: full context has no gemini" "$CTX" "gemini"
 assert_file_exists "h1: baseline recorded" "$BASELINE1"
 HEAD1="$(git_f "$R1" rev-parse HEAD)"
 assert_eq "h1: baseline line1 is session-start HEAD" "$(baseline_head "$BASELINE1")" "$HEAD1"
@@ -137,6 +140,7 @@ SID1B="${SID_PREFIX}-h1b"
 run_hook "$SS" "{\"session_id\":\"${SID1B}\",\"cwd\":\"${R1}\"}" solo
 CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
 assert_contains "h1: solo profile announced" "$CTX" "Active profile: solo"
+assert_not_contains "h1: solo context has no researcher mention" "$CTX" "researcher"
 
 # non-git cwd: still valid JSON, no baseline written
 NONGIT="$WORK/h1-nongit"

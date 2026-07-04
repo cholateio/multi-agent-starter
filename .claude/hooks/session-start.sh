@@ -4,7 +4,7 @@
 #
 # Two jobs, both cheap:
 #   1. Inject dynamic kit context into the session: active KIT_PROFILE,
-#      reviewer/researcher availability, kit version, and this session's
+#      reviewer availability, kit version, and this session's
 #      review-marker paths. Claude cannot know its own session_id any other
 #      way — the /kit-review and /kit-skip-review skills rely on this
 #      broadcast to touch the right files.
@@ -68,11 +68,10 @@ fi
 # --- dynamic context ---
 KIT_VERSION=$(cut -d' ' -f1 "$CWD/.claude/kit-version" 2>/dev/null || echo "unknown")
 if [[ "$PROFILE" == "full" ]]; then
-    command -v codex  >/dev/null 2>&1 && CODEX="available" || CODEX="MISSING"
-    command -v gemini >/dev/null 2>&1 && GEMINI="available" || GEMINI="MISSING"
-    TOOLS="reviewer=codex(${CODEX}) researcher=gemini(${GEMINI})"
+    command -v codex >/dev/null 2>&1 && CODEX="available" || CODEX="MISSING"
+    TOOLS="reviewer=codex(${CODEX})"
 else
-    TOOLS="no external reviewer/researcher; reviews are same-model self-reviews (state/time isolation only)"
+    TOOLS="no external reviewer; reviews are same-model self-reviews (state/time isolation only)"
 fi
 
 CONTEXT="KIT_CONTEXT (multi-agent kit ${KIT_VERSION})

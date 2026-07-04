@@ -3,7 +3,6 @@
 
   "permissions": {
     "allow": [
-      "Bash(./.claude/scripts/gemini_exec.sh *)",
       "Bash(timeout *)",
       "Bash(git status)",
       "Bash(git status *)",
