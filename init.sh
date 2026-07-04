@@ -213,6 +213,11 @@ if [ "$UPDATE" -eq 1 ]; then
      && ! cmp -s "$KIT_ROOT/.claude/settings.json" "$TARGET/.claude/settings.json"; then
     echo "settings.json 與 kit 模板不同(不會覆蓋,如需新設定請手動合併):"
     diff -u "$TARGET/.claude/settings.json" "$KIT_ROOT/.claude/settings.json" || true
+    echo
+    echo "最省事的合併法 - 在專案裡開 claude,貼上這句:"
+    echo "「把 kit 模板($KIT_ROOT/.claude/settings.json)的 hooks 區塊和權限基線"
+    echo "  合併進這個專案的 .claude/settings.json,保留我既有的條目;合併後用 jq 驗證,"
+    echo "  完成後提醒我重啟 session 讓 hooks 生效。」"
     warnings=$((warnings + 1))
     echo
   fi

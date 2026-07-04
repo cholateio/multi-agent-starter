@@ -502,6 +502,7 @@ assert_contains "s11: updated list mentions settings.json" "$OUT" "  + .claude/s
 printf '{"permissions":{"allow":[]}}\n' > "$S11/.claude/settings.json"
 init_run "$GIT_ID_CFG" nomise "$S11" --update
 assert_contains "s11: differing settings flagged, not overwritten" "$OUT" "settings.json 與 kit 模板不同"
+assert_contains "s11: merge hint offers a paste-able prompt" "$OUT" "hooks 區塊和權限基線"
 cmp -s "$KIT_ROOT/.claude/settings.json" "$S11/.claude/settings.json"
 if [ $? -ne 0 ]; then
   pass "s11: existing differing settings.json left untouched"
