@@ -139,7 +139,155 @@ CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 
 assert_contains "h1: kit version surfaced" "$CTX" "v9.9.9"
 rm -rf "$R1/.claude"   # keep later fixtures clean
 
-# --- H2 inserted here by Task 2 ---
+# ===========================================================================
+# H2 - verify-final-review.sh
+# ===========================================================================
+VF="$HOOKS/verify-final-review.sh"
+R2="$WORK/h2-repo"
+make_repo "$R2"
+SID2="${SID_PREFIX}-h2"
+BASELINE2="/tmp/claude-kit-baseline-${SID2}"
+CODEX_M2="/tmp/claude-codex-reviewed-${SID2}"
+SELF_M2="/tmp/claude-reviewed-${SID2}"
+BYPASS2="/tmp/claude-skip-review-${SID2}"
+STOP_JSON="{\"session_id\":\"${SID2}\",\"cwd\":\"${R2}\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
+
+# seed the baseline with the real session-start hook (integration!)
+run_hook "$SS" "{\"session_id\":\"${SID2}\",\"cwd\":\"${R2}\"}"
+assert_file_exists "h2 setup: baseline seeded by session-start" "$BASELINE2"
+
+# (a) clean tree, fresh baseline -> allow silently
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2a: clean tree allows stop" "$CODE" "0"
+assert_eq "h2a: no block JSON emitted" "$OUT" ""
+
+# (b) uncommitted business file, no marker -> block (and stays blocked on rerun)
+echo "print('x')" > "$R2/app.py"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2b: exit 0 (block via JSON, not exit code)" "$CODE" "0"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "h2b: decision is block" "$DEC" "block"
+assert_contains "h2b: reason names the file" "$REASON" "app.py"
+assert_contains "h2b: full-profile reason names the codex marker" "$REASON" "$CODEX_M2"
+assert_contains "h2b: reason points at /kit-review" "$REASON" "/kit-review"
+run_hook "$VF" "$STOP_JSON"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2b: uncertified state re-blocks on rerun" "$DEC" "block"
+
+# (c) marker -> allow + consume + certify; SAME dirty state must not re-block
+touch "$CODEX_M2"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2c: marker satisfies gate" "$OUT" ""
+assert_file_absent "h2c: marker consumed" "$CODEX_M2"
+assert_eq "h2c: baseline line1 advanced to HEAD" "$(baseline_head "$BASELINE2")" "$(git_f "$R2" rev-parse HEAD)"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2c: certified dirty state does not re-block" "$OUT" ""
+
+# (c2) committing the certified state keeps the certification (content-addressed)
+git_f "$R2" add -A && git_f "$R2" commit -q -m "fixture: certified change committed"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2c2: commit of certified content still allows" "$OUT" ""
+
+# (c3) new edits after certification re-block
+echo "print('more')" >> "$R2/app.py"
+run_hook "$VF" "$STOP_JSON"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2c3: post-certification edit blocks again" "$DEC" "block"
+touch "$SELF_M2"
+run_hook "$VF" "$STOP_JSON"   # certify + settle for next scenarios
+assert_eq "h2c3: self marker settles the state" "$OUT" ""
+
+# (d) THE COMMIT BLIND SPOT: commit business change, then point baseline at
+# the pre-commit HEAD (clean tree, no cert) -> must still block
+PRE_HEAD="$(git_f "$R2" rev-parse HEAD)"
+echo "print('committed change')" >> "$R2/app.py"
+git_f "$R2" add -A && git_f "$R2" commit -q -m "fixture: business change"
+printf '%s\n' "$PRE_HEAD" > "$BASELINE2"
+run_hook "$VF" "$STOP_JSON"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "h2d: committed-but-unreviewed change blocks" "$DEC" "block"
+assert_contains "h2d: reason names the committed file" "$REASON" "app.py"
+
+# (e) review it -> allow, baseline advances past the commit, stays quiet
+touch "$SELF_M2"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2e: marker satisfies gate after commit" "$OUT" ""
+assert_eq "h2e: baseline advanced past the commit" "$(baseline_head "$BASELINE2")" "$(git_f "$R2" rev-parse HEAD)"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2e: reviewed commit does not re-block" "$OUT" ""
+
+# (f) rename handling: staged rename must surface the NEW path, no '->' garbage
+git_f "$R2" mv app.py renamed.py
+run_hook "$VF" "$STOP_JSON"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_contains "h2f: rename reports new path" "$REASON" "renamed.py"
+assert_not_contains "h2f: no arrow artifacts in file list" "$REASON" " -> "
+git_f "$R2" mv renamed.py app.py   # restore
+
+# (g) untracked file inside a NEW directory must be seen (porcelain -uall)
+mkdir -p "$R2/newdir"
+echo "print('hidden')" > "$R2/newdir/deep.py"
+run_hook "$VF" "$STOP_JSON"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_contains "h2g: file inside new directory is caught" "$REASON" "newdir/deep.py"
+rm -rf "$R2/newdir"
+
+# (h) trivial-only change -> allow
+echo "docs tweak" >> "$R2/README.md"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2h: docs-only change allows stop" "$OUT" ""
+git_f "$R2" checkout -q -- README.md
+
+# (i) bypass flag -> allow + consumed + baseline advanced
+echo "print('y')" > "$R2/app2.py"
+touch "$BYPASS2"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2i: bypass allows stop" "$OUT" ""
+assert_file_absent "h2i: bypass flag consumed" "$BYPASS2"
+assert_eq "h2i: bypass advances baseline" "$(baseline_head "$BASELINE2")" "$(git_f "$R2" rev-parse HEAD)"
+rm -f "$R2/app2.py"
+
+# (j) stop_hook_active -> allow unconditionally (loop guard), baseline untouched
+echo "print('z')" > "$R2/app3.py"
+printf 'STALE\n' > "$BASELINE2"
+run_hook "$VF" "{\"session_id\":\"${SID2}\",\"cwd\":\"${R2}\",\"stop_hook_active\":true}"
+assert_eq "h2j: stop_hook_active allows" "$OUT" ""
+assert_eq "h2j: loop-guard exit does not touch baseline" "$(cat "$BASELINE2")" "STALE"
+rm -f "$R2/app3.py" "$BASELINE2"
+
+# (k) degraded mode: no baseline file at all + clean tree -> allow
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2k: no baseline + clean tree degrades to allow" "$OUT" ""
+
+# (l) FAIL CLOSED: baseline exists but sha is unresolvable -> everything
+# tracked is up for review; one review heals the baseline
+printf '0123456789abcdef0123456789abcdef01234567\n' > "$BASELINE2"
+run_hook "$VF" "$STOP_JSON"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "h2l: unresolvable baseline fails closed" "$DEC" "block"
+assert_contains "h2l: fail-closed review scope covers tracked files" "$REASON" "app.py"
+touch "$CODEX_M2"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2l: review heals the broken baseline" "$OUT" ""
+assert_eq "h2l: healed baseline line1 is HEAD" "$(baseline_head "$BASELINE2")" "$(git_f "$R2" rev-parse HEAD)"
+
+# (m) solo profile block message discloses reduced isolation
+echo "print('s')" >> "$R2/app.py"
+run_hook "$VF" "$STOP_JSON" solo
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_contains "h2m: solo block mentions isolation OFF" "$REASON" "ISOLATION IS OFF"
+assert_contains "h2m: solo block names self marker" "$REASON" "$SELF_M2"
+git_f "$R2" checkout -q -- app.py
+
+# (n) filename with a space survives the porcelain parse
+echo "x" > "$R2/my app.py"
+run_hook "$VF" "$STOP_JSON"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_contains "h2n: space-containing filename listed intact" "$REASON" "my app.py"
+rm -f "$R2/my app.py" "$BASELINE2"
 
 # --- H3 inserted here by Task 3 ---
 
