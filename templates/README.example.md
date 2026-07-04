@@ -90,7 +90,7 @@ npm run dev          # → http://localhost:3000  (Turbopack)
 
 **⑤ 環境 / kit 沒裝好時**
 ```bash
-./setup.sh          # 檢查 claude / codex / gemini CLI 與 env
+./setup.sh          # 檢查 claude / codex CLI 與 env
 ```
 codex plugin 是每台機器一次性安裝(在 Claude Code 內):
 ```

@@ -37,7 +37,7 @@ A `TASK_CLASSIFICATION` hint appears only for explicit user overrides —
 - Real feature or multi-file change → plan first (superpowers
   writing-plans), run a review on the plan, get user approval, implement.
 - Large or risky (new deps, refactor, migration, auth/payment, novel
-  architecture) → research (full: gemini scout) + brainstorm before
+  architecture) → research (research-scout subagent) + brainstorm before
   planning; adversarial review for the plan.
 
 If `docs/specs/` contains a spec: it is the authoritative requirements
@@ -63,4 +63,4 @@ review the spec itself (it is an external artifact; isolation applies).
 - Research suggests a meaningfully better approach than the plan assumed.
 - A phase would modify > 100 lines, or delete/rewrite > 30 existing lines.
 - The change touches the project CLAUDE.md "Project-specific constraints".
-- (full) codex/gemini unavailable — ask whether to proceed or wait.
+- (full) codex unavailable — ask whether to proceed or wait.

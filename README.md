@@ -1,6 +1,6 @@
-# Multi-Agent Starter Kit (v3.3)
+# Multi-Agent Starter Kit (v3.4)
 
-讓 **Claude Code + Superpowers + Codex Plugin + Gemini CLI** 乾淨分工地一起工作的起手包。
+讓 **Claude Code + Superpowers + Codex Plugin** 乾淨分工地一起工作的起手包。
 你只負責描述任務、approve plan；AI 之間自己協作——你不再當人肉訊息路由器。
 
 ---
@@ -12,13 +12,13 @@
                        │
        ┌───────────────┼───────────────┐
        ▼               ▼               ▼
-   Gemini          Superpowers      Codex Plugin
-  (研究)           (規劃 + 實作)     (跨模型審查)
+ research-scout    Superpowers      Codex Plugin
+ (Claude 子代理研究)  (規劃 + 實作)     (跨模型審查)
 ```
 
-三個外部 AI 各做最擅長的事，Main Claude 居中編排：
+三個角色各做最擅長的事，Main Claude 居中編排：
 
-- **Gemini** — 研究：蒐集網路資料、整合外部資訊。不寫 code、不 review。
+- **research-scout** — 研究：Claude 原生子代理（WebSearch/WebFetch），蒐集網路資料、整合外部資訊。不寫 code、不 review。
 - **Superpowers** — 規劃 + 實作：brainstorm / 寫 plan / 執行 plan。
 - **Codex Plugin** — 審查：用「不同的模型」來挑錯。
 
@@ -50,8 +50,8 @@ kit 自己的文件（這份 README、`ARCHITECTURE.md`）**永遠留在 kit rep
 
 | Profile | 研究 | 規劃 + 實作 | 審查（isolation 保證） |
 |---------|------|------------|----------------------|
-| `full`（預設） | Gemini | Superpowers | **Codex Plugin** — 不同模型，真正的隔離 |
-| `solo` | 無（自己 search） | Superpowers | **fresh-context Claude 自審** — 只有狀態/時間隔離，非模型隔離 |
+| `full`（預設） | research-scout | Superpowers | **Codex Plugin** — 不同模型，真正的隔離 |
+| `solo` | research-scout（同 full） | Superpowers | **fresh-context Claude 自審** — 只有狀態/時間隔離，非模型隔離 |
 
 用環境變數 `KIT_PROFILE` 切換，每台機器設一次：
 
@@ -67,16 +67,14 @@ solo 不是「壞掉的 full」，是個誠實的降級檔位：保留 superpowe
 ```bash
 # 1. 裝工具
 #    Claude Code（唯一硬需求）— https://docs.claude.com/en/docs/claude-code/getting-started
-#    以下兩個只有 full profile 需要：
+#    以下只有 full profile 需要：
 npm i -g @openai/codex && codex login
-npm i -g @google/gemini-cli
 
 # 2. clone kit（從此留著，日後 git pull 就能更新）
 git clone <kit-repo-url> ~/.multi-agent-kit
 
 # 3. 設環境變數，加進 ~/.bashrc 或 ~/.zshrc 讓它持久
 export KIT_PROFILE=full
-export GEMINI_API_KEY="AIza..."          # full 才需要；Windows 另跑 setx
 ```
 
 第一次進 claude 時，再裝一次 codex plugin（**整台機器只做這一次**，之後所有專案共用）：
@@ -173,7 +171,7 @@ kit repo 更新後（`git -C ~/.multi-agent-kit pull`），已經跑過 `init.sh
 
 ### Hooks（`.claude/settings.json`，預設關閉，opt-in）
 
-- `session-start.sh`：session 開始時廣播 kit context（active profile、codex/gemini 可用性、這個 session 的 review marker 路徑），並記下 review gate 用的 git baseline。
+- `session-start.sh`：session 開始時廣播 kit context（active profile、codex 可用性、這個 session 的 review marker 路徑），並記下 review gate 用的 git baseline。
 - `classify-task.sh`：只認你的明確修飾語（`直接做`→跳過流程、`完整流程`→全套），其他一律交給模型自判（v3.3 起移除關鍵字啟發式）。
 - `verify-final-review.sh`：結束前若有未審的業務邏輯就 block——v3.3 起連「已經 commit 的變更」也看得到（靠 session-start 記的 baseline），審過的內容則用 content hash 記住、不會重複煩你。
 - **啟用**：把 settings.json 裡 `_hooksDisabledByDefault_uncomment_to_enable` 改名成 `hooks`，重啟 session。**SessionStart 跟 Stop 要一起開**（Stop gate 靠 SessionStart 記的 baseline）。
@@ -182,7 +180,7 @@ kit repo 更新後（`git -C ~/.multi-agent-kit pull`），已經跑過 `init.sh
 
 ### 權限提示
 
-v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow` 基線（`git status/diff/log/show`、`ls`、`timeout`、gemini_exec），裝完就少掉大部分權限彈窗；要收緊或放寬直接編輯專案裡的 settings.json（它是你的檔）。路徑含 session UUID 的提示照舊選 `Yes` 即可。
+v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow` 基線（`git status/diff/log/show`、`ls`、`timeout`），裝完就少掉大部分權限彈窗；要收緊或放寬直接編輯專案裡的 settings.json（它是你的檔）。路徑含 session UUID 的提示照舊選 `Yes` 即可。
 
 ---
 
@@ -190,7 +188,6 @@ v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow
 
 - **「我沒有 codex 這個 tool」** → plugin 沒裝：重跑上面那四個 `/plugin … /codex:setup` 指令。
 - **`/codex:review` 回 usage / rate limit** → quota 用光：等冷卻（通常幾小時）、升級訂閱，或暫切 `export KIT_PROFILE=solo`。
-- **研究階段卡住 / 「Input must be provided」** → 檢查 `echo $GEMINI_API_KEY`；Windows 用 `setx` 後重開所有 terminal；手動測 `./.claude/scripts/gemini_exec.sh "say hello"`。
 - **`claude` 在 Git Bash 立即退出** → 非 git 目錄誤入 print 模式：`git init`（`init.sh` 已代勞），或從 PowerShell 啟動。
 - **找不到 superpowers 寫的 plan** → 問「plan 存在哪？」；不同版本可能在 `plans/`、`docs/plans/`、`.claude/plans/`。
 - **Hook 沒生效 / 誤觸發** → `cat .claude/settings.json | grep -A20 '"hooks"'` 確認啟用；`echo '{"prompt":"add a button"}' | .claude/hooks/classify-task.sh` 測分類；要客製 hook 改 kit repo 的檔，再 `--update` 鋪回專案。
@@ -224,10 +221,11 @@ v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow
 
 ## 版本
 
-- **v3.3（現在）**：harness 閉環——Stop review gate 修好三個洞（marker 無人寫、commit 盲區、rename 解析），SessionStart hook 廣播 profile/marker context + 記 baseline，`/kit-review`、`/kit-skip-review` 修飾語 skills，`solo-reviewer` 正式 agent 檔，classify-task 只留明確覆寫，settings 模板內建 read-only 權限基線。
+- **v3.4（現在）**：gemini 退役（使用者環境因素，非能力問題）——研究改由 Claude 原生 `research-scout` 子代理（WebSearch/WebFetch）承接、不再限 full profile，profile 從此只決定 reviewer；init.sh 收尾三小項（`--help` 只印檔頭、`--update` 補缺失 settings.json、smoke env 隔離）+ `--update` gemini 遷移提示。
+- **v3.3**：harness 閉環——Stop review gate 修好三個洞（marker 無人寫、commit 盲區、rename 解析），SessionStart hook 廣播 profile/marker context + 記 baseline，`/kit-review`、`/kit-skip-review` 修飾語 skills，`solo-reviewer` 正式 agent 檔，classify-task 只留明確覆寫，settings 模板內建 read-only 權限基線。
 - **v3.2**：檔案級所有權二分——`CLAUDE.md` 純專案內容、workflow 規則移到 kit-owned 的 `.claude/rules/kit-workflow.md` + `init.sh --update` 讓已鋪過 kit 的專案能回流拿新版 + `templates/`（README / gitignore / mise 範本）+ 那份「怎麼下指令」的一頁速查文件光榮退役（教學任務已完成，殘值併入 `templates/README.md`）。
 - **v3.1**：`KIT_PROFILE` profile 切換 + 一鍵 `init.sh` + 一頁「怎麼下指令」速查表 + 砍掉專案污染與冗長文件。
 - **v3**：官方 codex-plugin-cc 取代自製 codex/gemini wrapper。
 - **v2 / v1**：deprecated（自製 wrapper / PAL MCP）。
 
-今天起手就用 v3.3。
+今天起手就用 v3.4。
