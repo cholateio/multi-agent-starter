@@ -396,7 +396,7 @@ git_f "$R2" checkout -q -- app.py
 rm -f "$BASELINE2"
 
 # ===========================================================================
-# H3 - classify-task.sh (explicit overrides only)
+# H3 - classify-task.sh (explicit overrides + per-turn judgment digest)
 # ===========================================================================
 CT="$HOOKS/classify-task.sh"
 
@@ -407,6 +407,7 @@ ct_ctx() {  # $1 = prompt json string value (plain text, no quotes inside)
 
 ct_ctx "just do it please"
 assert_contains "h3: 'just do it' -> explicit_skip" "$CTX" "explicit_skip"
+assert_contains "h3: override still carries judgment digest" "$CTX" "KIT_JUDGMENT"
 ct_ctx "直接做,不用問"
 assert_contains "h3: zh skip phrase -> explicit_skip" "$CTX" "explicit_skip"
 ct_ctx "please run the full workflow on this"
@@ -414,28 +415,30 @@ assert_contains "h3: 'full workflow' -> explicit_full" "$CTX" "explicit_full"
 ct_ctx "這個要走完整流程"
 assert_contains "h3: zh full phrase -> explicit_full" "$CTX" "explicit_full"
 
-# heuristic branches are GONE: these used to classify, now must stay silent
+# heuristic branches are GONE: these used to classify, now must emit the
+# digest ONLY (v4.1) — never a TASK_CLASSIFICATION
 ct_ctx "fix this bug in the login flow"
-assert_eq "h3: bug-fix prompt no longer classified" "$OUT" ""
+assert_not_contains "h3: bug-fix prompt no longer classified" "$CTX" "TASK_CLASSIFICATION"
+assert_contains "h3: ordinary prompt gets judgment digest" "$CTX" "KIT_JUDGMENT"
 ct_ctx "change the button color to blue"
-assert_eq "h3: UI prompt no longer classified" "$OUT" ""
+assert_not_contains "h3: UI prompt no longer classified" "$CTX" "TASK_CLASSIFICATION"
 ct_ctx "refactor the payment module"
-assert_eq "h3: refactor prompt no longer classified" "$OUT" ""
+assert_not_contains "h3: refactor prompt no longer classified" "$CTX" "TASK_CLASSIFICATION"
 ct_ctx "implement a new feature for exports"
-assert_eq "h3: feature prompt no longer classified" "$OUT" ""
+assert_not_contains "h3: feature prompt no longer classified" "$CTX" "TASK_CLASSIFICATION"
 
 # descriptive size words are NOT explicit overrides (round 1, P2)
 ct_ctx "this should be a small change in the auth middleware"
-assert_eq "h3: descriptive 'small change' does not opt out" "$OUT" ""
+assert_not_contains "h3: descriptive 'small change' does not opt out" "$CTX" "TASK_CLASSIFICATION"
 ct_ctx "we need a quick fix for the login bug"
-assert_eq "h3: descriptive 'quick fix' does not opt out" "$OUT" ""
+assert_not_contains "h3: descriptive 'quick fix' does not opt out" "$CTX" "TASK_CLASSIFICATION"
 
 # field-name tolerance: user_input instead of prompt
 run_hook "$CT" "{\"session_id\":\"${SID_PREFIX}-h3\",\"user_input\":\"just do it\"}"
 CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
 assert_contains "h3: .user_input field accepted" "$CTX" "explicit_skip"
 
-# empty / missing prompt -> silent
+# empty / missing prompt -> fully silent (no digest on empty input)
 run_hook "$CT" "{}"
 assert_eq "h3: empty input silent" "$OUT" ""
 
