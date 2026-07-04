@@ -172,7 +172,7 @@ kit-workflow.md 同步瘦身成 landmines-only（~60 行）：留下的是模型
 的高風險規則（isolation 地雷、gate 機制、STOP 條件），刪掉的是模型本來就會
 的（任務大小判斷表、能力清單）。
 
-### v3.4（當前）：gemini 退役——研究回歸 Claude 原生
+### v3.4（已被擴充）：gemini 退役——研究回歸 Claude 原生
 
 使用者決定將 gemini 自工具鏈移除。**這是使用者環境的個人因素決策，不是
 模型能力問題**——研究員角色本身留任，由 Claude 原生的 `research-scout`
@@ -189,6 +189,33 @@ kit-workflow.md 同步瘦身成 landmines-only（~60 行）：留下的是模型
 3. 同輪收掉 v3.3 的三個 fix-later（`--help` 噪音、`--update` 補缺失
    settings.json、smoke env 隔離），並為已鋪 kit 的專案加 `--update`
    遷移提示（孤兒 gemini 檔不代刪、只講明去向）。
+
+### v3.5（當前）：sizing 防偏壓 + hooks 預設開啟
+
+對照《AI Coding Agent》的 Harness Engineering 框架做了一輪 gap 分析，
+修的是兩個「機制正常、效果打折」的點：
+
+1. **Workflow sizing 被 superpowers 的觸發規則結構性壓過。** v3.3 把
+   關鍵字啟發式刪掉、交給模型自判是對的；但實戰發現 default 路徑上有
+   一股不對等的力量——superpowers 的 using-superpowers 每個 session 以
+   EXTREMELY_IMPORTANT 級別注入「1% 可能適用就必須 invoke」，而
+   brainstorming 的 description（creating features / adding functionality
+   / modifying behavior）幾乎 match 所有改 code 的任務。kit-workflow.md
+   的 sizing 表只有四行、語氣弱，單檔小 feature 這種灰色地帶就被拉進
+   brainstorm→spec→TDD 全套。修法是「把模型需要的授權文字放進它會讀、
+   優先權最高的位置」：sizing 段給小任務可操作判準（≤2 檔、無新依賴、
+   不碰 schema/auth/payment/constraints → 直接做 + 自行驗證），並引用
+   superpowers 自己承認的優先權順序（專案指示 > skills）明文解除小任務
+   的強制觸發；模糊地帶則「問一句」而非默默走全流程。同輪清掉
+   research-before-planning 與 research-scout 裡引用已廢除分類器的
+   `large_task`/`small_task` 標籤。
+
+2. **Hooks 從 opt-in 改為預設開啟。** 「最少必要」在 v3 選擇 default-off
+   的理由是 gate 有洞、debug 複雜；v3.3 把三個洞修完、hooks-smoke.sh
+   380 行行為測試蓋住 edge case 之後，opt-in 的前提已不存在——而
+   default-off 的實際代價是大多數部署根本沒有 gate 在跑，kit 最重要的
+   紀律機制形同虛設。settings.json 歸使用者所有的原則不變：`--update`
+   照舊不覆蓋既有 settings.json，只印 diff 讓使用者自己合併。
 
 ## 三、角色設計
 
@@ -264,7 +291,7 @@ v3 引入兩個 hooks，v3.3 補上第三個：
 - `verify-final-review.sh`（Stop）：強制最終 review（profile-aware；v3.3 起
   含 commit 盲區修復與 content-hash 認證）
 
-但**預設關閉**，使用者主動 opt-in。理由：
+v3.5 起**預設開啟**（v3 至 v3.4 為 opt-in）。當年 default-off 的理由：
 
 **Hooks 的好處**：
 - 確定性執行，不靠 LLM 記憶
@@ -276,6 +303,10 @@ v3 引入兩個 hooks，v3.3 補上第三個：
 - 可能跟 superpowers 的 hooks 衝突
 
 「最少必要」原則：只用 hooks 實現「沒它就會出錯」的紀律。其他保持彈性。
+
+v3.5 翻轉預設的推理見 §二 v3.5：代價清單裡真正致命的（gate 的洞）已在
+v3.3 修復且有行為測試保護，而 default-off 的隱性代價——大多數部署根本
+沒有 gate 在跑——比殘餘代價更高。
 
 ## 六、為什麼不做更多
 
