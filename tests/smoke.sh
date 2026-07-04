@@ -189,6 +189,16 @@ assert_eq "s1: branch is main" "$BRANCH" "main"
 REVCOUNT="$(git_ctl "$S1" rev-list --count HEAD 2>/dev/null)" || REVCOUNT="ERR"
 assert_eq "s1: exactly 1 commit" "$REVCOUNT" "1"
 assert_contains "s1: mode detected as new" "$OUT" "mode: new"
+# kit-version content: "v<VERSION> <sha-or-unknown> <YYYY-MM-DD>", e.g.
+# "v3.2.0 ed4dd86 2026-07-04" - built from the kit repo's own VERSION file
+# so this doesn't need hand-updating on every release bump.
+KVER_ESC="$(sed 's/\./\\./g' "$KIT_ROOT/VERSION" 2>/dev/null || echo '0\.0\.0')"
+KVER_REGEX="^v${KVER_ESC} ([0-9a-f]+|unknown) [0-9]{4}-[0-9]{2}-[0-9]{2}\$"
+assert_regex "s1: kit-version content format" "$(cat "$S1/.claude/kit-version" 2>/dev/null)" "$KVER_REGEX"
+# kit-version is now written BEFORE the initial commit, so a fresh install's
+# working tree must be fully clean (nothing left untracked/uncommitted).
+PORCELAIN="$(git_ctl "$S1" status --porcelain 2>&1)"
+assert_eq "s1: git status is clean after install (kit-version committed)" "$PORCELAIN" ""
 scenario_end "scenario 1: new project install"
 
 # ===========================================================================
