@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 #
-# classify-task.sh — UserPromptSubmit hook
+# classify-task.sh — UserPromptSubmit hook (explicit overrides only)
 #
-# Inspects user's prompt and injects a TASK_CLASSIFICATION hint into context
-# so main Claude knows which workflow path to take.
+# v3.3: the keyword heuristics (bug-fix / UI / refactor / feature detection)
+# are gone — the model classifies task size from the prompt and
+# .claude/rules/kit-workflow.md better than keyword grep ever did (a prompt
+# mentioning "button" is not necessarily a small task). What remains is the
+# one thing grep IS reliable at: the user's explicit, imperative override
+# phrases, in either language. Descriptive size words ("this is a small
+# change") deliberately do NOT trigger — only commands do.
 #
-# Output format: JSON to stdout with `additionalContext` field, OR exit 0 silently.
-# Failures here should not block the user prompt — fall through silently.
+# Output: JSON with hookSpecificOutput.additionalContext, or silent exit 0.
+# Failures here must never block the user's prompt.
 #
 # Reference: https://code.claude.com/docs/en/hooks#userpromptsubmit
 
@@ -17,68 +22,32 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 0
 fi
 
-# Read input JSON from stdin (silently ignore parse errors)
 INPUT=$(cat 2>/dev/null || echo '{}')
-PROMPT=$(echo "$INPUT" | jq -r '.prompt // ""' 2>/dev/null || echo "")
+# The stdin field name has varied across Claude Code versions
+# (.prompt / .user_input) — accept either.
+PROMPT=$(echo "$INPUT" | jq -r '.prompt // .user_input // ""' 2>/dev/null || echo "")
 
-# If no prompt or jq failed, exit silently
 if [[ -z "$PROMPT" ]]; then
     exit 0
 fi
 
-# Lowercase for matching
 PROMPT_LOWER=$(echo "$PROMPT" | tr '[:upper:]' '[:lower:]')
 
-# === Classification rules (order matters: most specific first) ===
-
-# Explicit user override — they said "skip" / "just do it"
-if echo "$PROMPT_LOWER" | grep -qE '(just do it|skip plan|skip review|quick fix|small change|直接做|不要 plan|不需要 review)'; then
-    cat <<EOF
-{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "TASK_CLASSIFICATION: explicit_skip — user explicitly opted out of full workflow. Just do the task directly. Skip research, brainstorming, plan-review. Do NOT auto-trigger /codex:review unless task touches business logic AND user did not say skip review."}}
+# Explicit opt-out — imperative phrases only
+if echo "$PROMPT_LOWER" | grep -qE '(just do it|skip plan|skip review|直接做|不要 plan|不需要 review)'; then
+    cat <<'EOF'
+{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "TASK_CLASSIFICATION: explicit_skip — user explicitly opted out of the full workflow. Do the task directly; skip research, brainstorming and plan-review. Do NOT auto-trigger a review unless the task touches business logic AND the user did not also say to skip review."}}
 EOF
     exit 0
 fi
 
-# Explicit user override — they want full workflow
-if echo "$PROMPT_LOWER" | grep -qE '(full workflow|full review|cross.?model review|review the plan|use plan.?with.?review|完整流程|完整審查)'; then
-    cat <<EOF
-{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "TASK_CLASSIFICATION: explicit_full — user explicitly requested full workflow. Engage superpowers brainstorming + writing-plans, run /codex:review on plan, run /codex:adversarial-review if high-stakes."}}
+# Explicit opt-in — user wants the full workflow
+if echo "$PROMPT_LOWER" | grep -qE '(full workflow|full review|cross.?model review|review the plan|完整流程|完整審查)'; then
+    cat <<'EOF'
+{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "TASK_CLASSIFICATION: explicit_full — user explicitly requested the full workflow: brainstorming/writing-plans, review the plan per the active profile (adversarial review if high-stakes), phase-level reviews, final review."}}
 EOF
     exit 0
 fi
 
-# Detect bug fix patterns
-if echo "$PROMPT_LOWER" | grep -qE '\b(fix|debug|修|修復|debug|bug)\b'; then
-    cat <<EOF
-{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "TASK_CLASSIFICATION: bug_fix — investigate root cause, apply fix, summarize. Skip planning. After fix: if change touched business logic or shared code, run /codex:review; otherwise just summarize. Always check for regressions in nearby code."}}
-EOF
-    exit 0
-fi
-
-# Detect small UI / cosmetic tasks
-if echo "$PROMPT_LOWER" | grep -qE '\b(button|color|colour|css|style|class|text|copy|wording|font|margin|padding|樣式|顏色|文字)\b' \
-   && echo "$PROMPT_LOWER" | grep -qE '\b(add|change|update|fix|adjust|tweak|加|改|調整)\b'; then
-    cat <<EOF
-{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "TASK_CLASSIFICATION: small_task — looks like a UI/cosmetic tweak. Skip superpowers brainstorming/planning. Just make the change directly. Brief summary at the end. NO automatic /codex:review."}}
-EOF
-    exit 0
-fi
-
-# Detect refactor explicitly
-if echo "$PROMPT_LOWER" | grep -qE '\b(refactor|rewrite|restructure|migrate|重構|改寫|遷移)\b'; then
-    cat <<EOF
-{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "TASK_CLASSIFICATION: large_task_refactor — refactoring. Use full superpowers workflow: brainstorming, writing-plans, /codex:review on plan. Consider /codex:adversarial-review. Ensure tests exist before changing code (write them first if not). Phase-level /codex:review on each phase."}}
-EOF
-    exit 0
-fi
-
-# Detect explicit large-feature signals
-if echo "$PROMPT_LOWER" | grep -qE '\b(new feature|add.*feature|implement|build a|design.*system|新功能|實作|設計.*系統)\b'; then
-    cat <<EOF
-{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "TASK_CLASSIFICATION: feature — likely medium or large task. Use superpowers writing-plans (consider brainstorming for large/unclear scope). Run /codex:review on plan. Trigger research-before-planning if task involves new external dependencies, security, or performance-critical paths."}}
-EOF
-    exit 0
-fi
-
-# Default: no classification injected, let Claude judge from prompt + CLAUDE.md
+# No explicit override → say nothing; the model judges task size itself.
 exit 0

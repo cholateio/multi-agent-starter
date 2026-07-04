@@ -289,7 +289,49 @@ REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
 assert_contains "h2n: space-containing filename listed intact" "$REASON" "my app.py"
 rm -f "$R2/my app.py" "$BASELINE2"
 
-# --- H3 inserted here by Task 3 ---
+# ===========================================================================
+# H3 - classify-task.sh (explicit overrides only)
+# ===========================================================================
+CT="$HOOKS/classify-task.sh"
+
+ct_ctx() {  # $1 = prompt json string value (plain text, no quotes inside)
+  run_hook "$CT" "{\"session_id\":\"${SID_PREFIX}-h3\",\"prompt\":\"$1\"}"
+  CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
+}
+
+ct_ctx "just do it please"
+assert_contains "h3: 'just do it' -> explicit_skip" "$CTX" "explicit_skip"
+ct_ctx "直接做,不用問"
+assert_contains "h3: zh skip phrase -> explicit_skip" "$CTX" "explicit_skip"
+ct_ctx "please run the full workflow on this"
+assert_contains "h3: 'full workflow' -> explicit_full" "$CTX" "explicit_full"
+ct_ctx "這個要走完整流程"
+assert_contains "h3: zh full phrase -> explicit_full" "$CTX" "explicit_full"
+
+# heuristic branches are GONE: these used to classify, now must stay silent
+ct_ctx "fix this bug in the login flow"
+assert_eq "h3: bug-fix prompt no longer classified" "$OUT" ""
+ct_ctx "change the button color to blue"
+assert_eq "h3: UI prompt no longer classified" "$OUT" ""
+ct_ctx "refactor the payment module"
+assert_eq "h3: refactor prompt no longer classified" "$OUT" ""
+ct_ctx "implement a new feature for exports"
+assert_eq "h3: feature prompt no longer classified" "$OUT" ""
+
+# descriptive size words are NOT explicit overrides (round 1, P2)
+ct_ctx "this should be a small change in the auth middleware"
+assert_eq "h3: descriptive 'small change' does not opt out" "$OUT" ""
+ct_ctx "we need a quick fix for the login bug"
+assert_eq "h3: descriptive 'quick fix' does not opt out" "$OUT" ""
+
+# field-name tolerance: user_input instead of prompt
+run_hook "$CT" "{\"session_id\":\"${SID_PREFIX}-h3\",\"user_input\":\"just do it\"}"
+CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
+assert_contains "h3: .user_input field accepted" "$CTX" "explicit_skip"
+
+# empty / missing prompt -> silent
+run_hook "$CT" "{}"
+assert_eq "h3: empty input silent" "$OUT" ""
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"
