@@ -179,6 +179,11 @@ assert_eq "h2b: decision is block" "$DEC" "block"
 assert_contains "h2b: reason names the file" "$REASON" "app.py"
 assert_contains "h2b: full-profile reason names the codex marker" "$REASON" "$CODEX_M2"
 assert_contains "h2b: reason points at /kit-review" "$REASON" "/kit-review"
+if printf '%s\n' "$REASON" | grep -qE '^  - *$'; then
+  fail "h2b: no empty entry in file list" "found a bare '  - ' line"
+else
+  pass "h2b: no empty entry in file list"
+fi
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
 assert_eq "h2b: uncertified state re-blocks on rerun" "$DEC" "block"
