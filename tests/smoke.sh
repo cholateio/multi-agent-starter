@@ -472,6 +472,18 @@ assert_file_exists "s9: gemini scout not deleted" "$S9/.claude/agents/gemini-res
 scenario_end "scenario 9: gemini migration hint on --update"
 
 # ===========================================================================
+# scenario 10 - --help prints only the header block, not every inline comment
+# ===========================================================================
+scenario_start
+init_run "$GIT_ID_CFG" nomise --help
+assert_eq "s10: exit code 0" "$CODE" "0"
+assert_contains "s10: usage line shown" "$OUT" "Usage:"
+assert_contains "s10: update mode documented" "$OUT" "Update mode:"
+assert_not_contains "s10: no inline section comments" "$OUT" "parse args"
+assert_not_contains "s10: no helper inline comments" "$OUT" "shared helpers"
+scenario_end "scenario 10: --help header only"
+
+# ===========================================================================
 # bonus (cheap) - --existing was removed in v3.2, must fail with a hint
 # ===========================================================================
 scenario_start
