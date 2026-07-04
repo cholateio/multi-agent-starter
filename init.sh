@@ -166,6 +166,13 @@ if [ "$UPDATE" -eq 1 ]; then
     done < <(enumerate_kit_files ".claude/$d")
   done
 
+  # --- settings.json: deploy-if-absent (never overwrite an existing one) ---
+  if [ -f "$KIT_ROOT/.claude/settings.json" ] && [ ! -f "$TARGET/.claude/settings.json" ]; then
+    cp "$KIT_ROOT/.claude/settings.json" "$TARGET/.claude/settings.json"
+    updated=$((updated + 1))
+    updated_list+=(".claude/settings.json")
+  fi
+
   echo "updated:"
   for u in "${updated_list[@]:-}"; do [ -n "$u" ] && echo "  + $u"; done
   echo
