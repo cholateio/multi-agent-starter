@@ -89,6 +89,16 @@ for h in session-start.sh classify-task.sh verify-final-review.sh; do
   if [ -x "$HOOKS/$h" ]; then pass "h0: exec bit on $h"; else fail "h0: exec bit on $h" "not executable"; fi
 done
 
+# The documented enable path is "rename the disabled key to hooks" — that only
+# works if the disabled block holds event keys DIRECTLY (no inner "hooks"
+# wrapper, which would double-nest and silently disable everything).
+if jq -e '._hooksDisabledByDefault_uncomment_to_enable | has("SessionStart") and has("UserPromptSubmit") and has("Stop") and (has("hooks") | not)' \
+     "$KIT_ROOT/.claude/settings.json" >/dev/null 2>&1; then
+  pass "h0: settings disabled-hooks block holds event keys directly"
+else
+  fail "h0: settings disabled-hooks block holds event keys directly" "rename-to-hooks would double-nest"
+fi
+
 # ===========================================================================
 # H1 - session-start.sh
 # ===========================================================================
@@ -300,7 +310,26 @@ echo "x" > "$R2/my app.py"
 run_hook "$VF" "$STOP_JSON"
 REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
 assert_contains "h2n: space-containing filename listed intact" "$REASON" "my app.py"
-rm -f "$R2/my app.py" "$BASELINE2"
+rm -f "$R2/my app.py"
+
+# (o) tracked-but-gitignored file must stay inside the content hash: an edit
+# to it must break the fast path and block (final-review round 2, P2)
+echo "print('legacy')" > "$R2/legacy.py"
+git_f "$R2" add -f legacy.py
+echo "legacy.py" > "$R2/.gitignore"
+git_f "$R2" add .gitignore
+git_f "$R2" commit -q -m "fixture: tracked-but-ignored file"
+touch "$SELF_M2"
+run_hook "$VF" "$STOP_JSON"   # certify the clean state (also heals baseline)
+assert_eq "h2o setup: clean state certified" "$OUT" ""
+echo "print('edited')" >> "$R2/legacy.py"
+run_hook "$VF" "$STOP_JSON"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "h2o: edit to tracked-but-ignored file blocks" "$DEC" "block"
+assert_contains "h2o: reason names the ignored-but-tracked file" "$REASON" "legacy.py"
+git_f "$R2" checkout -q -- legacy.py
+rm -f "$BASELINE2"
 
 # ===========================================================================
 # H3 - classify-task.sh (explicit overrides only)
