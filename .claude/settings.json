@@ -1,8 +1,19 @@
 {
-  "_comment": "v3 settings template. Hooks are commented-out by default — uncomment to enable. See USAGE.md section 5 for what each hook does and when to enable. Permission allow patterns in '_permissionsExample' below speed up subagent work; copy them into 'permissions.allow' if you want to enable.",
+  "_comment": "v3.3 settings template. Hooks are commented-out by default — rename '_hooksDisabledByDefault_uncomment_to_enable' to 'hooks' and restart the session to enable. Enable SessionStart and Stop TOGETHER: the Stop gate reads the baseline that SessionStart records; without it, committed changes are invisible to the gate. Permission allow patterns in '_permissionsExample' below speed up subagent work; copy them into 'permissions.allow' if you want to enable.",
 
   "_hooksDisabledByDefault_uncomment_to_enable": {
     "hooks": {
+      "SessionStart": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh",
+              "timeout": 5
+            }
+          ]
+        }
+      ],
       "UserPromptSubmit": [
         {
           "hooks": [
