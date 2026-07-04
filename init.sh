@@ -298,25 +298,39 @@ echo
 write_kit_version
 
 # --- git init (handles the Windows/Git-Bash 'claude exits in non-git dir' gotcha) ---
+# The whole section is soft under `set -e`: every git invocation that could
+# fail (missing binary, init failing, commit failing) sits inside an if/else
+# branch (exempt from errexit) rather than as a naked statement, so a git
+# problem never aborts the rest of the install (env check + next-step prompt
+# must still print, exit 0).
 if [ -d "$TARGET/.git" ]; then
   echo "git:     already a repo, left as-is"
+elif ! command -v git >/dev/null 2>&1; then
+  echo "git:     not installed (not fatal) - install git, then run 'git init' yourself"
 else
+  git_init_ok=1
   if ! git -C "$TARGET" init -q -b main >/dev/null 2>&1; then
     # older git without `init -b` support
-    git -C "$TARGET" init -q
-    git -C "$TARGET" symbolic-ref HEAD refs/heads/main
+    if git -C "$TARGET" init -q && git -C "$TARGET" symbolic-ref HEAD refs/heads/main; then
+      : # fallback succeeded
+    else
+      git_init_ok=0
+      echo "git:     init failed (not fatal) - run 'git init' yourself"
+    fi
   fi
 
-  if git -C "$TARGET" config user.name >/dev/null 2>&1 && git -C "$TARGET" config user.email >/dev/null 2>&1; then
-    if git -C "$TARGET" add -A && git -C "$TARGET" commit -q -m "chore: add multi-agent kit (install-tier)"; then
-      echo "git:     initialised (branch main) + initial commit"
+  if [ "$git_init_ok" -eq 1 ]; then
+    if git -C "$TARGET" config user.name >/dev/null 2>&1 && git -C "$TARGET" config user.email >/dev/null 2>&1; then
+      if git -C "$TARGET" add -A && git -C "$TARGET" commit -q -m "chore: add multi-agent kit (install-tier)"; then
+        echo "git:     initialised (branch main) + initial commit"
+      else
+        echo "git:     commit failed (not fatal) - commit manually"
+      fi
     else
-      echo "git:     commit failed (not fatal) - commit manually"
+      echo "git:     initialised (branch main); commit skipped - git identity not set"
+      chk "git user.name configured"  "git -C \"$TARGET\" config user.name"  'git config --global user.name "Your Name"'
+      chk "git user.email configured" "git -C \"$TARGET\" config user.email" 'git config --global user.email "you@example.com"'
     fi
-  else
-    echo "git:     initialised (branch main); commit skipped - git identity not set"
-    chk "git user.name configured"  "git -C \"$TARGET\" config user.name"  'git config --global user.name "Your Name"'
-    chk "git user.email configured" "git -C \"$TARGET\" config user.email" 'git config --global user.email "you@example.com"'
   fi
 fi
 echo
