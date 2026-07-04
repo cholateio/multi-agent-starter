@@ -17,7 +17,8 @@
 # Update mode: init.sh <target-dir> --update
 #   Re-deploys the kit-owned files under
 #   .claude/{rules,hooks,scripts,agents,skills}/ into an existing kit
-#   project, add-or-overwrite. Never touches .claude/settings.json or your
+#   project, add-or-overwrite. Deploys .claude/settings.json only when the
+#   project has none; never overwrites an existing settings.json or your
 #   CLAUDE.md. Flags orphaned kit-owned files and legacy monolithic
 #   CLAUDE.md for you to handle by hand. No backups are made - use
 #   `git diff` / `git checkout -- <path>` to review or revert.
