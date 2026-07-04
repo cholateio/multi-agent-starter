@@ -481,6 +481,7 @@ assert_contains "s10: usage line shown" "$OUT" "Usage:"
 assert_contains "s10: update mode documented" "$OUT" "Update mode:"
 assert_not_contains "s10: no inline section comments" "$OUT" "parse args"
 assert_not_contains "s10: no helper inline comments" "$OUT" "shared helpers"
+assert_not_contains "s10: no stale settings.json promise" "$OUT" "Never touches .claude/settings.json"
 scenario_end "scenario 10: --help header only"
 
 # ===========================================================================
