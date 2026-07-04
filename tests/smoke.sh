@@ -484,6 +484,32 @@ assert_not_contains "s10: no helper inline comments" "$OUT" "shared helpers"
 scenario_end "scenario 10: --help header only"
 
 # ===========================================================================
+# scenario 11 - --update deploys settings.json when absent, never overwrites
+# an existing (differing) one
+# ===========================================================================
+scenario_start
+S11="$WORK/s11"
+init_run "$GIT_ID_CFG" nomise "$S11"
+report "s11 setup: initial install succeeded" "$CODE" "install failed: $OUT"
+rm "$S11/.claude/settings.json"
+init_run "$GIT_ID_CFG" nomise "$S11" --update
+assert_eq "s11: exit code 0" "$CODE" "0"
+assert_file_exists "s11: settings.json redeployed when absent" "$S11/.claude/settings.json"
+cmp -s "$KIT_ROOT/.claude/settings.json" "$S11/.claude/settings.json"
+report "s11: redeployed settings.json matches template" $? "content differs from template"
+assert_contains "s11: updated list mentions settings.json" "$OUT" "  + .claude/settings.json"
+printf '{"permissions":{"allow":[]}}\n' > "$S11/.claude/settings.json"
+init_run "$GIT_ID_CFG" nomise "$S11" --update
+assert_contains "s11: differing settings flagged, not overwritten" "$OUT" "settings.json 與 kit 模板不同"
+cmp -s "$KIT_ROOT/.claude/settings.json" "$S11/.claude/settings.json"
+if [ $? -ne 0 ]; then
+  pass "s11: existing differing settings.json left untouched"
+else
+  fail "s11: existing differing settings.json left untouched" "was overwritten"
+fi
+scenario_end "scenario 11: settings.json deploy-if-absent"
+
+# ===========================================================================
 # bonus (cheap) - --existing was removed in v3.2, must fail with a hint
 # ===========================================================================
 scenario_start
