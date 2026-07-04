@@ -1,0 +1,45 @@
+---
+name: kit-review
+description: Run the kit's profile-aware review on the current change set and
+  record it for the Stop-hook gate. full profile -> cross-model /codex:review;
+  solo profile -> fresh-context solo-reviewer subagent (state/time isolation
+  only, disclosed to the user). Use when a change set needs its kit review,
+  when the user says "review this", or when the Stop hook blocked the turn
+  asking for a review.
+---
+
+# /kit-review — profile-aware review
+
+One skill, one promise: the review that runs matches the active profile, and
+the Stop-hook gate learns about it (marker touched) so it won't re-block.
+
+## Steps
+
+1. **Resolve the active profile**: `KIT_PROFILE` env var, default `full`.
+   If hooks are enabled, the session-start KIT_CONTEXT block already
+   announced it, along with this session's exact marker paths.
+
+2. **Run the review**:
+   - **full** → invoke `/codex:review` on the change set
+     (`/codex:adversarial-review` instead for high-stakes work: auth,
+     payments, schema/data migration, security boundaries).
+   - **solo** → spawn the `solo-reviewer` subagent on the diff, and tell the
+     user plainly: "solo profile: cross-model isolation is OFF — this is a
+     same-model self-review (state/time isolation only)."
+
+3. **Handle findings before claiming done**: fix or explicitly defer each
+   finding and report the outcome to the user. Never silently absorb
+   findings.
+
+4. **Touch the marker** so the Stop gate records the review. Exact paths are
+   in KIT_CONTEXT (session start) and in the Stop-hook block message:
+   - full: `touch /tmp/claude-codex-reviewed-<session_id>`
+   - solo: `touch /tmp/claude-reviewed-<session_id>`
+
+## Reviewer unavailable?
+
+full profile with codex missing / quota exhausted / auth broken: do NOT
+silently fall back to a Claude self-review — that breaks the isolation
+guarantee. Report the failure (quota / auth / network, plus the fix) and ask
+the user: wait, skip, or explicitly accept a temporary solo-style
+self-review.
