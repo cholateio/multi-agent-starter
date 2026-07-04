@@ -44,7 +44,7 @@ while [ $# -gt 0 ]; do
     --profile)   [ $# -ge 2 ] || { echo "--profile needs a value" >&2; exit 2; }
                  PROFILE="$2"; shift 2 ;;
     --profile=*) PROFILE="${1#*=}"; shift ;;
-    -h|--help)   grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)   sed -n '1d; /^#/ { s/^# \{0,1\}//; p; b; }; q' "$0"; exit 0 ;;
     -*)          echo "unknown option: $1" >&2; exit 2 ;;
     *)           TARGET="$1"; shift ;;
   esac
