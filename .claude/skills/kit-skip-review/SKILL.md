@@ -18,9 +18,12 @@ waive that review once.
    explicit user request. If you (Claude) merely want to end the turn, the
    answer is /kit-review, not this skill.
 
-2. **Touch the bypass flag** for this session — the exact path is in
-   KIT_CONTEXT (session start) and in the Stop-hook block message:
-   `touch /tmp/claude-skip-review-<session_id>`
+2. **Write the bypass flag** for this session — the exact path is in
+   KIT_CONTEXT (session start). The gate only accepts a flag whose first
+   line starts with `user-approved` (a bare touch is discarded):
+   `echo "user-approved date=<YYYY-MM-DD> quote=\"<the user's actual words>\"" > /tmp/claude-skip-review-<session_id>`
+   The quote field is the audit trail — put the user's real words in it,
+   never a paraphrase you wish they had said.
 
 3. **Tell the user** the gate is bypassed for the next turn-end only — the
    hook consumes the flag when it fires, so later turns are gated again.

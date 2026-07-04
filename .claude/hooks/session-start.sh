@@ -7,7 +7,7 @@
 #      reviewer availability, kit version, and this session's
 #      review-marker paths. Claude cannot know its own session_id any other
 #      way — the /kit-review and /kit-skip-review skills rely on this
-#      broadcast to touch the right files.
+#      broadcast to write their evidence lines to the right marker files.
 #   2. Record the review-gate baseline that verify-final-review.sh checks:
 #      line1 = HEAD at session start (closes the "committed changes are
 #      invisible to git status" blind spot), line2 = a content hash of the
@@ -29,6 +29,7 @@ fi
 
 INPUT=$(cat 2>/dev/null || echo '{}')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "default"' 2>/dev/null || echo "default")
+SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || echo "startup")
 CWD=$(echo "$INPUT" | jq -r '.cwd // "."' 2>/dev/null || echo ".")
 # Normalize once — a relative cwd must not get double-applied later.
 CWD=$(cd "$CWD" 2>/dev/null && pwd || echo "")
@@ -76,12 +77,25 @@ fi
 
 CONTEXT="KIT_CONTEXT (multi-agent kit ${KIT_VERSION})
 - Active profile: ${PROFILE} — ${TOOLS}
-- Review markers for THIS session (touch the matching one after a review so the Stop gate records it):
-  - cross-model review done:  /tmp/claude-codex-reviewed-${SESSION_ID}
-  - solo self-review done:    /tmp/claude-reviewed-${SESSION_ID}
-  - user-approved gate skip:  /tmp/claude-skip-review-${SESSION_ID}
-- Use /kit-review to run the profile-correct review (it handles the marker). /kit-skip-review only on explicit user request.
-- Workflow rules: .claude/rules/kit-workflow.md (auto-loaded)."
+- Stop-gate files for THIS session (a bare touch NEVER passes the gate — each needs its evidence line, and only the named skill writes it):
+  - cross-model review done:  /tmp/claude-codex-reviewed-${SESSION_ID}   (written by /kit-review)
+  - solo self-review done:    /tmp/claude-reviewed-${SESSION_ID}   (written by /kit-review)
+  - user-approved gate skip:  /tmp/claude-skip-review-${SESSION_ID}   (written by /kit-skip-review, ONLY after an explicit user request)
+- Use /kit-review to run the profile-correct review (it records the evidence marker).
+- Workflow rules: .claude/rules/ (auto-loaded: kit-workflow, kit-delegation, kit-evolution)."
+
+# RE-ANCHOR: compact/resume are when a drifting model is most dangerous —
+# the plan details and no-touch zones were just squeezed out of context.
+# Startup doesn't need this (everything is still fresh).
+if [[ "$SOURCE" == "compact" || "$SOURCE" == "resume" ]]; then
+    CONTEXT="${CONTEXT}
+
+RE-ANCHOR (context was just ${SOURCE}ed — memory of this session is lossy now). BEFORE the next file modification:
+1. Re-read CLAUDE.md 'Project-specific constraints' (the no-touch zones).
+2. Re-read the active plan / progress doc if one exists (docs/plans/, docs/specs/, .superpowers/).
+3. State in ONE sentence which phase you are in and which files are already DONE — completed work is off-limits unless the plan says otherwise.
+Do not rely on your summarized memory for any of the above — re-read the files."
+fi
 
 jq -n --arg ctx "$CONTEXT" \
   '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'

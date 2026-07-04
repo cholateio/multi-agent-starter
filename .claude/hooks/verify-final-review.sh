@@ -15,7 +15,9 @@
 #           (marker: /tmp/claude-reviewed-<session_id>); the block message
 #           reminds Claude that cross-model isolation is OFF.
 #   Either marker satisfies the gate, so a full-profile review still counts
-#   if the profile changed mid-session.
+#   if the profile changed mid-session. v4.0: a marker only counts when its
+#   first line is a "reviewed-by=..." evidence line (written by /kit-review);
+#   a bare touch is discarded and called out in the block message.
 #
 # Session baseline (/tmp/claude-kit-baseline-<session_id>, written by
 # session-start.sh and re-written here on gate-satisfied exits):
@@ -103,11 +105,21 @@ advance_baseline() {
     printf '%s\n%s\n' "$head_sha" "${CURRENT_TREE}" >"$BASELINE_FILE" 2>/dev/null || true
 }
 
-# User bypass: honor and consume
+# User bypass: honor and consume — but only with evidence (v4.0). After
+# review markers got evidence-gated, a bare-touched skip flag would be the
+# new cheapest forgery; same rule for it: first line must start with
+# "user-approved" (written by /kit-skip-review after an explicit user
+# request, or by the user's own hand — the format is documented in the kit
+# README, which deployed projects don't carry).
+INVALID_BYPASS=0
 if [[ -f "$BYPASS_FLAG" ]]; then
+    if head -n1 "$BYPASS_FLAG" 2>/dev/null | grep -q '^user-approved'; then
+        rm -f "$BYPASS_FLAG"
+        advance_baseline
+        exit 0
+    fi
     rm -f "$BYPASS_FLAG"
-    advance_baseline
-    exit 0
+    INVALID_BYPASS=1
 fi
 
 BASE=""
@@ -176,39 +188,79 @@ if [[ -z "$BUSINESS_FILES" ]]; then
     exit 0
 fi
 
-# A review counts if EITHER marker exists (see header). Markers are boolean
-# by design: they certify the tree state at THIS stop, so finding-fixes made
-# between review and turn-end ride along — the same trust boundary as a human
-# review flow. (/kit-review tells Claude to re-review substantial fix waves.)
-if [[ -f "$CODEX_MARKER" || -f "$SELF_MARKER" ]]; then
+# A review counts if EITHER marker exists AND carries an evidence line
+# ("reviewed-by=..." — written by /kit-review after the review actually
+# ran). v4.0: a bare `touch` no longer satisfies the gate; the old block
+# message used to hand out the touch command, making the forged shortcut
+# cheaper than the real review. Markers still certify the tree state at
+# THIS stop (finding-fixes ride along; /kit-review says to re-review
+# substantial fix waves) — the evidence line adds friction plus an audit
+# trail, not cryptography (see docs/harness-diagnosis.md, limit 2).
+marker_valid() {
+    local first
+    [[ -f "$1" ]] || return 1
+    first=$(head -n1 "$1" 2>/dev/null)
+    printf '%s' "$first" | grep -qE '^reviewed-by=[^[:space:]]+' || return 1
+    # verdict=blocked is not a certification: blocking findings must be
+    # fixed and the review re-run — a blocked review passing the gate would
+    # advance the baseline past unresolved findings.
+    [[ "$first" != *"verdict=blocked"* ]]
+}
+INVALID_MARKER=0
+for m in "$CODEX_MARKER" "$SELF_MARKER"; do
+    if [[ -f "$m" ]] && ! marker_valid "$m"; then
+        INVALID_MARKER=1
+    fi
+done
+if marker_valid "$CODEX_MARKER" || marker_valid "$SELF_MARKER"; then
     rm -f "$CODEX_MARKER" "$SELF_MARKER"
     advance_baseline
     exit 0
 fi
+# Consume evidence-less markers so they don't linger; the block message
+# below tells the model why its marker didn't count.
+rm -f "$CODEX_MARKER" "$SELF_MARKER"
 
 # === Block the stop ===
 FILE_LIST=$(echo -e "$BUSINESS_FILES" | grep -v '^$' | head -10 | sed 's/^/  - /')
 
+# v4.0: the block message deliberately contains NO marker-writing command.
+# /kit-review knows the evidence format; teaching it here would make the
+# forged marker cheaper than the real review again.
+STALE_NOTE=""
+if [[ "$INVALID_MARKER" -eq 1 ]]; then
+    STALE_NOTE="
+NOTE: a review marker WAS present but did not certify (bare touch, or verdict=blocked). It has been discarded — a blocked review means the blocking findings must be fixed and /kit-review re-run; only a passing evidence marker satisfies this gate.
+"
+fi
+if [[ "$INVALID_BYPASS" -eq 1 ]]; then
+    STALE_NOTE="${STALE_NOTE}
+NOTE: a skip flag WAS present but carried no user-approval line (a bare touch?). It has been discarded — only /kit-skip-review (after an EXPLICIT user request) writes a valid one.
+"
+fi
+
 if [[ "$PROFILE" == "solo" ]]; then
     REASON=$(cat <<EOF
 Final review check (solo profile): this session modified business-logic files but no review was run.
-
-CROSS-MODEL ISOLATION IS OFF in the solo profile. Run /kit-review (or spawn the solo-reviewer subagent yourself) to review the changes with clean state — state/time isolation only, NOT model isolation — and say that limitation to the user. When the review is done, run 'touch ${SELF_MARKER}' and end the turn again.
+${STALE_NOTE}
+CROSS-MODEL ISOLATION IS OFF in the solo profile. Run /kit-review now — it spawns the fresh-context solo-reviewer (state/time isolation only, NOT model isolation; say that limitation to the user), then records the evidence marker this gate accepts. Do NOT write the marker without actually running the review: markers are audited against the session tool log.
 
 Files modified:
 ${FILE_LIST}
 
-To skip the review entirely (the user's call, not yours): 'touch ${BYPASS_FLAG}' and try again.
+If the USER explicitly said to skip this review, run /kit-skip-review (user-approved bypass). Never self-approve a skip to end the turn.
 EOF
 )
 else
     REASON=$(cat <<EOF
-Final review check: this session modified business-logic files that have not been reviewed yet. Run /kit-review (resolves to /codex:review in the full profile) on these changes now. When the review is done, run 'touch ${CODEX_MARKER}' so the gate records it, then end the turn again.
+Final review check: this session modified business-logic files that have not been reviewed yet.
+${STALE_NOTE}
+Run /kit-review now — in the full profile it resolves to /codex:review, and after the review actually runs it records the evidence marker this gate accepts. Do NOT write the marker without running the review: markers are audited against the session tool log.
 
 Files modified:
 ${FILE_LIST}
 
-To skip the review entirely (the user's call, not yours): 'touch ${BYPASS_FLAG}' and try again.
+If the USER explicitly said to skip this review, run /kit-skip-review (user-approved bypass). Never self-approve a skip to end the turn.
 EOF
 )
 fi

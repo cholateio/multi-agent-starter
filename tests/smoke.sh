@@ -203,6 +203,12 @@ assert_file_exists "s1: kit-review skill deployed" "$S1/.claude/skills/kit-revie
 assert_file_exists "s1: kit-skip-review skill deployed" "$S1/.claude/skills/kit-skip-review/SKILL.md"
 assert_file_exists "s1: solo-reviewer agent deployed" "$S1/.claude/agents/solo-reviewer.md"
 assert_file_exists "s1: research-scout agent deployed" "$S1/.claude/agents/research-scout.md"
+assert_file_exists "s1: protect-paths hook deployed (v4.0)" "$S1/.claude/hooks/protect-paths.sh"
+assert_file_exists "s1: tool-breaker hook deployed (v4.0)" "$S1/.claude/hooks/tool-breaker.sh"
+assert_file_exists "s1: kit-delegation rules deployed (v4.0)" "$S1/.claude/rules/kit-delegation.md"
+assert_file_exists "s1: kit-evolution rules deployed (v4.0)" "$S1/.claude/rules/kit-evolution.md"
+assert_file_exists "s1: judgment-matrix deployed (v4.0)" "$S1/.claude/docs/judgment-matrix.md"
+assert_file_exists "s1: kit-dispatch skill deployed (v4.0)" "$S1/.claude/skills/kit-dispatch/SKILL.md"
 assert_file_absent "s1: gemini scout agent not deployed" "$S1/.claude/agents/gemini-research-scout.md"
 assert_file_absent "s1: gemini_exec.sh not deployed" "$S1/.claude/scripts/gemini_exec.sh"
 BRANCH="$(git_ctl "$S1" symbolic-ref --short HEAD 2>/dev/null)" || BRANCH="ERR"
@@ -317,6 +323,28 @@ init_run "$GIT_ID_CFG" nomise "$S3B" --update
 assert_eq "s3b: idempotent update exit code 0" "$CODE" "0"
 assert_contains "s3b: idempotent update shows updated 0" "$OUT" "updated 0, "
 scenario_end "scenario 3b: --update propagates executable-bit changes"
+
+# ===========================================================================
+# scenario 3c - `--update` covers the v4.0 kit-owned set (docs/ + new hooks)
+# ===========================================================================
+scenario_start
+S3C="$WORK/s3c"
+init_run "$GIT_ID_CFG" nomise "$S3C"
+report "s3c setup: initial install succeeded" "$CODE" "install failed: $OUT"
+rm -f "$S3C/.claude/docs/judgment-matrix.md" "$S3C/.claude/hooks/tool-breaker.sh"
+printf 'MUTATED\n' > "$S3C/.claude/rules/kit-delegation.md"
+init_run "$GIT_ID_CFG" nomise "$S3C" --update
+assert_eq "s3c: exit code 0" "$CODE" "0"
+assert_file_exists "s3c: deleted judgment-matrix re-deployed (docs in KIT_OWNED_DIRS)" "$S3C/.claude/docs/judgment-matrix.md"
+assert_file_exists "s3c: deleted tool-breaker re-deployed" "$S3C/.claude/hooks/tool-breaker.sh"
+cmp -s "$KIT_ROOT/.claude/rules/kit-delegation.md" "$S3C/.claude/rules/kit-delegation.md"
+report "s3c: mutated kit-delegation.md restored" $? "content still differs from kit repo"
+if [ -x "$S3C/.claude/hooks/tool-breaker.sh" ]; then
+  pass "s3c: re-deployed tool-breaker is executable"
+else
+  fail "s3c: re-deployed tool-breaker is executable" "not executable"
+fi
+scenario_end "scenario 3c: --update covers the v4.0 kit-owned set"
 
 # ===========================================================================
 # scenario 4 - dirty working tree only warns on `--update`, never blocks

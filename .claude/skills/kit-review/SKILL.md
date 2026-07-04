@@ -11,7 +11,8 @@ description: Run the kit's profile-aware review on the current change set and
 # /kit-review — profile-aware review
 
 One skill, one promise: the review that runs matches the active profile, and
-the Stop-hook gate learns about it (marker touched) so it won't re-block.
+the Stop-hook gate learns about it (evidence marker written) so it won't
+re-block.
 
 ## Steps
 
@@ -31,10 +32,22 @@ the Stop-hook gate learns about it (marker touched) so it won't re-block.
    finding and report the outcome to the user. Never silently absorb
    findings.
 
-4. **Touch the marker** so the Stop gate records the review. Exact paths are
-   in KIT_CONTEXT (session start) and in the Stop-hook block message:
-   - full: `touch /tmp/claude-codex-reviewed-<session_id>`
-   - solo: `touch /tmp/claude-reviewed-<session_id>`
+4. **Write the evidence marker** so the Stop gate records the review. Exact
+   paths are in KIT_CONTEXT (session start). One line, no more:
+   - full:
+     `echo "reviewed-by=codex verdict=<approve|with-fixes> scope=\"<one line: what was reviewed>\" date=<YYYY-MM-DD>" > /tmp/claude-codex-reviewed-<session_id>`
+   - solo:
+     `echo "reviewed-by=solo verdict=<approve|with-fixes> scope=\"<one line>\" date=<YYYY-MM-DD>" > /tmp/claude-reviewed-<session_id>`
+
+   If the review verdict is **Blocked**, do NOT write the marker — the gate
+   rejects `verdict=blocked` by design. Fix the blocking findings, then
+   re-run /kit-review and record the passing verdict.
+
+   A bare `touch` does NOT pass the gate (v4.0). NEVER write this line
+   without having actually run the review in this session — the marker is
+   an audit record, cross-checkable against the session tool log
+   (/tmp/claude-kit-toollog-<session_id>.jsonl). Faking it is the single
+   fastest way to corrupt this harness.
 
    The marker certifies the working-tree state at the moment the turn ends —
    small finding-fixes made between review and turn-end ride along with it.

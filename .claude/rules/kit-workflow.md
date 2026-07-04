@@ -60,8 +60,10 @@ review the spec itself (it is an external artifact; isolation applies).
 - **Final review**: before declaring a task complete, if the session
   modified business-logic files not yet reviewed → run `/kit-review`. The
   Stop hook (`verify-final-review.sh`, when enabled) enforces this: it sees
-  uncommitted changes AND commits made since session start, and its block
-  message names the marker to touch after the review.
+  uncommitted changes AND commits made since session start, and it only
+  accepts markers carrying a `reviewed-by=` evidence line — `/kit-review`
+  writes that line after the review actually runs; a bare touch does not
+  pass and is called out.
 - **Phase-level review** during plan execution — always for: auth/authz/
   session, payment/billing/money, data migration/schema, and anything in
   the project CLAUDE.md "Project-specific constraints". Skip for docs,
