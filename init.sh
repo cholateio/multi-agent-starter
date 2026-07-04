@@ -16,7 +16,7 @@
 #
 # Update mode: init.sh <target-dir> --update
 #   Re-deploys the kit-owned files under
-#   .claude/{rules,hooks,scripts,agents,skills}/ into an existing kit
+#   .claude/{rules,hooks,scripts,agents,skills,docs}/ into an existing kit
 #   project, add-or-overwrite. Deploys .claude/settings.json only when the
 #   project has none; never overwrites an existing settings.json or your
 #   CLAUDE.md. Flags orphaned kit-owned files and legacy monolithic
@@ -123,10 +123,11 @@ if [ "$UPDATE" -eq 1 ]; then
   echo "update: $FROM → v$KIT_VERSION"
   echo
 
-  # --- overwrite the kit-owned set: rules, hooks, scripts, agents, skills ---
+  # --- overwrite the kit-owned set: rules, hooks, scripts, agents, skills, docs ---
   # add-or-overwrite: this is how a v3.1 project picks up rules/kit-workflow.md.
+  # "docs" (v4.0) carries on-demand references like judgment-matrix.md.
   # .claude/settings.json is deliberately NOT in this set.
-  KIT_OWNED_DIRS="rules hooks scripts agents skills"
+  KIT_OWNED_DIRS="rules hooks scripts agents skills docs"
   updated=0
   unchanged=0
   warnings=0

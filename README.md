@@ -1,4 +1,4 @@
-# Multi-Agent Starter Kit (v3.5)
+# Multi-Agent Starter Kit (v4.0)
 
 讓 **Claude Code + Superpowers + Codex Plugin** 乾淨分工地一起工作的起手包。
 你只負責描述任務、approve plan；AI 之間自己協作——你不再當人肉訊息路由器。
@@ -39,7 +39,8 @@
 | `README.md` | 給人看的專案速查 | AI 幫你填好佔位符（30 秒重啟、環境變數、部署…） |
 | `.gitignore` | 標準忽略規則 | 不用管 |
 | `docs/specs/` | 放功能藍圖 / spec 的地方 | 有 spec-driven 開發時放進去，沒有就留空 |
-| `.claude/` | 跑這套流程的基礎建設（`rules/kit-workflow.md`、hooks / scripts / agents / skills、`kit-version`） | **別碰**（要客製改 kit repo，再 `--update` 鋪回） |
+| `.claude/` | 跑這套流程的基礎建設（rules / hooks / scripts / agents / skills / docs、`kit-version`） | **別碰**（要客製改 kit repo，再 `--update` 鋪回；v4.0 起 hook 會物理擋下對這些檔的編輯） |
+| `.claude/protected-paths` | 專案禁區清單（一行一個 glob），PreToolUse hook 據此硬擋編輯 | **要填**——CLAUDE.md constraints 裡每條「路徑型」禁區同步加進來 |
 | `mise.toml` | 工具版本鎖定 | 只有這台機器裝了 mise 才會出現；沒裝的機器不會生成、也不會提它 |
 
 kit 自己的文件（這份 README、`ARCHITECTURE.md`）**永遠留在 kit repo**，不會被複製進你的專案——就像你的 app 不需要 React 的 `CONTRIBUTING.md`。這就是為什麼你以後打開專案不會再被一堆文件搞混「哪些能改」。
@@ -171,11 +172,13 @@ kit repo 更新後（`git -C ~/.multi-agent-kit pull`），已經跑過 `init.sh
 
 ### Hooks（`.claude/settings.json`，v3.5 起預設開啟）
 
-- `session-start.sh`：session 開始時廣播 kit context（active profile、codex 可用性、這個 session 的 review marker 路徑），並記下 review gate 用的 git baseline。
+- `session-start.sh`：session 開始時廣播 kit context（active profile、codex 可用性、這個 session 的 review marker 路徑），記下 review gate 用的 git baseline；v4.0 起在 compact/resume 後注入 RE-ANCHOR（強制重讀 constraints 與 plan，防記憶解體後亂改）。
 - `classify-task.sh`：只認你的明確修飾語（`直接做`→跳過流程、`完整流程`→全套），其他一律交給模型自判（v3.3 起移除關鍵字啟發式）。
-- `verify-final-review.sh`：結束前若有未審的業務邏輯就 block——v3.3 起連「已經 commit 的變更」也看得到（靠 session-start 記的 baseline），審過的內容則用 content hash 記住、不會重複煩你。
-- **預設開啟**（v3.5 起；gate 的洞在 v3.3 已修完、有 smoke test 保護，opt-in 的前提不存在了）。要停用：把 settings.json 裡的 `hooks` 改名（例如 `_hooks_disabled`），重啟 session。**SessionStart 跟 Stop 要一起開/關**（Stop gate 靠 SessionStart 記的 baseline）。既有專案 `--update` 不會覆蓋你的 settings.json，想跟上就照它印出的 diff 手動合併。
-- **審完怎麼過 gate**：用 `/kit-review`——它會依 profile 跑對的 review 並 touch marker；要跳過就 `/kit-skip-review`（或手動 `touch /tmp/claude-skip-review-<session_id>`，路徑在 block 訊息裡）。
+- `verify-final-review.sh`：結束前若有未審的業務邏輯就 block——v3.3 起連「已經 commit 的變更」也看得到（靠 session-start 記的 baseline），審過的內容則用 content hash 記住、不會重複煩你。v4.0 起 marker 必須含 `reviewed-by=` 證據行（由 `/kit-review` 寫入），空 touch 不再過關。
+- `protect-paths.sh`（v4.0）：兩檔防護——`.claude/protected-paths` 清單路徑（你宣告的專案禁區）**硬擋**；kit-owned 檔案（rules/hooks/settings.json 等）**轉請示**（你在場時彈窗放行你確實要求過的修改，例如加權限；無人值守時等同封鎖）。整個 session 放行：啟動前 `export KIT_PROTECT=off`（模型自己 export 沒用——hook 吃的是 claude 啟動時的環境）。
+- `tool-breaker.sh`（v4.0）：連續 3 次完全相同的工具調用會被物理擋下（重試螺旋熔斷）、工具連續失敗會收到警示；所有調用寫進 `/tmp/claude-kit-toollog-<session_id>.jsonl` 供事後審計。停用：啟動前 `export KIT_BREAKER=off`。
+- **預設開啟**（v3.5 起）。要停用全部：把 settings.json 裡的 `hooks` 改名（例如 `_hooks_disabled`），重啟 session。**SessionStart 跟 Stop 要一起開/關**（Stop gate 靠 SessionStart 記的 baseline）。既有專案 `--update` 不會覆蓋你的 settings.json，想跟上就照它印出的 diff 手動合併。
+- **審完怎麼過 gate**：用 `/kit-review`——它會依 profile 跑對的 review 並寫入證據 marker；要跳過就 `/kit-skip-review`。你本人的手動逃生口（路徑在 session 開頭的 KIT_CONTEXT 裡；空 touch 無效，gate 只認 `user-approved` 開頭的內容——這行格式故意只寫在這份 kit 文件裡，部署出去的專案看不到）：`echo "user-approved date=$(date +%F) quote=\"manual skip\"" > /tmp/claude-skip-review-<session_id>`。
 - ⚠️ **不要**啟用 `/codex:setup --enable-review-gate`：它在每次 stop 自動 review，會造成 Claude/Codex loop 燒 quota。我們的 Stop hook 做同樣的事但更可控。
 
 ### 權限提示
@@ -200,9 +203,11 @@ v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow
 |------|------|---------|
 | `CLAUDE.md` | 專案設定 | 填 / 維護 |
 | `README.md` | 給人看的專案速查 | 填 / 維護 |
-| `.claude/settings.json` | 設定 | 可調（hooks / 權限） |
-| `.claude/rules/kit-workflow.md` | kit-owned 工作流規則 | 別碰——`--update` 會直接覆蓋；要客製改 kit repo 再鋪回 |
-| `.claude/hooks/`、`scripts/`、`agents/`、`skills/` | infra，同樣 kit-owned | 別碰（要改流程就去改 kit repo，`--update` 鋪回） |
+| `.claude/settings.json` | 設定 | 可調（hooks / 權限）——v4.0 起模型動它要先向你請示（protect-paths 彈窗），無人值守時動不了 |
+| `.claude/protected-paths` | 專案禁區清單（給 protect-paths hook 執法） | 填 / 維護；模型只能加嚴、不能放寬 |
+| `docs/LESSONS.md` | 踩坑教訓（Context/Error/Solution/Rule 四行格式） | 模型自行累積，超過 300 行會自我精簡（規則見 kit-evolution） |
+| `.claude/rules/`（workflow / delegation / evolution） | kit-owned 規則，每 session 自動載入 | 別碰——`--update` 會直接覆蓋；要客製改 kit repo 再鋪回 |
+| `.claude/hooks/`、`scripts/`、`agents/`、`skills/`、`docs/` | infra，同樣 kit-owned | 別碰（v4.0 起 hook 物理執法；要改流程就去改 kit repo，`--update` 鋪回） |
 | `.claude/kit-version` | kit 版本標記 | kit 自動寫入，別手動編輯 |
 
 ---
@@ -213,7 +218,9 @@ v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow
 |------|--------|------|
 | `README.md` | 新人 / 你 | 你正在看的——裝機、開專案、操作、debug（給專案用的範本在 `templates/README.md`，`init.sh` 複製時改名成專案的 `README.md`） |
 | `CLAUDE.md` | AI（每個 session） | 專案內容範本：goal / stack / constraints（會進專案；workflow 規則另外放在 `.claude/rules/kit-workflow.md`，同樣會進專案、但 kit-owned） |
-| `ARCHITECTURE.md` | 想深入的人 | 為什麼這樣設計、v1→v3.3 的取捨 |
+| `ARCHITECTURE.md` | 想深入的人 | 為什麼這樣設計、v1→v4.0 的取捨 |
+| `docs/harness-diagnosis.md` | 想深入的人 | v4.0 防線的設計依據：三大弱模型失敗場景 → 三個物理痛點 → 阻斷方案，含誠實條款（這套 harness 的能力極限） |
+| `docs/handover-from-fable.md` | 未來的模型與你 | 一次性高階模型 session 留下的交接信：三件關鍵事 + 制度腐化路徑與偵測法 |
 
 （`ADOPTION.md` 已併入本檔「既有專案」段、`USAGE.md` 已併入本檔「操作參考 / Debug」段，皆不再單獨維護。）
 
@@ -221,7 +228,8 @@ v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow
 
 ## 版本
 
-- **v3.5（現在）**：workflow sizing 防偏壓——kit-workflow.md 給小任務可操作判準（≤2 檔、無新依賴、不碰 auth/payment/schema/constraints → 直接做），並依 superpowers 自己的優先權規則（專案指示 > skills）明文解除小任務的 brainstorming/TDD 強制觸發、模糊時問一句而非默默走全套；hooks 預設開啟（v3.3 修完 gate 的洞後 opt-in 前提不存在）；清掉 research skill/agent 裡已廢除的 `large_task`/`small_task` 分類標籤。
+- **v4.0（現在）**：弱模型防線——判斷力外化 + 物理熔斷。兩支新 hook（`protect-paths` 禁區硬擋、`tool-breaker` 重試螺旋熔斷 + 埋點日誌）、Stop gate marker 證據化（空 touch 不過關、block 訊息不再印捷徑）、compact/resume RE-ANCHOR、三份新規則（kit-delegation 派工升降級、kit-evolution 自我更新邊界、judgment-matrix 判斷檢核表）、`/kit-dispatch` 派工模板 skill、CLAUDE.md 範本改版（constraints ↔ protected-paths 同步執法）。設計依據：`docs/harness-diagnosis.md`。
+- **v3.5**：workflow sizing 防偏壓——kit-workflow.md 給小任務可操作判準（≤2 檔、無新依賴、不碰 auth/payment/schema/constraints → 直接做），並依 superpowers 自己的優先權規則（專案指示 > skills）明文解除小任務的 brainstorming/TDD 強制觸發、模糊時問一句而非默默走全套；hooks 預設開啟（v3.3 修完 gate 的洞後 opt-in 前提不存在）；清掉 research skill/agent 裡已廢除的 `large_task`/`small_task` 分類標籤。
 - **v3.4**：gemini 退役（使用者環境因素，非能力問題）——研究改由 Claude 原生 `research-scout` 子代理（WebSearch/WebFetch）承接、不再限 full profile，profile 從此只決定 reviewer；init.sh 收尾三小項（`--help` 只印檔頭、`--update` 補缺失 settings.json、smoke env 隔離）+ `--update` gemini 遷移提示。
 - **v3.3**：harness 閉環——Stop review gate 修好三個洞（marker 無人寫、commit 盲區、rename 解析），SessionStart hook 廣播 profile/marker context + 記 baseline，`/kit-review`、`/kit-skip-review` 修飾語 skills，`solo-reviewer` 正式 agent 檔，classify-task 只留明確覆寫，settings 模板內建 read-only 權限基線。
 - **v3.2**：檔案級所有權二分——`CLAUDE.md` 純專案內容、workflow 規則移到 kit-owned 的 `.claude/rules/kit-workflow.md` + `init.sh --update` 讓已鋪過 kit 的專案能回流拿新版 + `templates/`（README / gitignore / mise 範本）+ 那份「怎麼下指令」的一頁速查文件光榮退役（教學任務已完成，殘值併入 `templates/README.md`）。
@@ -229,4 +237,4 @@ v3.3 起 settings.json 模板直接內建一組 read-only 的 `permissions.allow
 - **v3**：官方 codex-plugin-cc 取代自製 codex/gemini wrapper。
 - **v2 / v1**：deprecated（自製 wrapper / PAL MCP）。
 
-今天起手就用 v3.5。
+今天起手就用 v4.0。
