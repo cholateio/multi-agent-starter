@@ -56,6 +56,11 @@ smoke test 把關(≤20KB)。
 - **判斷檢核表**(`.claude/docs/judgment-matrix.md`,需要時才讀)——換路徑
   信號(R1)、完成判準(R2)、熔斷提問時機(R3)、品味不拍板(R4),
   每條附正例反例。R3/R4 觸發條件明文**優先於** kit-judgment 的「直接做」傾向。
+- **驗證信號注入**(`.claude/docs/verification-signals.md`,需要時才讀,v4.2)——
+  五個「迴圈裡缺便宜驗證信號」的高風險領域:UI 沒截圖=視覺上未驗證(S1)、
+  schema 每欄要有現存讀取路徑(S2)、bug 連環卡後交接去假設化(S3)、
+  SaaS 引入必附實查成本卡且 user 拍板(S4)、業務邏輯不得只能透過 UI 觸達
+  (S5,痛點驅動不預建)。kit-judgment 通用證據紀律在領域層的實例化。
 
 ## 二、Context engineering 防護(不可再生資源:誰讀什麼、怎麼不膨脹、怎麼重錨)
 
