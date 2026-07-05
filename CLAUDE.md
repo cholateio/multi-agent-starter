@@ -46,9 +46,8 @@
 |------|--------|
 | 卡關了 / 想宣告完成 / 猶豫要不要問 user | `.claude/docs/judgment-matrix.md` |
 | 要派工給 subagent | `/kit-dispatch` skill（五種模板） |
-| 要記教訓 / 想改 harness 檔案 | `docs/LESSONS.md`（append）/ kit-evolution 規則（自動已載入） |
+| 要記教訓 / 查歷史教訓 / 想改 harness 檔案 | `docs/LESSONS.md`（append；動大手術前先掃一眼）/ kit-evolution 規則（自動已載入） |
 | 有 spec 的功能 | `docs/specs/`（spec 是需求的唯一權威來源） |
-| 專案歷史教訓 | `docs/LESSONS.md`（存在的話，動大手術前先掃一眼） |
 | 要做 UI / 設計 schema / 同一 bug 連續卡 / 引入外部服務 / 定架構 | `.claude/docs/verification-signals.md`（命中哪節讀哪節） |
 
 （review / isolation / 任務 sizing / 派工升降級 / 判斷層的規則不在
