@@ -1,6 +1,6 @@
 # [PROJECT NAME]
 
-> CLAUDE.md（kit v4.0）。本檔只放「這個專案是什麼」——工作流、派工、
+> CLAUDE.md（kit v4.2）。本檔只放「這個專案是什麼」——工作流、派工、
 > review 規則由 `.claude/rules/` 自動載入（kit-owned，別在專案裡改）。
 > 首次使用：跑 `claude`，貼上 `init.sh` 結尾印出的 bootstrap prompt，
 > 讓 AI 幫你把 [佔位符] 填掉。
@@ -49,6 +49,7 @@
 | 要記教訓 / 想改 harness 檔案 | `docs/LESSONS.md`（append）/ kit-evolution 規則（自動已載入） |
 | 有 spec 的功能 | `docs/specs/`（spec 是需求的唯一權威來源） |
 | 專案歷史教訓 | `docs/LESSONS.md`（存在的話，動大手術前先掃一眼） |
+| 要做 UI / 設計 schema / 同一 bug 連續卡 / 引入外部服務 / 定架構 | `.claude/docs/verification-signals.md`（命中哪節讀哪節） |
 
 （review / isolation / 任務 sizing / 派工升降級 / 判斷層的規則不在
 本檔——`.claude/rules/` 的 kit-workflow、kit-delegation、kit-evolution、
