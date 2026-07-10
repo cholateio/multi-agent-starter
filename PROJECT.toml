@@ -1,0 +1,14 @@
+# PROJECT.toml — 專案 manifest(機器可讀,`proj` 指令據此做跨專案彙總)。
+# user-owned:kit 永不覆蓋。狀態/指令/付費服務改變時同步本檔,並更新 updated。
+
+name = "multi-agent-starter"
+status = "active"
+status_note = "kit 本體(v4.4):新增 PROJECT.toml manifest 體系與 proj 彙總指令"
+updated = 2026-07-11
+
+[commands]
+test = "bash tests/smoke.sh && bash tests/proj-smoke.sh && bash tests/hooks-smoke.sh"
+init-new = "./init.sh <target-dir>"
+update-all = "for d in /home/cholate/*/; do [ -f \"$d/.claude/kit-version\" ] && ./init.sh \"$d\" --update; done"
+
+# 無付費外部服務(codex/claude 訂閱屬機器層,不算專案綁定)
