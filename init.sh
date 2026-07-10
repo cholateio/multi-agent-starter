@@ -175,6 +175,14 @@ if [ "$UPDATE" -eq 1 ]; then
     updated_list+=(".claude/settings.json")
   fi
 
+  # --- PROJECT.toml: deploy-if-absent (user-owned manifest; never overwritten,
+  # never diffed - unlike settings.json it has no kit-side evolution to merge) ---
+  if [ -f "$KIT_ROOT/templates/PROJECT.toml" ] && [ ! -f "$TARGET/PROJECT.toml" ]; then
+    cp "$KIT_ROOT/templates/PROJECT.toml" "$TARGET/PROJECT.toml"
+    updated=$((updated + 1))
+    updated_list+=("PROJECT.toml")
+  fi
+
   echo "updated:"
   for u in "${updated_list[@]:-}"; do [ -n "$u" ] && echo "  + $u"; done
   echo
