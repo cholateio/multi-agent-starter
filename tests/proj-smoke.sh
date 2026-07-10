@@ -52,6 +52,10 @@ EOF
 
 printf 'name = "broken\n' > "$ROOT/broken-proj/PROJECT.toml"
 
+# 合法 TOML 但 status 不是字串(codex review P2:不可 hash 的型別不能炸掉整個列表)
+mkdir -p "$ROOT/weird-proj"
+printf 'name = "weird-proj"\nstatus = ["active"]\n' > "$ROOT/weird-proj/PROJECT.toml"
+
 # run: $@ = proj args; sets OUT / ERR / CODE
 run() {
   OUT="$(env PROJ_ROOT="$ROOT" "$PROJ" "$@" 2>"$WORK/stderr")"; CODE=$?
@@ -67,6 +71,8 @@ assert_not_contains "list: free-tier not \$-marked" "$OUT" "\$Supabase"
 assert_contains "list: bare-proj is 未登記" "$OUT" "未登記"
 assert_contains "list: broken manifest flagged in table" "$OUT" "manifest 損壞"
 assert_contains "list: parse warning on stderr" "$ERR" "解析失敗"
+assert_contains "list: non-string status warns but stays listed" "$ERR" "weird-proj"
+assert_contains "list: non-string status row present" "$OUT" "weird-proj"
 assert_not_contains "list: hidden dir excluded" "$OUT" ".hidden"
 
 # --- stale 偵測: good-proj 給一個今天的 commit,updated=2020 → ⚠ ---

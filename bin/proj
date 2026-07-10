@@ -49,7 +49,8 @@ def load_manifest(d):
     except (tomllib.TOMLDecodeError, OSError) as e:
         return None, str(e)
     status = data.get("status")
-    if status is not None and status not in VALID_STATUSES:
+    if status is not None and (not isinstance(status, str)
+                               or status not in VALID_STATUSES):
         warn(f'{d.name}: status "{status}" 不在 {sorted(VALID_STATUSES)},照列')
     return data, None
 
