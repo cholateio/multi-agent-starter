@@ -1,0 +1,18 @@
+# PROJECT.toml — 專案 manifest(機器可讀,`proj` 指令據此做跨專案彙總)。
+# user-owned:kit 永不覆蓋。狀態/指令/付費服務改變時同步本檔,並更新 updated。
+
+name = "[專案名]"
+status = "active"          # active | mvp | done | paused | abandoned
+status_note = "[一句話:現在做到哪、下一步是什麼]"
+updated = 2026-07-11       # 最後一次人工確認本檔內容的日期
+
+[commands]                 # key = 用途短名;value = 可直接複製執行的指令
+# dev = "pnpm dev"
+# summary = "uv run yt-summary <youtube-url>"
+
+# 每個付費/可能付費的外部服務一節 [[paid]];完全沒有就整段刪掉
+# [[paid]]
+# service = "OpenAI API"
+# billing = "按用量"        # 按用量 | 月費 | 年費 | free-tier
+# monthly_est = "~$3"
+# cancel = "拿掉 .env 的 key 即停"
