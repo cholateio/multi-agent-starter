@@ -51,6 +51,18 @@ A `TASK_CLASSIFICATION` hint appears only for explicit user overrides —
 - Genuinely ambiguous between small and feature-sized → ask the user one
   sizing question instead of silently running the full flow.
 
+For feature-sized-or-larger plans, the plan presented for approval MUST
+include a per-phase main-model proposal: recommended MAIN-conversation
+model (e.g. Fable 5 vs Opus 4.8) + reasoning effort, a one-line
+rationale, and the escalation trigger ("pull max if stuck on X").
+Guidance: novel design / irreversible operations / root-cause debugging
+→ strongest model, high effort; spec-locked implementation behind frozen
+interfaces → one tier down. At each phase boundary during execution,
+remind the user in one line: "next phase suggests <model>/<effort> —
+switch with /model, or continue as-is." Advisory only — the user
+executes the switch; never block on it. (Subagent tiers stay
+kit-delegation's job.)
+
 If `docs/specs/` contains a spec: it is the authoritative requirements
 source — skip brainstorming, still derive a codebase-aware plan, and still
 review the spec itself (it is an external artifact; isolation applies).
@@ -63,7 +75,13 @@ review the spec itself (it is an external artifact; isolation applies).
   uncommitted changes AND commits made since session start, and it only
   accepts markers carrying a `reviewed-by=` evidence line — `/kit-review`
   writes that line after the review actually runs; a bare touch does not
-  pass and is called out.
+  pass and is called out. v4.3: the gate auto-allows while the CUMULATIVE
+  unreviewed change stays small (≤50 lines / ≤2 business files, no
+  sensitive or protected path) — small tweaks accumulate and the review
+  that fires once the threshold is crossed covers the whole batch. Do not
+  run ceremonial reviews for changes under that threshold, and do not
+  slice work to stay under it: sensitive paths (auth/payment/migration/
+  protected-paths) are always size-blind.
 - **Phase-level review** during plan execution — always for: auth/authz/
   session, payment/billing/money, data migration/schema, and anything in
   the project CLAUDE.md "Project-specific constraints". Skip for docs,

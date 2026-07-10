@@ -36,6 +36,14 @@
 #   resolves (gc, tampering) FAILS CLOSED: diff against the empty tree, so
 #   everything tracked is up for review until one review/bypass heals it.
 #
+# v4.3 small-change auto-allow: when the CUMULATIVE diff since the last
+# certified tree stays within SMALL_MAX_LINES/SMALL_MAX_FILES across
+# business files and touches no sensitive or protected path, the stop is
+# allowed WITHOUT advancing the baseline — small changes accumulate until
+# one review covers the whole batch. Sensitive paths and unmeasurable
+# states (no baseline, binary rows) stay size-blind. See the
+# small_change_allow section below.
+#
 # Reference: https://code.claude.com/docs/en/hooks#stop
 
 set -uo pipefail
@@ -188,6 +196,68 @@ if [[ -z "$BUSINESS_FILES" ]]; then
     exit 0
 fi
 
+# --- v4.3 small-change auto-allow --------------------------------------
+# Tuning-phase reality: a 5-line tweak should not force a cross-model
+# review. The gate measures the CUMULATIVE change since the last certified
+# tree (baseline line2 -> current tree) with git numstat — committed,
+# uncommitted and untracked all in one content-addressed diff. Small
+# changes pass WITHOUT advancing the baseline, so they keep accumulating;
+# the review that fires once the threshold is crossed covers the whole
+# batch (deliberate: no salami-slicing past the review). The threshold is
+# git-measured — the model calling a change "small" has no effect.
+# Fail closed: no baseline, unresolvable CERT_TREE, or a binary numstat
+# row ("-") all fall through to the size-blind block below.
+SMALL_MAX_LINES=50
+SMALL_MAX_FILES=2
+# Sensitive stems stay size-blind. No right boundary on purpose: "auth"
+# catches authentication/authorize (and false-positives like authors.py —
+# acceptable, it errs toward review). "oauth"/"sso" listed explicitly:
+# the left-delimiter requirement means "auth" does NOT match inside
+# "oauth.py" (codex review finding, 2026-07-10).
+SENSITIVE_PATH_REGEX='(^|[/_.-])(auth|oauth|sso|login|password|payment|billing|migrat|security|secret|crypto)'
+
+# matches_protected <path>: 0 if the path hits a .claude/protected-paths
+# glob (same semantics as protect-paths.sh: `*` crosses `/`, trailing
+# slash means the subtree).
+matches_protected() {
+    local pat list=".claude/protected-paths"
+    [[ -f "$list" ]] || return 1
+    while IFS= read -r pat; do
+        pat="${pat%%#*}"
+        pat="${pat#"${pat%%[![:space:]]*}"}"
+        pat="${pat%"${pat##*[![:space:]]}"}"
+        [[ -z "$pat" ]] && continue
+        [[ "$pat" == */ ]] && pat="${pat}*"
+        # shellcheck disable=SC2053  # unquoted RHS is the point: glob match
+        [[ "$1" == $pat ]] && return 0
+    done < "$list"
+    return 1
+}
+
+# small_change_allow: 0 if the cumulative certified-tree diff qualifies.
+small_change_allow() {
+    local numstat add del path total=0 files=0
+    [[ -n "$CERT_TREE" && -n "$CURRENT_TREE" ]] || return 1
+    git rev-parse --verify --quiet "${CERT_TREE}^{tree}" >/dev/null 2>&1 || return 1
+    # --no-renames keeps a rename deterministic: full delete + full add
+    # (a renamed file counts big and gets reviewed — conservative).
+    numstat=$(git diff --no-renames --numstat "$CERT_TREE" "$CURRENT_TREE" 2>/dev/null) || return 1
+    while IFS=$'\t' read -r add del path; do
+        [[ -z "$path" ]] && continue
+        path="${path#\"}"; path="${path%\"}"
+        echo "$path" | grep -qE "$BUSINESS_LOGIC_REGEX" || continue
+        echo "$path" | grep -qE "$SKIP_REGEX" && continue
+        [[ "$add" == "-" || "$del" == "-" ]] && return 1   # binary: fail closed
+        echo "$path" | grep -qiE "$SENSITIVE_PATH_REGEX" && return 1
+        matches_protected "$path" && return 1
+        total=$((total + add + del))
+        files=$((files + 1))
+    done <<< "$numstat"
+    # files may be 0 when the touched business files are net-identical to
+    # the certified tree — nothing to review, allow.
+    [[ "$files" -le "$SMALL_MAX_FILES" && "$total" -le "$SMALL_MAX_LINES" ]]
+}
+
 # A review counts if EITHER marker exists AND carries an evidence line
 # ("reviewed-by=..." — written by /kit-review after the review actually
 # ran). v4.0: a bare `touch` no longer satisfies the gate; the old block
@@ -220,6 +290,12 @@ fi
 # Consume evidence-less markers so they don't linger; the block message
 # below tells the model why its marker didn't count.
 rm -f "$CODEX_MARKER" "$SELF_MARKER"
+
+# Cumulative change still small (v4.3) -> allow, but do NOT advance the
+# baseline: the change keeps counting toward the next review.
+if small_change_allow; then
+    exit 0
+fi
 
 # === Block the stop ===
 FILE_LIST=$(echo -e "$BUSINESS_FILES" | grep -v '^$' | head -10 | sed 's/^/  - /')

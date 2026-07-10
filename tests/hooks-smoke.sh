@@ -75,6 +75,12 @@ valid_marker() {
   printf 'reviewed-by=%s verdict=approve scope="smoke fixture" date=2026-01-01\n' "$2" > "$1"
 }
 
+# py_lines <n>: n lines of trivial python on stdout. v4.3: the Stop gate
+# auto-allows small cumulative changes, so every block-expecting business
+# fixture must exceed the threshold (50 lines) to keep testing the block
+# path; 1-line fixtures now legitimately pass the gate.
+py_lines() { local i; for ((i=1; i<=$1; i++)); do echo "print('line $i')"; done; }
+
 # git_f: git against a fixture dir under the same isolation
 git_f() {
   local d="$1"; shift
@@ -211,7 +217,7 @@ assert_eq "h2a: clean tree allows stop" "$CODE" "0"
 assert_eq "h2a: no block JSON emitted" "$OUT" ""
 
 # (b) uncommitted business file, no marker -> block (and stays blocked on rerun)
-echo "print('x')" > "$R2/app.py"
+py_lines 60 > "$R2/app.py"
 run_hook "$VF" "$STOP_JSON"
 assert_eq "h2b: exit 0 (block via JSON, not exit code)" "$CODE" "0"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
@@ -246,7 +252,7 @@ run_hook "$VF" "$STOP_JSON"
 assert_eq "h2c2: commit of certified content still allows" "$OUT" ""
 
 # (c3) new edits after certification re-block
-echo "print('more')" >> "$R2/app.py"
+py_lines 60 >> "$R2/app.py"
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
 assert_eq "h2c3: post-certification edit blocks again" "$DEC" "block"
@@ -255,7 +261,9 @@ run_hook "$VF" "$STOP_JSON"   # certify + settle for next scenarios
 assert_eq "h2c3: self marker settles the state" "$OUT" ""
 
 # (d) THE COMMIT BLIND SPOT: commit business change, then point baseline at
-# the pre-commit HEAD (clean tree, no cert) -> must still block
+# the pre-commit HEAD (clean tree, no cert) -> must still block. The change
+# is deliberately 1 line: a baseline with no tree hash (line2) is
+# unmeasurable, so the v4.3 small-change gate must fail closed here.
 PRE_HEAD="$(git_f "$R2" rev-parse HEAD)"
 echo "print('committed change')" >> "$R2/app.py"
 git_f "$R2" add -A && git_f "$R2" commit -q -m "fixture: business change"
@@ -284,7 +292,7 @@ git_f "$R2" mv renamed.py app.py   # restore
 
 # (g) untracked file inside a NEW directory must be seen (porcelain -uall)
 mkdir -p "$R2/newdir"
-echo "print('hidden')" > "$R2/newdir/deep.py"
+py_lines 60 > "$R2/newdir/deep.py"
 run_hook "$VF" "$STOP_JSON"
 REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
 assert_contains "h2g: file inside new directory is caught" "$REASON" "newdir/deep.py"
@@ -297,7 +305,7 @@ assert_eq "h2h: docs-only change allows stop" "$OUT" ""
 git_f "$R2" checkout -q -- README.md
 
 # (i) bypass flag: bare touch rejected (v4.0), user-approved line honored
-echo "print('y')" > "$R2/app2.py"
+py_lines 60 > "$R2/app2.py"
 touch "$BYPASS2"
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
@@ -338,7 +346,7 @@ assert_eq "h2l: review heals the broken baseline" "$OUT" ""
 assert_eq "h2l: healed baseline line1 is HEAD" "$(baseline_head "$BASELINE2")" "$(git_f "$R2" rev-parse HEAD)"
 
 # (m) solo profile block message discloses reduced isolation
-echo "print('s')" >> "$R2/app.py"
+py_lines 60 >> "$R2/app.py"
 run_hook "$VF" "$STOP_JSON" solo
 REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
 assert_contains "h2m: solo block mentions isolation OFF" "$REASON" "ISOLATION IS OFF"
@@ -346,7 +354,7 @@ assert_not_contains "h2m: solo block has no touch incantation" "$REASON" "touch 
 git_f "$R2" checkout -q -- app.py
 
 # (n) filename with a space survives the porcelain parse
-echo "x" > "$R2/my app.py"
+py_lines 60 > "$R2/my app.py"
 run_hook "$VF" "$STOP_JSON"
 REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
 assert_contains "h2n: space-containing filename listed intact" "$REASON" "my app.py"
@@ -362,7 +370,7 @@ git_f "$R2" commit -q -m "fixture: tracked-but-ignored file"
 valid_marker "$SELF_M2" solo
 run_hook "$VF" "$STOP_JSON"   # certify the clean state (also heals baseline)
 assert_eq "h2o setup: clean state certified" "$OUT" ""
-echo "print('edited')" >> "$R2/legacy.py"
+py_lines 60 >> "$R2/legacy.py"
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
 REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
@@ -373,7 +381,7 @@ rm -f "$BASELINE2"
 
 # (p) v4.0 anti-forgery: a BARE-TOUCHED marker must not pass — it is
 # discarded, called out, and only an evidence marker heals the state
-echo "print('forged')" >> "$R2/app.py"
+py_lines 60 >> "$R2/app.py"
 touch "$CODEX_M2"
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
@@ -393,6 +401,64 @@ valid_marker "$CODEX_M2" codex
 run_hook "$VF" "$STOP_JSON"
 assert_eq "h2p: evidence marker passes the gate" "$OUT" ""
 git_f "$R2" checkout -q -- app.py
+rm -f "$BASELINE2"
+
+# (q) v4.3 small-change auto-allow: small cumulative diffs pass WITHOUT
+# advancing the baseline; accumulation past a threshold blocks; the review
+# that fires then covers the whole batch
+run_hook "$SS" "{\"session_id\":\"${SID2}\",\"cwd\":\"${R2}\"}"   # re-seed baseline at clean state
+CERT_BEFORE="$(baseline_tree "$BASELINE2")"
+py_lines 10 > "$R2/tweak.py"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2q: small business change auto-allows" "$OUT" ""
+assert_eq "h2q: small allow does NOT advance baseline" "$(baseline_tree "$BASELINE2")" "$CERT_BEFORE"
+py_lines 10 > "$R2/tweak2.py"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2q: second small change still allowed (cumulative 20 lines, 2 files)" "$OUT" ""
+py_lines 5 > "$R2/tweak3.py"
+run_hook "$VF" "$STOP_JSON"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2q: third business file crosses the file cap and blocks" "$DEC" "block"
+rm -f "$R2/tweak3.py"
+py_lines 45 >> "$R2/tweak.py"
+run_hook "$VF" "$STOP_JSON"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2q: cumulative lines past the threshold block" "$DEC" "block"
+valid_marker "$SELF_M2" solo
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2q: one review covers the accumulated batch" "$OUT" ""
+# cleanup: removing the untracked tweaks leaves a clean porcelain — the
+# gate's "nothing to review" path advances the baseline by itself. NO
+# marker here: on that path the marker check is never reached, so a
+# marker written now would linger and falsely satisfy the next scenario.
+rm -f "$R2/tweak.py" "$R2/tweak2.py"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2q cleanup: post-cleanup state certified" "$OUT" ""
+assert_file_absent "h2q cleanup: no marker left behind" "$SELF_M2"
+
+# (r) sensitive path stays size-blind: a 5-line auth change must block
+py_lines 5 > "$R2/auth.py"
+run_hook "$VF" "$STOP_JSON"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2r: tiny change on sensitive path still blocks" "$DEC" "block"
+rm -f "$R2/auth.py"
+# "oauth" must match even though "auth" inside it has no left delimiter
+# (codex review finding 2026-07-10)
+py_lines 5 > "$R2/oauth.py"
+run_hook "$VF" "$STOP_JSON"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2r: tiny change on oauth path still blocks" "$DEC" "block"
+rm -f "$R2/oauth.py"
+
+# (s) protected path stays size-blind: a 3-line change in a
+# .claude/protected-paths zone must block
+mkdir -p "$R2/.claude" "$R2/src/legacy"
+echo "src/legacy/" > "$R2/.claude/protected-paths"
+py_lines 3 > "$R2/src/legacy/pay.py"
+run_hook "$VF" "$STOP_JSON"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2s: tiny change on protected path still blocks" "$DEC" "block"
+rm -rf "$R2/src" "$R2/.claude"
 rm -f "$BASELINE2"
 
 # ===========================================================================
@@ -426,6 +492,19 @@ ct_ctx "refactor the payment module"
 assert_not_contains "h3: refactor prompt no longer classified" "$CTX" "TASK_CLASSIFICATION"
 ct_ctx "implement a new feature for exports"
 assert_not_contains "h3: feature prompt no longer classified" "$CTX" "TASK_CLASSIFICATION"
+
+# v4.3 descriptive-context guard: sentences DESCRIBING the workflow must
+# not classify (real misfire 2026-07-10: "一直在走完整流程" -> explicit_full)
+ct_ctx "我發現模型常常會到最後變成一直在走完整流程"
+assert_not_contains "h3: descriptive zh full-workflow sentence not classified" "$CTX" "TASK_CLASSIFICATION"
+ct_ctx "it keeps running the full review on tiny fixes"
+assert_not_contains "h3: descriptive en full-review sentence not classified" "$CTX" "TASK_CLASSIFICATION"
+ct_ctx "模型總是不需要 review 就出事"
+assert_not_contains "h3: descriptive zh skip sentence not classified as skip" "$CTX" "TASK_CLASSIFICATION"
+ct_ctx "the model always says skip review"
+assert_not_contains "h3: reported speech skip phrase not classified (codex finding)" "$CTX" "TASK_CLASSIFICATION"
+ct_ctx "請走完整流程"
+assert_contains "h3: imperative zh full phrase still classifies" "$CTX" "explicit_full"
 
 # descriptive size words are NOT explicit overrides (round 1, P2)
 ct_ctx "this should be a small change in the auth middleware"
