@@ -19,6 +19,7 @@ fail() { FAIL_COUNT=$((FAIL_COUNT+1)); printf 'FAIL %s (%s)\n' "$1" "$2"; }
 assert_eq() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "got [$2] want [$3]"; fi }
 assert_contains() { if printf '%s\n' "$2" | grep -qF -- "$3"; then pass "$1"; else fail "$1" "missing text: [$3]"; fi }
 assert_not_contains() { if printf '%s\n' "$2" | grep -qF -- "$3"; then fail "$1" "unexpectedly contains: [$3]"; else pass "$1"; fi }
+assert_file_exists() { if [ -e "$2" ]; then pass "$1"; else fail "$1" "missing: $2"; fi }
 
 if [ ! -x "$PROJ" ]; then
   echo "FAIL setup (bin/proj not found/executable at $PROJ)"
@@ -55,6 +56,14 @@ printf 'name = "broken\n' > "$ROOT/broken-proj/PROJECT.toml"
 # 合法 TOML 但 status 不是字串(codex review P2:不可 hash 的型別不能炸掉整個列表)
 mkdir -p "$ROOT/weird-proj"
 printf 'name = "weird-proj"\nstatus = ["active"]\n' > "$ROOT/weird-proj/PROJECT.toml"
+
+# HTML 轉義測試用:status_note 含 < > & (proj html 必須跳脫,不得原樣注入)
+mkdir -p "$ROOT/xss-proj"
+cat > "$ROOT/xss-proj/PROJECT.toml" <<'EOF'
+name = "xss-proj"
+status = "active"
+status_note = "note with <script>alert(1)</script> & ampersand"
+EOF
 
 # run: $@ = proj args; sets OUT / ERR / CODE
 run() {
@@ -113,6 +122,33 @@ done
 OUT="$(env PATH="$GHLESS" PROJ_ROOT="$ROOT" "$PROJ" remote 2>&1)"; CODE=$?
 assert_eq "remote: exit 1 without gh" "$CODE" "1"
 assert_contains "remote: hint mentions gh CLI" "$OUT" "gh"
+
+# --- proj html: 自包含 dashboard + 非 WSL 降級 (受控 PATH 無 explorer.exe,不觸發開啟) ---
+HTMLBIN="$WORK/html-bin"
+mkdir -p "$HTMLBIN"
+for t in python3 git sh; do
+  p="$(type -P "$t" 2>/dev/null || true)"
+  [ -n "$p" ] && ln -s "$p" "$HTMLBIN/$t"
+done
+HTMLHOME="$WORK/html-home"
+DASH="$HTMLHOME/.local/share/proj/dashboard.html"
+OUT="$(env PATH="$HTMLBIN" HOME="$HTMLHOME" PROJ_ROOT="$ROOT" "$PROJ" html 2>&1)"; CODE=$?
+assert_eq "html: exit 0 without explorer.exe" "$CODE" "0"
+assert_file_exists "html: dashboard.html produced" "$DASH"
+HTML="$(cat "$DASH" 2>/dev/null)"
+assert_contains "html: project name present" "$HTML" "good-proj"
+assert_contains "html: status value present" "$HTML" "mvp"
+assert_contains "html: paid service present" "$HTML" "OpenAI API"
+assert_contains "html: broken manifest flagged" "$HTML" "manifest 損壞"
+assert_contains "html: path printed on non-WSL" "$OUT" "dashboard.html"
+# 自包含:零外部引用
+assert_not_contains "html: no external http" "$HTML" "http://"
+assert_not_contains "html: no external https" "$HTML" "https://"
+assert_not_contains "html: no external src=" "$HTML" "src="
+assert_not_contains "html: no external stylesheet" "$HTML" "<link"
+# HTML 轉義:xss-proj 的 <script> 不得原樣注入
+assert_not_contains "html: user script not raw" "$HTML" "<script>alert(1)"
+assert_contains "html: user script escaped" "$HTML" "&lt;script&gt;alert(1)"
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"
