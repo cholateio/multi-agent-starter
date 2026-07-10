@@ -566,6 +566,7 @@ init_run "$GIT_ID_CFG" nomise "$PM1"
 assert_file_exists "pm1: PROJECT.toml deployed on install" "$PM1/PROJECT.toml"
 assert_contains "pm1: PROJECT.toml is placeholder skeleton" "$(cat "$PM1/PROJECT.toml" 2>/dev/null)" "[專案名]"
 assert_contains "pm1: bootstrap prompt mentions PROJECT.toml" "$OUT" "PROJECT.toml"
+assert_file_exists "pm1: project-manifest rule deployed" "$PM1/.claude/rules/project-manifest.md"
 
 PM1B="$WORK/pm1b"
 mkdir -p "$PM1B"
@@ -587,6 +588,7 @@ init_run "$GIT_ID_CFG" nomise "$PM2" --update
 assert_eq "pm2: update exit 0" "$CODE" "0"
 assert_file_exists "pm2: --update deploys missing PROJECT.toml" "$PM2/PROJECT.toml"
 assert_contains "pm2: updated list names PROJECT.toml" "$OUT" "  + PROJECT.toml"
+assert_file_exists "pm2: project-manifest rule deployed by update" "$PM2/.claude/rules/project-manifest.md"
 
 printf 'name = "filled"\nstatus = "mvp"\n' > "$PM2/PROJECT.toml"
 CKSUM_PM="$(cksum "$PM2/PROJECT.toml")"
