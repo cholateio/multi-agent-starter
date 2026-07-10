@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""proj — 跨專案 PROJECT.toml 彙總(kit v4.4)。
+
+用法:
+  proj              全專案總覽表格(狀態/說明/付費服務/最後 commit)
+  proj <name>       單一專案完整資訊(起始指令可直接複製)
+  proj money        只列有付費服務的專案,每服務一列
+  proj remote       gh repo list 對照本機,列出未 clone 的 repo
+
+掃描根目錄: $PROJ_ROOT(預設 $HOME)第一層子目錄中,有 .git 或
+PROJECT.toml 者視為專案。Python 3.11+,零第三方依賴。
+"""
+import datetime
+import os
+import shutil
+import subprocess
+import sys
+import tomllib
+import unicodedata
+from pathlib import Path
+
+VALID_STATUSES = {"active", "mvp", "done", "paused", "abandoned"}
+STALE_DAYS = 30
+
+
+def warn(msg):
+    print(f"proj: {msg}", file=sys.stderr)
+
+
+def find_projects(root):
+    try:
+        entries = sorted(root.iterdir())
+    except OSError as e:
+        warn(f"無法讀取 {root}: {e}")
+        return []
+    return [d for d in entries
+            if d.is_dir() and not d.name.startswith(".")
+            and ((d / ".git").exists() or (d / "PROJECT.toml").is_file())]
+
+
+def load_manifest(d):
+    """回傳 (data, err): 無檔 (None, None);壞檔 (None, str);正常 (dict, None)。"""
+    p = d / "PROJECT.toml"
+    if not p.is_file():
+        return None, None
+    try:
+        with open(p, "rb") as f:
+            data = tomllib.load(f)
+    except (tomllib.TOMLDecodeError, OSError) as e:
+        return None, str(e)
+    status = data.get("status")
+    if status is not None and status not in VALID_STATUSES:
+        warn(f'{d.name}: status "{status}" 不在 {sorted(VALID_STATUSES)},照列')
+    return data, None
+
+
+def last_commit_date(d):
+    if not (d / ".git").exists():
+        return None
+    try:
+        r = subprocess.run(["git", "-C", str(d), "log", "-1", "--format=%cs"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    try:
+        return datetime.date.fromisoformat(r.stdout.strip())
+    except ValueError:
+        return None
+
+
+def is_stale(data, commit_date):
+    upd = data.get("updated")
+    if isinstance(upd, datetime.datetime):
+        upd = upd.date()
+    if not isinstance(upd, datetime.date) or commit_date is None:
+        return False
+    return (commit_date - upd).days > STALE_DAYS
+
+
+# --- 等寬表格(CJK 全形字算 2 格,不然中文欄位會歪) ---
+
+def disp_width(s):
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
+               for c in s)
+
+
+def pad(s, width):
+    return s + " " * (width - disp_width(s))
+
+
+def print_table(headers, rows):
+    widths = [disp_width(h) for h in headers]
+    for r in rows:
+        for i, cell in enumerate(r):
+            widths[i] = max(widths[i], disp_width(cell))
+
+    def emit(cells):
+        print("  ".join(pad(cells[i], widths[i])
+                        for i in range(len(cells))).rstrip())
+
+    emit(headers)
+    emit(["-" * w for w in widths])
+    for r in rows:
+        emit(r)
+
+
+def paid_summary(data):
+    parts = []
+    for p in data.get("paid", []):
+        name = str(p.get("service", "?"))
+        if str(p.get("billing", "")) != "free-tier":
+            name = "$" + name
+        parts.append(name)
+    return ", ".join(parts)
+
+
+def cmd_list(root):
+    rows = []
+    for d in find_projects(root):
+        data, err = load_manifest(d)
+        cdate = last_commit_date(d)
+        cstr = cdate.isoformat() if cdate else "-"
+        if err:
+            warn(f"{d.name}/PROJECT.toml 解析失敗: {err}")
+            rows.append([d.name, "manifest 損壞", "", "", cstr])
+        elif data is None:
+            rows.append([d.name, "未登記", "", "", cstr])
+        else:
+            status = str(data.get("status", "?"))
+            if is_stale(data, cdate):
+                status += " ⚠"
+            rows.append([d.name, status, str(data.get("status_note", "")),
+                         paid_summary(data), cstr])
+    print_table(["專案", "狀態", "說明", "付費服務", "最後 commit"], rows)
+    return 0
+
+
+def cmd_detail(root, name):
+    d = root / name
+    if not d.is_dir():
+        warn(f"找不到專案目錄 {d}")
+        return 1
+    data, err = load_manifest(d)
+    if err:
+        warn(f"{name}/PROJECT.toml 解析失敗: {err}")
+        return 1
+    if data is None:
+        warn(f"{name} 沒有 PROJECT.toml(未登記)")
+        return 1
+    cdate = last_commit_date(d)
+    stale = "  ⚠ manifest 可能過時" if is_stale(data, cdate) else ""
+    print(f"{data.get('name', name)}  [{data.get('status', '?')}]{stale}")
+    if data.get("status_note"):
+        print(data["status_note"])
+    print(f"updated: {data.get('updated', '?')}   "
+          f"最後 commit: {cdate.isoformat() if cdate else '-'}")
+    if data.get("commands"):
+        print("\n指令:")
+        for k, v in data["commands"].items():
+            print(f"  {k}:")
+            print(f"    {v}")
+    paid = data.get("paid", [])
+    if paid:
+        print("\n付費服務:")
+        for p in paid:
+            print(f"  - {p.get('service', '?')} | {p.get('billing', '?')}"
+                  f" | {p.get('monthly_est', '?')}")
+            if p.get("cancel"):
+                print(f"    取消方式: {p['cancel']}")
+    else:
+        print("\n付費服務: 無")
+    return 0
+
+
+def cmd_money(root):
+    warn("money 尚未實作")   # Task 5 取代
+    return 1
+
+
+def cmd_remote(root):
+    warn("remote 尚未實作")  # Task 5 取代
+    return 1
+
+
+def main(argv):
+    root = Path(os.environ.get("PROJ_ROOT", str(Path.home())))
+    if len(argv) <= 1:
+        return cmd_list(root)
+    arg = argv[1]
+    if arg in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    if arg == "money":
+        return cmd_money(root)
+    if arg == "remote":
+        return cmd_remote(root)
+    return cmd_detail(root, arg)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
