@@ -102,6 +102,7 @@ proj              # 全專案:狀態/說明/燒錢服務/最後 commit(過時標
 proj yt-summary   # 單一專案:起始指令直接可複製
 proj money        # 只看誰在花錢:服務/計費/月費估計/取消方式
 proj remote       # gh repo list 對照本機,列出還沒 clone 的
+proj html         # 產出視覺化 HTML dashboard,WSL 自動開瀏覽器(終端太窄看不下時)
 ```
 
 維護不靠記性:kit-owned rule(`project-manifest.md`)會讓每個專案的

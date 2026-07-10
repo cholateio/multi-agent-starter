@@ -6,11 +6,13 @@
   proj <name>       單一專案完整資訊(起始指令可直接複製)
   proj money        只列有付費服務的專案,每服務一列
   proj remote       gh repo list 對照本機,列出未 clone 的 repo
+  proj html         產出視覺化 HTML dashboard,WSL 自動開瀏覽器
 
 掃描根目錄: $PROJ_ROOT(預設 $HOME)第一層子目錄中,有 .git 或
 PROJECT.toml 者視為專案。Python 3.11+,零第三方依賴。
 """
 import datetime
+import html
 import os
 import shutil
 import subprocess
@@ -214,6 +216,237 @@ def cmd_remote(root):
     return 0
 
 
+# --- proj html: 自包含 HTML dashboard ---
+
+STATUS_ORDER = ["active", "mvp", "done", "paused", "abandoned"]
+
+_CSS = """
+:root{--bg:#f7f7f6;--surf:#fff;--ink:#1a1a1a;--mut:#6b6b6b;--line:#e3e3e0;--warn-i:#b45309}
+@media(prefers-color-scheme:dark){:root{--bg:#161615;--surf:#1f1f1e;--ink:#e8e8e6;--mut:#9a9a97;--line:#333330;--warn-i:#fbbf24}}
+*{box-sizing:border-box}
+body{padding:24px;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Noto Sans TC",sans-serif;max-width:1200px;margin:0 auto}
+h1{font-size:20px;font-weight:600;margin:0 0 20px}
+h2{font-size:15px;font-weight:600;margin:32px 0 12px}
+.kpis{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:28px}
+.kpi{display:flex;flex-direction:column;gap:2px;padding:12px 16px;background:var(--surf);border:1px solid var(--line);border-radius:10px;font:inherit;color:inherit;text-align:left}
+button.kpi{cursor:pointer}
+.kpi-n{font-size:22px;font-weight:600}
+.kpi-l{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:5px}
+.kpi.active{outline:2px solid var(--ink)}
+.kpi-warn .kpi-n{color:var(--warn-i)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.card{background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.card header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.card h3{font-size:15px;font-weight:600;margin:0;flex:1;font-family:ui-monospace,monospace}
+.commit{font-size:11px;color:var(--mut)}
+.badge{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--s-b);color:var(--s-i)}
+.dot{width:8px;height:8px;border-radius:999px;display:inline-block;background:var(--s-i)}
+[data-status="active"]{--s-i:#15803d;--s-b:#dcfce7}
+[data-status="mvp"]{--s-i:#1d4ed8;--s-b:#dbeafe}
+[data-status="done"]{--s-i:#525252;--s-b:#ececec}
+[data-status="paused"]{--s-i:#b45309;--s-b:#fef3c7}
+[data-status="abandoned"]{--s-i:#737373;--s-b:#f0f0f0}
+[data-status="unregistered"]{--s-i:#737373;--s-b:#f0f0f0}
+[data-status="broken"]{--s-i:#b91c1c;--s-b:#fee2e2}
+@media(prefers-color-scheme:dark){
+[data-status="active"]{--s-i:#4ade80;--s-b:#0f2f1a}
+[data-status="mvp"]{--s-i:#60a5fa;--s-b:#14243d}
+[data-status="done"]{--s-i:#a3a3a3;--s-b:#2c2c2a}
+[data-status="paused"]{--s-i:#fbbf24;--s-b:#3a2c07}
+[data-status="abandoned"]{--s-i:#8a8a87;--s-b:#262624}
+[data-status="unregistered"]{--s-i:#8a8a87;--s-b:#262624}
+[data-status="broken"]{--s-i:#f87171;--s-b:#3a0f0f}
+}
+.stale{color:var(--warn-i)}
+.note{margin:0 0 10px;color:var(--mut);font-size:13px}
+.cmds{list-style:none;padding:0;margin:0 0 10px;display:flex;flex-direction:column;gap:4px}
+.cmds li{display:flex;align-items:center;gap:6px;font-size:12px}
+.cmd-k{color:var(--mut);min-width:56px}
+.cmds code{background:var(--bg);padding:2px 6px;border-radius:5px;font-family:ui-monospace,monospace;flex:1;overflow-x:auto;white-space:nowrap}
+.copy{border:1px solid var(--line);background:var(--surf);color:var(--mut);border-radius:5px;cursor:pointer;padding:1px 6px}
+.paid-row{display:flex;flex-wrap:wrap;gap:5px}
+.paid{font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
+.paid-usage{color:var(--warn-i);border-color:var(--warn-i)}
+.paid-free{color:var(--mut)}
+.grp{font-weight:600;font-size:13px;margin:16px 0 6px}
+.grp.warn{color:var(--warn-i)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:500}
+.money-usage td:first-child,.money-usage td:nth-child(2){color:var(--warn-i)}
+details{margin-top:10px}summary{cursor:pointer;color:var(--mut);font-size:13px}
+"""
+
+_JS = """
+document.querySelectorAll('.kpi-status').forEach(function(b){b.addEventListener('click',function(){var f=b.dataset.filter;var on=b.classList.toggle('active');document.querySelectorAll('.kpi-status').forEach(function(x){if(x!==b)x.classList.remove('active')});document.querySelectorAll('.card').forEach(function(c){c.style.display=(!on||c.dataset.status===f)?'':'none'})})});
+document.querySelectorAll('.copy').forEach(function(b){b.addEventListener('click',function(){if(navigator.clipboard)navigator.clipboard.writeText(b.dataset.cmd);var t=b.textContent;b.textContent='OK';setTimeout(function(){b.textContent=t},900)})});
+"""
+
+
+def _e(s):
+    return html.escape(str(s), quote=True)
+
+
+def _collect(root):
+    rows = []
+    for d in find_projects(root):
+        data, err = load_manifest(d)
+        cdate = last_commit_date(d)
+        cstr = cdate.isoformat() if cdate else "-"
+        if err:
+            rows.append({"name": d.name, "status": "manifest 損壞", "skey": "broken",
+                         "note": "", "commands": {}, "paid": [], "commit": cstr, "stale": False})
+        elif data is None:
+            rows.append({"name": d.name, "status": "未登記", "skey": "unregistered",
+                         "note": "", "commands": {}, "paid": [], "commit": cstr, "stale": False})
+        else:
+            st = str(data.get("status", "?"))
+            rows.append({
+                "name": str(data.get("name", d.name)),
+                "status": st,
+                "skey": st if st in STATUS_ORDER else "unregistered",
+                "note": str(data.get("status_note", "")),
+                "commands": {str(k): str(v) for k, v in (data.get("commands") or {}).items()},
+                "paid": data.get("paid", []),
+                "commit": cstr,
+                "stale": is_stale(data, cdate),
+            })
+    return rows
+
+
+def _paid_bucket(billing):
+    if billing in ("月費", "年費"):
+        return "fixed"
+    if billing == "free-tier":
+        return "free"
+    return "usage"
+
+
+def _render_kpi(rows):
+    counts = {}
+    for r in rows:
+        counts[r["skey"]] = counts.get(r["skey"], 0) + 1
+    fixed = usage = 0
+    for r in rows:
+        for p in r["paid"]:
+            b = _paid_bucket(str(p.get("billing", "")))
+            if b == "fixed":
+                fixed += 1
+            elif b == "usage":
+                usage += 1
+    tiles = [f'<div class="kpi"><span class="kpi-n">{len(rows)}</span><span class="kpi-l">專案</span></div>']
+    for st in STATUS_ORDER:
+        n = counts.get(st)
+        if n:
+            tiles.append(
+                f'<button class="kpi kpi-status" data-filter="{_e(st)}">'
+                f'<span class="kpi-n">{n}</span>'
+                f'<span class="kpi-l"><span class="dot" data-status="{_e(st)}"></span>{_e(st)}</span></button>')
+    tiles.append(f'<div class="kpi"><span class="kpi-n">{fixed}</span><span class="kpi-l">固定月費項</span></div>')
+    tiles.append(f'<div class="kpi kpi-warn"><span class="kpi-n">{usage}</span><span class="kpi-l">按用量待盯</span></div>')
+    return '<section class="kpis">' + "".join(tiles) + '</section>'
+
+
+def _render_cards(rows):
+    cards = []
+    for r in rows:
+        badge = f'<span class="badge" data-status="{_e(r["skey"])}">{_e(r["status"])}</span>'
+        stale = '<span class="stale" title="manifest 可能過時">⚠</span>' if r["stale"] else ''
+        note = f'<p class="note">{_e(r["note"])}</p>' if r["note"] else ''
+        cmds = ''
+        if r["commands"]:
+            items = "".join(
+                f'<li><span class="cmd-k">{_e(k)}</span><code>{_e(v)}</code>'
+                f'<button class="copy" data-cmd="{_e(v)}" title="複製">C</button></li>'
+                for k, v in r["commands"].items())
+            cmds = f'<ul class="cmds">{items}</ul>'
+        paid = ''
+        if r["paid"]:
+            tags = "".join(
+                f'<span class="paid paid-{_paid_bucket(str(p.get("billing", "")))}">'
+                f'{_e(p.get("service", "?"))}</span>'
+                for p in r["paid"])
+            paid = f'<div class="paid-row">{tags}</div>'
+        cards.append(
+            f'<article class="card" data-status="{_e(r["skey"])}">'
+            f'<header>{badge}{stale}<h3>{_e(r["name"])}</h3>'
+            f'<span class="commit">{_e(r["commit"])}</span></header>'
+            f'{note}{cmds}{paid}</article>')
+    return '<section class="cards">' + "".join(cards) + '</section>'
+
+
+def _render_money(rows):
+    fixed, usage, free = [], [], []
+    for r in rows:
+        for p in r["paid"]:
+            entry = (r["name"], p)
+            b = _paid_bucket(str(p.get("billing", "")))
+            (fixed if b == "fixed" else free if b == "free" else usage).append(entry)
+    if not (fixed or usage or free):
+        return ''
+
+    def table(items, cls=""):
+        body = "".join(
+            f'<tr><td>{_e(name)}</td><td>{_e(p.get("service", "?"))}</td>'
+            f'<td>{_e(p.get("billing", "?"))}</td><td>{_e(p.get("monthly_est", "?"))}</td>'
+            f'<td>{_e(p.get("cancel", ""))}</td></tr>'
+            for name, p in items)
+        return (f'<table class="{cls}"><thead><tr><th>專案</th><th>服務</th><th>計費</th>'
+                f'<th>月費估計</th><th>取消方式</th></tr></thead><tbody>{body}</tbody></table>')
+
+    parts = ['<h2>花錢總覽</h2>']
+    if fixed:
+        parts.append('<p class="grp">固定月費 / 年費</p>' + table(fixed))
+    if usage:
+        parts.append('<p class="grp warn">按用量待盯</p>' + table(usage, "money-usage"))
+    if free:
+        parts.append(f'<details><summary>free-tier（$0，{len(free)} 項）</summary>'
+                     f'{table(free)}</details>')
+    return '<section class="money">' + "".join(parts) + '</section>'
+
+
+def _render_html(rows):
+    return (
+        '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<title>proj dashboard</title><style>' + _CSS + '</style></head><body>'
+        '<h1>專案總覽</h1>'
+        + _render_kpi(rows) + _render_cards(rows) + _render_money(rows)
+        + '<script>' + _JS + '</script></body></html>')
+
+
+def _open_in_browser(path):
+    print(f"dashboard: {path}", file=sys.stderr)
+    exe = shutil.which("explorer.exe")
+    if exe is None:
+        return
+    try:
+        r = subprocess.run(["wslpath", "-w", str(path)],
+                           capture_output=True, text=True, timeout=5)
+        win = r.stdout.strip() if r.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        win = ""
+    if not win:
+        return
+    try:
+        subprocess.run([exe, win], timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def cmd_html(root):
+    rows = _collect(root)
+    out = Path.home() / ".local" / "share" / "proj" / "dashboard.html"
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(_render_html(rows), encoding="utf-8")
+    except OSError as e:
+        warn(f"無法寫入 {out}: {e}")
+        return 1
+    _open_in_browser(out)
+    return 0
+
+
 def main(argv):
     root = Path(os.environ.get("PROJ_ROOT", str(Path.home())))
     if len(argv) <= 1:
@@ -226,6 +459,8 @@ def main(argv):
         return cmd_money(root)
     if arg == "remote":
         return cmd_remote(root)
+    if arg == "html":
+        return cmd_html(root)
     return cmd_detail(root, arg)
 
 
