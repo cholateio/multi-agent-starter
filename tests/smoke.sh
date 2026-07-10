@@ -558,6 +558,44 @@ fi
 scenario_end "bonus: rules growth budget"
 
 # ===========================================================================
+# scenario pm1 - PROJECT.toml: install 鋪骨架 + no-clobber (v4.4)
+# ===========================================================================
+scenario_start
+PM1="$WORK/pm1"
+init_run "$GIT_ID_CFG" nomise "$PM1"
+assert_file_exists "pm1: PROJECT.toml deployed on install" "$PM1/PROJECT.toml"
+assert_contains "pm1: PROJECT.toml is placeholder skeleton" "$(cat "$PM1/PROJECT.toml" 2>/dev/null)" "[專案名]"
+assert_contains "pm1: bootstrap prompt mentions PROJECT.toml" "$OUT" "PROJECT.toml"
+
+PM1B="$WORK/pm1b"
+mkdir -p "$PM1B"
+printf 'name = "mine"\nstatus = "done"\n' > "$PM1B/PROJECT.toml"
+init_run "$GIT_ID_CFG" nomise "$PM1B"
+assert_eq "pm1: existing PROJECT.toml untouched" "$(cat "$PM1B/PROJECT.toml")" 'name = "mine"
+status = "done"'
+assert_contains "pm1: skipped list names PROJECT.toml" "$OUT" "  ~ PROJECT.toml"
+scenario_end "pm1: PROJECT.toml install"
+
+# ===========================================================================
+# scenario pm2 - PROJECT.toml: --update deploy-if-absent (v4.4)
+# ===========================================================================
+scenario_start
+PM2="$WORK/pm2"
+init_run "$GIT_ID_CFG" nomise "$PM2"
+rm "$PM2/PROJECT.toml"   # 模擬 pre-v4.4 的既有 kit 專案
+init_run "$GIT_ID_CFG" nomise "$PM2" --update
+assert_eq "pm2: update exit 0" "$CODE" "0"
+assert_file_exists "pm2: --update deploys missing PROJECT.toml" "$PM2/PROJECT.toml"
+assert_contains "pm2: updated list names PROJECT.toml" "$OUT" "  + PROJECT.toml"
+
+printf 'name = "filled"\nstatus = "mvp"\n' > "$PM2/PROJECT.toml"
+CKSUM_PM="$(cksum "$PM2/PROJECT.toml")"
+init_run "$GIT_ID_CFG" nomise "$PM2" --update
+assert_eq "pm2: filled PROJECT.toml unchanged after update" "$(cksum "$PM2/PROJECT.toml")" "$CKSUM_PM"
+assert_not_contains "pm2: no updated-list entry when present" "$OUT" "  + PROJECT.toml"
+scenario_end "pm2: PROJECT.toml update deploy-if-absent"
+
+# ===========================================================================
 # bonus (cheap) - --existing was removed in v3.2, must fail with a hint
 # ===========================================================================
 scenario_start

@@ -291,6 +291,7 @@ fi
 # project templates : README / gitignore, renamed on the way in
 copy_as_no_clobber "templates/README.md" "README.md"
 copy_as_no_clobber "templates/gitignore" ".gitignore"
+copy_as_no_clobber "templates/PROJECT.toml" "PROJECT.toml"
 
 # docs/specs/ : spec-driven entry point (kit-workflow.md looks here)
 if [ -d "$TARGET/docs/specs" ]; then
@@ -377,9 +378,11 @@ echo "  then paste this bootstrap prompt:"
 if [ "$MODE" = "new" ]; then
   echo "    這個專案是 [一句話],stack 用 [語言/框架]。"
   echo "    請填好 CLAUDE.md 的 goal / stack / file layout(constraints 留空)和 README.md 的佔位符。"
+  echo "    並依專案現況填 PROJECT.toml(狀態、起始指令、付費的外部服務)。"
 else
   echo "    請先探索整個 repo,把架構、慣例、以及「不該碰的區域」寫進 CLAUDE.md,並填 README.md 的佔位符;"
-  echo "    若架構值得記錄,建 docs/ARCHITECTURE.md(大綱:分層、data flow、要改 X 先看 Y、歷史遺留)。"
+  echo "    若架構值得記錄,建 docs/ARCHITECTURE.md(大綱:分層、data flow、要改 X 先看 Y、歷史遺留);"
+  echo "    並依探索所得填 PROJECT.toml(狀態、起始指令、付費的外部服務)。"
   echo "    先不要改任何其他檔案。"
 fi
 if [ "$PROFILE" = "full" ]; then
