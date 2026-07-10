@@ -2,6 +2,12 @@
 
 > 踩坑記錄（格式見 kit-evolution 規則）。同一個坑踩第二次之前寫入。
 
+### 2026-07-10 `git add .claude` 會一併收進執行期狀態檔
+- Context: 機隊決定把 `.claude/` 從 gitignore 翻成 track（settings.json 的核可清單與 protected-paths 不可重建，不該只存在一顆硬碟上）
+- Error: `git add .claude` 在 kaf-observatory 收進 `.claude/scheduled_tasks.lock`——內容是 `{"sessionId":...,"pid":16304,"acquiredAt":...}`，5 月殘留的執行期鎖檔，pid 與 sessionId 對別台機器毫無意義
+- Solution: `git rm --cached` + gitignore 該檔；kit 的 `templates/gitignore` 補上 `.claude/settings.local.json` 與 `.claude/scheduled_tasks.lock` 兩行，讓新專案不再重踩
+- Rule: 把一個目錄整包納入版控前，先列出它的實際內容（`find <dir> -type f`）並逐檔問「這在另一台機器上還有意義嗎」——工具目錄裡混著設定、產物與執行期狀態，`git add <dir>` 不會替你分辨。
+
 ### 2026-07-10 review marker 只在 gate 走到 marker 檢查時才被消耗
 - Context: v4.3 hooks-smoke 加小改放行測項，cleanup 步驟順手寫了顆 marker 再跑 gate
 - Error: 該次 stop 的 porcelain 是乾淨的 → gate 走「無變更 → advance+exit」路徑，根本沒碰 marker 檢查；marker 殘留，被**下一個場景**吃掉，把 5 行的 auth.py 變更放行（h2r 假失敗，實為測試自己污染狀態）
