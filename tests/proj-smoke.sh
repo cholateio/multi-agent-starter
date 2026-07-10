@@ -90,6 +90,24 @@ assert_contains "detail: cancel instruction shown" "$OUT" "拿掉 .env 的 key"
 run no-such-proj
 assert_eq "detail: unknown project exits 1" "$CODE" "1"
 
+# --- proj money ---
+run money
+assert_eq "money: exit 0" "$CODE" "0"
+assert_contains "money: service row shown" "$OUT" "OpenAI API"
+assert_contains "money: monthly_est shown" "$OUT" "~\$3"
+assert_contains "money: cancel shown" "$OUT" "拿掉 .env 的 key"
+
+# --- proj remote: gh 缺席的降級路徑(比照 smoke.sh 的受控 PATH 手法) ---
+GHLESS="$WORK/ghless-bin"
+mkdir -p "$GHLESS"
+for t in python3 git sh; do
+  p="$(type -P "$t" 2>/dev/null || true)"
+  [ -n "$p" ] && ln -s "$p" "$GHLESS/$t"
+done
+OUT="$(env PATH="$GHLESS" PROJ_ROOT="$ROOT" "$PROJ" remote 2>&1)"; CODE=$?
+assert_eq "remote: exit 1 without gh" "$CODE" "1"
+assert_contains "remote: hint mentions gh CLI" "$OUT" "gh"
+
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1

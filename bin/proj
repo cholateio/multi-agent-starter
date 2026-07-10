@@ -173,13 +173,44 @@ def cmd_detail(root, name):
 
 
 def cmd_money(root):
-    warn("money 尚未實作")   # Task 5 取代
-    return 1
+    rows = []
+    for d in find_projects(root):
+        data, _ = load_manifest(d)
+        if not data:
+            continue
+        for p in data.get("paid", []):
+            rows.append([d.name, str(p.get("service", "?")),
+                         str(p.get("billing", "?")),
+                         str(p.get("monthly_est", "?")),
+                         str(p.get("cancel", ""))])
+    if not rows:
+        print("沒有登記任何付費服務。")
+        return 0
+    print_table(["專案", "服務", "計費", "月費估計", "取消方式"], rows)
+    return 0
 
 
 def cmd_remote(root):
-    warn("remote 尚未實作")  # Task 5 取代
-    return 1
+    if shutil.which("gh") is None:
+        warn("需要 gh CLI(安裝後 gh auth login)")
+        return 1
+    r = subprocess.run(
+        ["gh", "repo", "list", "--json", "name,updatedAt", "--limit", "200"],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        warn(f"gh repo list 失敗: {r.stderr.strip()}")
+        return 1
+    import json
+    repos = json.loads(r.stdout)
+    local = {d.name for d in find_projects(root)}
+    rows = [[x["name"], x.get("updatedAt", "")[:10]]
+            for x in sorted(repos, key=lambda x: x["name"])
+            if x["name"] not in local]
+    if not rows:
+        print("GitHub 上所有 repo 都已 clone。")
+        return 0
+    print_table(["未 clone 的 repo", "最後更新"], rows)
+    return 0
 
 
 def main(argv):
