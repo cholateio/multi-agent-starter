@@ -67,7 +67,7 @@ cd ~/projects/my-thing && claude
 
 `init.sh` 只複製安裝層、`git init` + 初始 commit、跑環境檢查,並在結尾印出一句
 **bootstrap prompt**——進 claude 後把它貼上去,AI 就會填好 `CLAUDE.md` /
-`README.md` 的佔位符。
+`README.md` / `PROJECT.toml` 的佔位符。
 
 **既有專案多一條黃金法則:先讓 AI 學會這個專案,再讓它動手。** init.sh 在既有
 模式下印出的第一句是叫 AI 做 onboarding(探索 repo、寫 constraints、**先不改任何
@@ -88,6 +88,24 @@ cd ~/projects/my-thing && claude
 ```bash
 ~/.multi-agent-kit/init.sh <dir> --update   # 覆蓋 kit-owned 檔、印遷移提示;settings.json 只印 diff 讓你自己合併
 ```
+
+## 專案總覽:proj(v4.4)
+
+每個專案根目錄有一份 `PROJECT.toml`(user-owned,init/--update 只鋪骨架、
+永不覆蓋):狀態、起始指令、付費外部服務。`bin/proj` 掃描 `$PROJ_ROOT`
+(預設 `$HOME`)彙總:
+
+```bash
+ln -s ~/.multi-agent-kit/bin/proj ~/.local/bin/proj   # 每台機器一次
+
+proj              # 全專案:狀態/說明/燒錢服務/最後 commit(過時標 ⚠)
+proj yt-summary   # 單一專案:起始指令直接可複製
+proj money        # 只看誰在花錢:服務/計費/月費估計/取消方式
+proj remote       # gh repo list 對照本機,列出還沒 clone 的
+```
+
+維護不靠記性:kit-owned rule(`project-manifest.md`)會讓每個專案的
+AI session 在狀態/指令/付費服務變動時順手更新 manifest。
 
 ## 日常使用
 
