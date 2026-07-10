@@ -37,6 +37,7 @@ status_note = "單影片可用;批次待做"
 updated = 2020-01-01
 
 [commands]
+dev = "pnpm dev"
 summary = "uv run good-proj <url>"
 
 [[paid]]
@@ -141,6 +142,8 @@ assert_contains "html: status value present" "$HTML" "mvp"
 assert_contains "html: paid service present" "$HTML" "OpenAI API"
 assert_contains "html: broken manifest flagged" "$HTML" "manifest 損壞"
 assert_contains "html: status_note split into list items" "$HTML" "<li>批次待做"
+assert_not_contains "html: generic framework command hidden" "$HTML" "pnpm dev"
+assert_contains "html: special command shown" "$HTML" "uv run good-proj"
 assert_not_contains "html: cmd code has no nowrap scroll" "$HTML" "white-space:nowrap"
 assert_contains "html: path printed on non-WSL" "$OUT" "dashboard.html"
 # 自包含:零外部引用
