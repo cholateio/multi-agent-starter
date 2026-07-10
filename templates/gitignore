@@ -23,3 +23,11 @@ __pycache__/
 
 # Logs
 *.log
+
+# Claude Code runtime state. `.claude/` itself IS tracked on purpose:
+# kit-owned files are regenerable via `init.sh --update`, but settings.json
+# (accumulated permission approvals) and protected-paths (project no-touch
+# zones) are project truth that nothing can rebuild. Only machine-local
+# state is excluded.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
