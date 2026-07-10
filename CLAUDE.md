@@ -1,6 +1,6 @@
 # [PROJECT NAME]
 
-> CLAUDE.md（kit v4.2）。本檔只放「這個專案是什麼」——工作流、派工、
+> CLAUDE.md（kit v4.3）。本檔只放「這個專案是什麼」——工作流、派工、
 > review 規則由 `.claude/rules/` 自動載入（kit-owned，別在專案裡改）。
 > 首次使用：跑 `claude`，貼上 `init.sh` 結尾印出的 bootstrap prompt，
 > 讓 AI 幫你把 [佔位符] 填掉。

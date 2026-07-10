@@ -252,7 +252,7 @@ kit-workflow.md 同步瘦身成 landmines-only（~60 行）：留下的是模型
    格式與範例、constraints 要求與 protected-paths 同步執法、加檔案路由
    表（何時讀哪份文件）。
 
-### v4.1（當前）：判斷層採納——fable-soul 蒸餾
+### v4.1：判斷層採納——fable-soul 蒸餾
 
 v4.0 防的是**結構性失敗**（context 經濟、迷航、重試螺旋、marker 造假）；
 v4.1 補**認知性失敗**（假完成措辭、過期驗證、湊數 findings、hedge 話術）。
@@ -283,6 +283,30 @@ Fable 判斷蒸餾——但只收 kit 未覆蓋的機制，不照搬。核心產
    外部收據與本 kit 生產史（詳見 tests/evals.md 採納註記）。
 5. **`docs/instruction-audit.md`**：例行規則審計（每 minor 版本前跑）。
    prose 有四層之後，「兩條規則打架」沒有物理偵測手段，只能例行審計。
+
+### v4.2：verification-signals 領域層
+
+`.claude/docs/verification-signals.md`（read-on-demand，經 CLAUDE.md
+路由表觸達）：五個「迴圈裡缺便宜驗證信號」的高風險領域（UI 截圖、
+schema 讀取路徑、bug 連環卡交接、SaaS 成本卡、業務邏輯可觸達性）——
+kit-judgment 通用證據紀律在領域層的實例化。
+
+### v4.3（當前）：成本感知層
+
+痛點（2026-07-07 真實 session）：調適期小改也被 size-blind Stop gate
+逼跑跨模型 review；模型/effort 配置只在 user 主動要求時出現。三個產出：
+
+1. **Stop gate 小改自動放行**（verify-final-review.sh）：量測「距上次
+   認證 tree 的累積 numstat」，≤50 行 / ≤2 業務檔 / 無敏感或 protected
+   路徑 → 放行但**不推進 baseline**——小改累積，破檻那次 review 批次
+   涵蓋全部（防切香腸）。無 baseline / binary 一律 fail-closed。門檻
+   是 git 實測，模型話術無效——延續「能用 hook 擋的不靠 rules」判準。
+2. **主導模型/effort 配置提案**（kit-workflow.md）：feature 級以上
+   計畫簽核必附各 phase 主導模型 + effort + 一句理由 + 卡關升級條件；
+   phase 交界一行 /model 提醒。純建議、user 執行（scenario 9 RED-GREEN
+   收據見 tests/evals.md）。
+3. **classify-task 描述語境濾網**：遮罩「頻率/進行式標記 + 觸發詞」
+   再比對——「一直在走完整流程」是描述不是指令（2026-07-10 實際誤觸）。
 
 ## 三、角色設計
 

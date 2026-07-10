@@ -44,11 +44,18 @@ smoke test 把關(≤20KB)。
   跳過的檢查、發明的路徑/數據、被弱化的斷言)。
 - **classify-task 只認明確修飾語**——移除關鍵字啟發式(button→small、
   refactor→large 判斷力不如模型本身)。只認祈使句 `直接做`/`完整流程`,
-  其餘一律交給模型自判。**harness 不搶模型比它強的判斷**。
+  其餘一律交給模型自判。**harness 不搶模型比它強的判斷**。v4.3 加
+  **描述語境濾網**:先遮罩「頻率/進行式標記 + 觸發詞」(一直在走完整
+  流程、keeps running the full review)再比對——描述工作流的句子不是
+  指令(2026-07-10 實際誤觸收據見 tests/evals.md)。
 - **Workflow sizing 反偏壓**(`kit-workflow.md`)——給小任務可操作判準
   (≤2 檔、無新依賴、不碰 schema/auth/payment/constraints → 直接做),
   並依 superpowers 自己承認的優先權(專案指示 > skills)明文解除小任務的
   brainstorming/TDD 強制觸發。防的是強觸發規則把瑣事拉進全套流程。
+- **主導模型/effort 配置提案**(`kit-workflow.md`,v4.3)——feature 級
+  以上計畫送簽核時必附各 phase「主導模型 + effort + 一句理由 + 卡關
+  升級條件」,phase 交界一行提醒「要切請 /model」。純建議、user 執行
+  ——讓成本可見,把「哪段可以用便宜檔」的決策交回 user 手上。
 - **規則變更紀律**(`kit-evolution.md`)——改 kit 規則前先查覆蓋(已有條目
   = 規則被無視,不是缺席)、要 RED-GREEN 收據(拿不出失敗證據 = 不知道
   在修什麼,不加)、逐字記藉口(paraphrase 會丟觸發詞)、rules/ 20KB 總量
@@ -110,7 +117,11 @@ API 呼叫都重複攜帶,越肥 → compact 越早 → 迷航越早。這層專
   修好三個洞:看得到 commit(baseline = session 起點 HEAD sha + working-tree
   hash,gate 聯集「未 commit + baseline 以來的 commits」)、審過用 content
   hash 記住不重複煩你、baseline 損毀則 **fail-closed**(退化方向是「多審」
-  不是「漏審」)。
+  不是「漏審」)。v4.3 加**小改自動放行**:距上次認證的**累積** diff
+  (git numstat 實測,模型話術無效)≤50 行、≤2 個業務檔、未碰敏感 stem
+  (auth/payment/migrat/…)或 protected-paths → 放行但**不推進 baseline**
+  ——小改持續累積,破檻那次 review 批次涵蓋全部(防切香腸);無 baseline
+  或 binary 一律 fail-closed 回到 size-blind block。
 - **Marker 證據化 = 逃生門加價**——v3.5 的 block 訊息**親手把 `touch <marker>`
   遞給模型**,假性完成的最短路徑是 harness 自己鋪的。v4.0 起 marker 第一行
   必須是 `reviewed-by=` 證據行(由 `/kit-review` 真跑完 review 後寫入)、
