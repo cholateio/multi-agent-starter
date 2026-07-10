@@ -33,7 +33,7 @@ mkdir -p "$ROOT/good-proj" "$ROOT/bare-proj/.git" "$ROOT/broken-proj" "$ROOT/.hi
 cat > "$ROOT/good-proj/PROJECT.toml" <<'EOF'
 name = "good-proj"
 status = "mvp"
-status_note = "單影片可用"
+status_note = "單影片可用;批次待做"
 updated = 2020-01-01
 
 [commands]
@@ -140,6 +140,8 @@ assert_contains "html: project name present" "$HTML" "good-proj"
 assert_contains "html: status value present" "$HTML" "mvp"
 assert_contains "html: paid service present" "$HTML" "OpenAI API"
 assert_contains "html: broken manifest flagged" "$HTML" "manifest 損壞"
+assert_contains "html: status_note split into list items" "$HTML" "<li>批次待做"
+assert_not_contains "html: cmd code has no nowrap scroll" "$HTML" "white-space:nowrap"
 assert_contains "html: path printed on non-WSL" "$OUT" "dashboard.html"
 # 自包含:零外部引用
 assert_not_contains "html: no external http" "$HTML" "http://"

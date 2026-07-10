@@ -259,10 +259,12 @@ button.kpi{cursor:pointer}
 }
 .stale{color:var(--warn-i)}
 .note{margin:0 0 10px;color:var(--mut);font-size:13px}
+.note-list{margin:0 0 10px;padding-left:18px;color:var(--mut);font-size:13px}
+.note-list li{margin:2px 0}
 .cmds{list-style:none;padding:0;margin:0 0 10px;display:flex;flex-direction:column;gap:4px}
-.cmds li{display:flex;align-items:center;gap:6px;font-size:12px}
-.cmd-k{color:var(--mut);min-width:56px}
-.cmds code{background:var(--bg);padding:2px 6px;border-radius:5px;font-family:ui-monospace,monospace;flex:1;overflow-x:auto;white-space:nowrap}
+.cmds li{display:flex;align-items:flex-start;gap:6px;font-size:12px}
+.cmd-k{color:var(--mut);min-width:56px;padding-top:3px}
+.cmds code{background:var(--bg);padding:2px 6px;border-radius:5px;font-family:ui-monospace,monospace;flex:1;white-space:pre-wrap;overflow-wrap:anywhere}
 .copy{border:1px solid var(--line);background:var(--surf);color:var(--mut);border-radius:5px;cursor:pointer;padding:1px 6px}
 .paid-row{display:flex;flex-wrap:wrap;gap:5px}
 .paid{font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
@@ -347,12 +349,22 @@ def _render_kpi(rows):
     return '<section class="kpis">' + "".join(tiles) + '</section>'
 
 
+def _render_note(note):
+    if not note:
+        return ''
+    parts = [s.strip() for s in note.replace("；", ";").split(";") if s.strip()]
+    if len(parts) <= 1:
+        return f'<p class="note">{_e(note)}</p>'
+    items = "".join(f'<li>{_e(p)}</li>' for p in parts)
+    return f'<ul class="note-list">{items}</ul>'
+
+
 def _render_cards(rows):
     cards = []
     for r in rows:
         badge = f'<span class="badge" data-status="{_e(r["skey"])}">{_e(r["status"])}</span>'
         stale = '<span class="stale" title="manifest 可能過時">⚠</span>' if r["stale"] else ''
-        note = f'<p class="note">{_e(r["note"])}</p>' if r["note"] else ''
+        note = _render_note(r["note"])
         cmds = ''
         if r["commands"]:
             items = "".join(
