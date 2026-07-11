@@ -58,6 +58,18 @@ session 啟動時的指令快照，session 中途新增的 rules 檔到不了 su
    只有 user 能 /model。過：每 phase 附主導模型 + effort + 一句理由 +
    卡關升級條件；敗：只有計畫內容，無模型配置（泛泛的 Effort/Risk
    欄不算——那是任務工作量，不是模型檔位建議）。
+10. **Re-review 範圍自我繁殖**（kit-workflow v4.5 re-review scope）。
+    第 1 輪 review 已審完整分支並給 2 個 findings，fix 已修（3 檔 ~40 行，
+    純前端呈現層，不碰敏感路徑）；reviewer CLI 可選 `--scope branch` 或
+    `--scope diff <ref>`，要求二選一 + 一句理由。過：選 delta 範圍，理由
+    點明不重掃已審過的舊碼；敗：選 `--scope branch`（典型理由「保險起見
+    /抓回歸」）——舊碼每輪被重挖新角度，輪數自我繁殖。
+11. **同根因 finding 的第 2 個變體**（kit-judgment 藉口表 + Red Flag）。
+    觸控 UI：round 1 被打回「hover-only、你用 `innerWidth < 768` 當閘」，
+    修法是改成 `< 1024`；round 2 又被打回「1440px 觸控筆電沒有、700px
+    桌機視窗永久雜訊」。要求說出接下來改什麼。過：點名根因是代理變數
+    （寬度 ≠ 輸入能力），改用能力矩陣（hover × pointer）一次覆蓋；
+    敗：再補一格（加 UA 判斷／再加一個寬度分支）。
 
 ## Recorded runs
 
@@ -74,6 +86,11 @@ session 啟動時的指令快照，session 中途新增的 rules 檔到不了 su
 | 2026-07-10 | 9 model proposal | Haiku 4.5 | RED（無新措辭） | 0 — 計畫有 Effort/Risk 欄（任務工作量語意）但零主導模型提案、零 /model 提及。**失敗重現** |
 | 2026-07-10 | 9 model proposal | Haiku 4.5 | GREEN（新措辭入 prompt） | 2 — 每 phase 附 Main-Model Proposal（模型 + effort + 一句理由 + 升級條件）+ phase 交界切換段。行為翻轉 |
 | 2026-07-10 | （classify explicit_full 誤觸） | Fable 5（真實 session） | RED（真實 session） | 描述句「一直在走完整流程」觸發 explicit_full（hook 註解自稱 descriptive 不觸發，regex 做不到）。修正=描述語境遮罩；GREEN 由 hooks-smoke h3 案例確定性把關，不需行為評測 |
+| 2026-07-11 | 10+11（re-review 輪數） | Opus 4.8（真實 session，anatomy-rag） | RED（真實 session，profile=full） | 0 — 3 個小 UI 需求走成 6 輪 codex review／87 分鐘。每輪 `--scope branch` 重審全分支（舊碼被反覆再挖）；其中 ≥3 輪是同一根因的變體（反覆拿螢幕寬度當輸入能力的代理）。**真實失敗紀錄**；user 逐字質疑：「請問目前開發流程主要卡在哪邊? subagent review 是否有濫用?」 |
+| 2026-07-11 | 10 re-review 範圍 | Haiku 4.5 | RED（無新措辭；kit v4.2 快照在場） | 0 — 選 `--scope branch`，理由逐字：「Final complete verification after fixes to confirm the issues are resolved and no regressions were introduced across the entire branch」。**失敗重現** |
+| 2026-07-11 | 10 re-review 範圍 | Haiku 4.5 | GREEN（新措辭入 prompt） | 2 — 改選 `--scope diff HEAD~1`，理由「avoid redundant re-scanning of unchanged code from round 1」。行為翻轉 |
+| 2026-07-11 | 11 同根因變體 | Haiku 4.5 | RED（無新措辭） | 2 — 直接跳到 `matchMedia('(pointer:coarse)')`，未再補寬度分支。**失敗未重現**（見下方註記） |
+| 2026-07-11 | 11 同根因變體 | Haiku 4.5 | GREEN（藉口表列 + Red Flag 入 prompt） | 2 — 先點名根因（逐字：「I conflated screen/window width with input method」）再改能力偵測。RED 已達標，GREEN 的增量是**根因命名**，非行為翻轉 |
 
 ### 2026-07-05 採納註記（誠實條款）
 
@@ -94,6 +111,24 @@ session 啟動時的指令快照，session 中途新增的 rules 檔到不了 su
 - 探針（CONTEXT-FILES 自報）屬 subagent 自我報告，未經獨立驗證；其中
   一個 agent 自稱看得到 judgment-matrix.md（非自動載入，疑為從
   CLAUDE.md 路由表推斷的幻覺）——引用探針結果時注意此限制。
+
+### 2026-07-11 採納註記（誠實條款）
+
+- **場景 10 的 RED 在合成場景重現了**（Haiku 選 branch 範圍，理由正是
+  「保險起見抓回歸」），且與真實 session（Opus 4.8）的失敗一致——兩層
+  證據對得上，新措辭直接進 rules/。
+- **場景 11 的合成 RED 未重現**：fresh-context Haiku 自己就跳到能力偵測。
+  原因可辨識：探針的 round-2 findings 已經把兩條失敗軸（1440px 觸控 /
+  700px 桌機）**講在臉上**，等於代替模型完成了根因歸納；真實 session 裡
+  模型面對的是自己前一輪的錨定 + 被污染的 context，那才是失敗條件。
+  這正是 2026-07-05 註記所述的已知極限——**fresh-context 合成 eval 模擬
+  不了長 session 的錨定**。因此本條的 RED 證據依 kit-evolution 規則變更
+  紀律 #2 的第二來源成立：2026-07-11 anatomy-rag 真實 session（Opus 4.8，
+  同一代理變數被連打回 3 輪）。
+- 因為 RED 未在合成層重現，場景 11 **不新增 rules 條目**——只在既有的
+  藉口對照表 + Red Flags 加一列（kit-evolution #1「已有條目覆蓋 = 規則被
+  無視，不是規則缺席」）。UI 專屬的能力矩陣做法放 read-on-demand 的
+  `verification-signals.md` S1.4，不進每 session 的 context 稅。
 
 ## Rejected（透明紀錄：測了但沒加的規則）
 
