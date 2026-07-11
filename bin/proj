@@ -253,11 +253,13 @@ button.kpi{cursor:pointer}
 .kpi-l{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:5px}
 .kpi.active{outline:2px solid var(--ink)}
 .kpi-warn .kpi-n{color:var(--warn-i)}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.card{background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
-.card header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.card h3{font-size:15px;font-weight:600;margin:0;flex:1;font-family:ui-monospace,monospace}
+.cards{display:flex;flex-direction:column;gap:12px}
+.card{display:flex;gap:20px;align-items:flex-start;background:var(--surf);border:1px solid var(--line);border-left:3px solid var(--s-i);border-radius:12px;padding:14px 18px}
+.c-head{flex:0 0 180px;display:flex;flex-direction:column;gap:4px}
+.c-badge{display:flex;align-items:center;gap:6px}
+.card h3{font-size:15px;font-weight:600;margin:0;font-family:ui-monospace,monospace;word-break:break-all}
 .commit{font-size:11px;color:var(--mut)}
+.c-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:9px}
 .badge{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--s-b);color:var(--s-i)}
 .dot{width:8px;height:8px;border-radius:999px;display:inline-block;background:var(--s-i)}
 [data-status="active"]{--s-i:#15803d;--s-b:#dcfce7}
@@ -277,13 +279,13 @@ button.kpi{cursor:pointer}
 [data-status="broken"]{--s-i:#f87171;--s-b:#3a0f0f}
 }
 .stale{color:var(--warn-i)}
-.note{margin:0 0 10px;color:var(--mut);font-size:13px}
-.note-list{margin:0 0 10px;padding-left:18px;color:var(--mut);font-size:13px}
+.note{margin:0;color:var(--mut);font-size:13px}
+.note-list{margin:0;padding-left:18px;color:var(--mut);font-size:13px}
 .note-list li{margin:2px 0}
-.cmds{list-style:none;padding:0;margin:0 0 10px;display:flex;flex-direction:column;gap:4px}
-.cmds li{display:flex;align-items:flex-start;gap:6px;font-size:12px}
-.cmd-k{color:var(--mut);min-width:56px;padding-top:3px}
-.cmds code{background:var(--bg);padding:2px 6px;border-radius:5px;font-family:ui-monospace,monospace;flex:1;white-space:pre-wrap;overflow-wrap:anywhere}
+.cmds{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:6px 14px}
+.cmds li{display:flex;align-items:baseline;gap:6px;font-size:12px;min-width:0}
+.cmd-k{color:var(--mut)}
+.cmds code{background:var(--bg);padding:2px 6px;border-radius:5px;font-family:ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 .copy{border:1px solid var(--line);background:var(--surf);color:var(--mut);border-radius:5px;cursor:pointer;padding:1px 6px}
 .paid-row{display:flex;flex-wrap:wrap;gap:5px}
 .paid{font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
@@ -296,6 +298,7 @@ th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);verti
 th{color:var(--mut);font-weight:500}
 .money-usage td:first-child,.money-usage td:nth-child(2){color:var(--warn-i)}
 details{margin-top:10px}summary{cursor:pointer;color:var(--mut);font-size:13px}
+@media(max-width:760px){.card{flex-direction:column;gap:10px}.c-head{flex:0 0 auto;flex-direction:row;align-items:center;flex-wrap:wrap}}
 """
 
 _JS = """
@@ -401,9 +404,10 @@ def _render_cards(rows):
             paid = f'<div class="paid-row">{tags}</div>'
         cards.append(
             f'<article class="card" data-status="{_e(r["skey"])}">'
-            f'<header>{badge}{stale}<h3>{_e(r["name"])}</h3>'
-            f'<span class="commit">{_e(r["commit"])}</span></header>'
-            f'{note}{cmds}{paid}</article>')
+            f'<div class="c-head"><div class="c-badge">{badge}{stale}</div>'
+            f'<h3>{_e(r["name"])}</h3>'
+            f'<span class="commit">{_e(r["commit"])}</span></div>'
+            f'<div class="c-body">{note}{cmds}{paid}</div></article>')
     return '<section class="cards">' + "".join(cards) + '</section>'
 
 
