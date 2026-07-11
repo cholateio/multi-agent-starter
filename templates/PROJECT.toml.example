@@ -6,8 +6,8 @@ status = "active"          # active | mvp | done | paused | abandoned
 status_note = "[一句話:現在做到哪、下一步是什麼]"
 updated = 2026-07-11       # 最後一次人工確認本檔內容的日期
 
-[commands]                 # key = 用途短名;value = 可直接複製執行的指令
-# dev = "pnpm dev"
+[commands]                 # 只收「用它」的指令(本專案工具/服務的啟動與操作,可直接複製執行)。
+                           # 不收「開發它」的指令(dev/build/test/deploy——package.json/Makefile 查得到)。
 # summary = "uv run yt-summary <youtube-url>"
 
 # 每個付費/可能付費的外部服務一節 [[paid]];完全沒有就整段刪掉
