@@ -83,13 +83,15 @@ review the spec itself (it is an external artifact; isolation applies).
   slice work to stay under it: sensitive paths (auth/payment/migration/
   protected-paths) are always size-blind.
 - **Re-review scope**: round 1 covers the whole change set; later rounds scope
-  to the fix delta plus the code the findings touched. Do NOT point the reviewer
-  at the whole branch every round — re-scanning already-reviewed, unchanged code
-  mines new angles out of old code and makes rounds breed rounds (receipt:
-  6 rounds on 3 small UI changes, 2026-07-11). It narrows what gets RE-read,
-  never what gets read: every line keeps its round-1 review, a fix wave that
-  redesigns the approach earns a fresh whole-set round, and sensitive paths
-  (auth/payment/migration/protected-paths) stay whole-set every round.
+  to the fix delta, whatever depends on what the fix changed (callers of every
+  touched function/type/interface — stale-green's front door), and the code the
+  findings touched. Do NOT point the reviewer at the whole branch every round —
+  re-scanning already-reviewed, unchanged code mines new angles out of old code
+  and makes rounds breed rounds (receipt: 6 rounds on 3 small UI changes,
+  2026-07-11). It narrows what gets RE-read, never what gets read: every line
+  keeps its round-1 review, a fix wave that redesigns the approach earns a fresh
+  whole-set round, and sensitive paths (auth/payment/migration/protected-paths)
+  stay whole-set every round.
 - **Phase-level review** during plan execution — always for: auth/authz/
   session, payment/billing/money, data migration/schema, and anything in
   the project CLAUDE.md "Project-specific constraints". Skip for docs,
