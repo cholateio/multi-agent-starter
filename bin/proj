@@ -403,20 +403,26 @@ def _render_money(rows):
     if not (fixed or usage or free):
         return ''
 
-    def table(items, cls=""):
-        body = "".join(
-            f'<tr><td>{_e(name)}</td><td>{_e(p.get("service", "?"))}</td>'
-            f'<td>{_e(p.get("billing", "?"))}</td><td>{_e(p.get("monthly_est", "?"))}</td>'
-            f'<td>{_e(p.get("cancel", ""))}</td></tr>'
-            for name, p in items)
-        return (f'<table class="{cls}"><thead><tr><th>專案</th><th>服務</th><th>計費</th>'
-                f'<th>月費估計</th><th>取消方式</th></tr></thead><tbody>{body}</tbody></table>')
+    def table(items, cls="", with_billing=True):
+        # 按用量組不渲染 計費/月費估計:計費恆為「按用量」(組標題已言明)、估計恆為 ?
+        def cells(name, p):
+            row = [_e(name), _e(p.get("service", "?"))]
+            if with_billing:
+                row += [_e(p.get("billing", "?")), _e(p.get("monthly_est", "?"))]
+            row.append(_e(p.get("cancel", "")))
+            return "".join(f'<td>{c}</td>' for c in row)
+        heads = ["專案", "服務"] + (["計費", "月費估計"] if with_billing else []) + ["取消方式"]
+        body = "".join(f'<tr>{cells(name, p)}</tr>' for name, p in items)
+        return (f'<table class="{cls}"><thead><tr>'
+                + "".join(f'<th>{h}</th>' for h in heads)
+                + f'</tr></thead><tbody>{body}</tbody></table>')
 
     parts = ['<h2>花錢總覽</h2>']
     if fixed:
         parts.append('<p class="grp">固定月費 / 年費</p>' + table(fixed))
     if usage:
-        parts.append('<p class="grp warn">按用量待盯</p>' + table(usage, "money-usage"))
+        parts.append('<p class="grp warn">按用量待盯</p>'
+                     + table(usage, "money-usage", with_billing=False))
     if free:
         parts.append(f'<details><summary>free-tier（$0，{len(free)} 項）</summary>'
                      f'{table(free)}</details>')

@@ -154,6 +154,9 @@ assert_not_contains "html: no external http" "$HTML" "http://"
 assert_not_contains "html: no external https" "$HTML" "https://"
 assert_not_contains "html: no external src=" "$HTML" "src="
 assert_not_contains "html: no external stylesheet" "$HTML" "<link"
+# 按用量待盯表:計費/月費估計兩欄為零資訊(組標題已言明、估計恆為?),不渲染
+assert_not_contains "html: usage table has no billing cell" "$HTML" "<td>按用量</td>"
+assert_not_contains "html: usage table has no monthly_est cell" "$HTML" "<td>~\$3</td>"
 # HTML 轉義:xss-proj 的 <script> 不得原樣注入
 assert_not_contains "html: user script not raw" "$HTML" "<script>alert(1)"
 assert_contains "html: user script escaped" "$HTML" "&lt;script&gt;alert(1)"
