@@ -220,25 +220,6 @@ def cmd_remote(root):
 
 STATUS_ORDER = ["active", "mvp", "done", "paused", "abandoned"]
 
-# dashboard 只顯自訂啟動指令:key 是框架通用名、且 value 是純框架呼叫
-# (無下列自訂特徵)者視為通用,濾掉。proj <name> 終端詳情不受此影響,仍顯全部。
-GENERIC_CMD_KEYS = {"dev", "build", "test", "lint", "start", "sync",
-                    "typecheck", "check", "stats", "preview", "format", "fmt",
-                    "serve", "clean", "install", "watch", "coverage", "tsc",
-                    "e2e", "unit", "setup"}
-_CUSTOM_CMD_MARKERS = ("<", ".mjs", ".py", ".sh", ".js", ".ts", "&&", "|", ";", " -m ")
-
-
-def _special_commands(commands):
-    out = {}
-    for k, v in commands.items():
-        v = str(v)
-        generic = (k.lower() in GENERIC_CMD_KEYS
-                   and not any(m in v for m in _CUSTOM_CMD_MARKERS))
-        if not generic:
-            out[k] = v
-    return out
-
 _CSS = """
 :root{--bg:#f7f7f6;--surf:#fff;--ink:#1a1a1a;--mut:#6b6b6b;--line:#e3e3e0;--warn-i:#b45309}
 @media(prefers-color-scheme:dark){:root{--bg:#161615;--surf:#1f1f1e;--ink:#e8e8e6;--mut:#9a9a97;--line:#333330;--warn-i:#fbbf24}}
@@ -387,13 +368,14 @@ def _render_cards(rows):
         badge = f'<span class="badge" data-status="{_e(r["skey"])}">{_e(r["status"])}</span>'
         stale = '<span class="stale" title="manifest 可能過時">⚠</span>' if r["stale"] else ''
         note = _render_note(r["note"])
-        special = _special_commands(r["commands"])
+        # 收錄規範在 manifest schema 端執法(kit rule:只收「用它」的指令),
+        # 渲染端不做啟發式過濾——manifest 有什麼顯什麼
         cmds = ''
-        if special:
+        if r["commands"]:
             items = "".join(
                 f'<li><span class="cmd-k">{_e(k)}</span><code>{_e(v)}</code>'
                 f'<button class="copy" data-cmd="{_e(v)}" title="複製">C</button></li>'
-                for k, v in special.items())
+                for k, v in r["commands"].items())
             cmds = f'<ul class="cmds">{items}</ul>'
         paid = ''
         if r["paid"]:
