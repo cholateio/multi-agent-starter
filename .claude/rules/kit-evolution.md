@@ -1,8 +1,7 @@
 # Harness Self-Update Rules
 
-> **Kit-owned file.** Overwritten verbatim by `init.sh --update`. To
-> customize, edit the kit repo and redeploy — do not edit this copy.
-> 本檔回答一個問題：模型可以自己改這套 harness 的哪些部分？
+> **Kit-owned.** Do not edit this copy — customize in the kit repo, then
+> `init.sh --update`.
 
 ## 誰可以改什麼
 

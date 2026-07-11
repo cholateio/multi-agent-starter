@@ -1,7 +1,7 @@
 # Project Manifest 規則
 
-> **Kit-owned file.** Overwritten verbatim by `init.sh --update`. To
-> customize, edit the kit repo and redeploy — do not edit this copy.
+> **Kit-owned.** Do not edit this copy — customize in the kit repo, then
+> `init.sh --update`.
 
 `PROJECT.toml`（專案根目錄）是專案狀態的機器可讀 manifest，user-owned，
 `proj` 指令靠它做跨專案彙總。

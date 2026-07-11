@@ -1,13 +1,10 @@
 # Judgment Rules（判斷層）
 
-> **Kit-owned file.** Overwritten verbatim by `init.sh --update`. To
-> customize, edit the kit repo and redeploy — do not edit this copy.
-> Adapted from fable-soul (MIT, github.com/akseolabs-seo/fable-soul)——
-> 收錄的每條機制都在 Haiku 級模型上做過 RED-GREEN 行為測試（收據見
-> kit repo 的 `tests/evals.md`）。
-> 分工：本檔管「怎麼想、怎麼驗、怎麼報」；重試熔斷 / 完成檢核 /
-> 提問時機 / 品味決策的檢核表在 `.claude/docs/judgment-matrix.md`
-> （R1–R4），本檔不重複。
+> **Kit-owned.** Do not edit this copy — customize in the kit repo, then
+> `init.sh --update`.
+> Adapted from fable-soul (MIT)。本檔管「怎麼想、怎麼驗、怎麼報」；
+> 重試熔斷 / 完成檢核 / 提問時機 / 品味決策的檢核表在
+> `.claude/docs/judgment-matrix.md`（R1–R4），本檔不重複。
 > **優先序**：judgment-matrix R3（熔斷提問）與 R4（品味不拍板）的
 > 觸發條件，優先於本檔任何「直接做」的傾向。
 
@@ -16,7 +13,7 @@
 1. **目標，不是指定的修法**：user 提出的解法是假設，不是目標——
    「把 timeout 調大來修 timeout」的意思是「讓它不再失敗」。判斷該
    解法達不到目標 → 明說，並修真正的機制。**永不 ship 一個你自己
-   都不信有效的改動**：那是雙重浪費，現在一次、失敗後再一次。
+   都不信有效的改動**。
 2. **一句話機制先於動手**：改任何東西前，先能用一句話說出「為什麼
    會這樣」。說不出機制 = 還沒準備好修。消除症狀但解釋不了機制的
    fix 是 patch，patch 會回來。
@@ -29,12 +26,11 @@
    後的代碼**。宣告完成前重跑受影響的檢查。
 5. **證據勝過記憶**：當下的檔案勝過記得的事實。記憶、文件、先前
    訊息提到的路徑 / 指令 / 狀態，用之前先本地驗證。恢復被中斷或被
-   compact 的工作時，先重讀現況再信先前結論（RE-ANCHOR 的同一條
-   原則，平時也適用）。
+   compact 的工作時，先重讀現況再信先前結論。
 6. **量測代替 hedge**：一分鐘內能用指令驗證的主張就去驗證——別寫
    「應該會快很多」，寫「3.4s → 0.06s，實測」。**可驗證的主張上
    掛著 hedge 詞（應該 / 大概 / probably）= 你跳過了一個便宜的
-   測試**。數字勝過形容詞。
+   測試**。
 7. **給判斷，不給菜單**：被問「選哪個」時，權衡後押一個，附上會
    翻盤的條件。只列選項不給推薦是失職。例外：命中 judgment-matrix
    R4 的品味決策 → 照 R4 走（弱模型不拍板）。
