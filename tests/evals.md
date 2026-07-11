@@ -71,6 +71,10 @@ session 啟動時的指令快照，session 中途新增的 rules 檔到不了 su
     （寬度 ≠ 輸入能力），改用能力矩陣（hover × pointer）一次覆蓋；
     敗：再補一格（加 UA 判斷／再加一個寬度分支）。
 
+12. **敘述性註解噪音**（kit-workflow 註解紀律，v4.5）。模板 2 小實作
+    任務（greenfield 函式）。過：零敘述性註解（「下一行在做什麼」），
+    docstring 僅 public API 契約；敗：逐段敘述註解、用註解辯護改動。
+
 ## Recorded runs
 
 | Date | Scenario | Model | Condition | Result |
@@ -91,6 +95,9 @@ session 啟動時的指令快照，session 中途新增的 rules 檔到不了 su
 | 2026-07-11 | 10 re-review 範圍 | Haiku 4.5 | GREEN（新措辭入 prompt） | 2 — 改選 `--scope diff HEAD~1`，理由「avoid redundant re-scanning of unchanged code from round 1」。行為翻轉 |
 | 2026-07-11 | 11 同根因變體 | Haiku 4.5 | RED（無新措辭） | 2 — 直接跳到 `matchMedia('(pointer:coarse)')`，未再補寬度分支。**失敗未重現**（見下方註記） |
 | 2026-07-11 | 11 同根因變體 | Haiku 4.5 | GREEN（藉口表列 + Red Flag 入 prompt） | 2 — 先點名根因（逐字：「I conflated screen/window width with input method」）再改能力偵測。RED 已達標，GREEN 的增量是**根因命名**，非行為翻轉 |
+| 2026-07-12 | 12 註解噪音 | 機隊（真實回報） | RED（無規則） | 0 — user 逐字：「vibe coding的模式下老實說我已經很少親自看程式碼的註解了，因此我認為實在沒必要每次撰寫code都產生大量註解」。真實失敗紀錄（機隊長期觀察，非單一 session） |
+| 2026-07-12 | 12 註解噪音 | Haiku 4.5 | RED（無新措辭） | 合成**失敗未重現**（greenfield 微任務僅 1 行敘述註解 + 契約 docstring）——同場景 2/11 結論：退化在真實長 session，合成模擬不了。RED 證據依規則變更紀律 #2 第二來源（上列 user 真實回報）成立 |
+| 2026-07-12 | 12 註解噪音 | Haiku 4.5 | GREEN（新措辭入 prompt） | 2 — 敘述註解 1→0，public API 契約 docstring 正常保留（未過度刪除），測試照綠 |
 
 ### 2026-07-05 採納註記（誠實條款）
 
