@@ -3,7 +3,7 @@
 
 name = "multi-agent-starter"
 status = "active"
-status_note = "kit 本體(v4.4):新增 PROJECT.toml manifest 體系與 proj 彙總指令"
+status_note = "kit 本體 v4.5:PROJECT.toml manifest 體系 + proj/proj html dashboard 完成;下一步:無(隨使用回饋演化)"
 updated = 2026-07-11
 
 [commands]                 # 只收「用它」的指令;測試指令見 tests/

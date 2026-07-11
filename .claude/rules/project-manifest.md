@@ -13,6 +13,9 @@ Session 結束前，若本次工作觸發以下任一事件，同步更新 PROJE
 - 起始指令新增或改變 → `[commands]`
 - 新增或移除付費外部服務（SaaS / LLM API）→ `[[paid]]`
 
+`status_note` 規範：固定兩段、以分號隔開——「目前進度;下一步」。
+細節（bug 經過、數據、待辦清單）不寫這裡，歸 LESSONS / commit message。
+
 `[commands]` 收錄規範（寧缺勿濫）：只收「**用它**」的指令——這個專案
 自己提供的工具/服務的啟動與操作指令（例：`uv run yt-summary "<url>"`）。
 不收「**開發它**」的指令（dev/build/test/lint/deploy、`make up`、
