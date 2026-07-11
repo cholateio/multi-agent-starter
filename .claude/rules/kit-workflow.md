@@ -65,6 +65,14 @@ If `docs/specs/` contains a spec: it is the authoritative requirements
 source — skip brainstorming, still derive a codebase-aware plan, and still
 review the spec itself — isolation applies to it too.
 
+## 註解紀律（代碼的讀者是 AI）
+
+機隊代碼的主要讀者是未來的 AI session，不是人。註解只寫代碼顯示
+不了的資訊：不變量/外部約束、跨檔耦合、非顯然的 why、附日期的收據
+——其餘零註解。禁止敘述性註解（下一行在做什麼）與辯護性註解（對
+reviewer 解釋改動為何正確）；那些歸 commit message 與 LESSONS。
+docstring 只給 public API 寫契約（參數/回傳/raises）。
+
 ## Reviews that are NOT optional
 
 - **Final review**: before declaring a task complete, if the session modified
