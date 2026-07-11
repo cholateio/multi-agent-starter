@@ -6,8 +6,7 @@ status = "active"
 status_note = "kit 本體(v4.4):新增 PROJECT.toml manifest 體系與 proj 彙總指令"
 updated = 2026-07-11
 
-[commands]
-test = "bash tests/smoke.sh && bash tests/proj-smoke.sh && bash tests/hooks-smoke.sh"
+[commands]                 # 只收「用它」的指令;測試指令見 tests/
 init-new = "./init.sh <target-dir>"
 update-all = "for d in /home/cholate/*/; do [ -f \"$d/.claude/kit-version\" ] && ./init.sh \"$d\" --update; done"
 
