@@ -144,6 +144,8 @@ assert_contains "html: broken manifest flagged" "$HTML" "manifest 損壞"
 assert_contains "html: status_note split into list items" "$HTML" "<li>批次待做"
 assert_not_contains "html: generic framework command hidden" "$HTML" "pnpm dev"
 assert_contains "html: special command shown" "$HTML" "uv run good-proj"
+assert_not_contains "html: no three-column grid (single-row layout)" "$HTML" "repeat(auto-fill"
+assert_contains "html: card body column present" "$HTML" "c-body"
 assert_not_contains "html: cmd code has no nowrap scroll" "$HTML" "white-space:nowrap"
 assert_contains "html: path printed on non-WSL" "$OUT" "dashboard.html"
 # 自包含:零外部引用
