@@ -415,11 +415,26 @@ assert_eq "h2q: small allow does NOT advance baseline" "$(baseline_tree "$BASELI
 py_lines 10 > "$R2/tweak2.py"
 run_hook "$VF" "$STOP_JSON"
 assert_eq "h2q: second small change still allowed (cumulative 20 lines, 2 files)" "$OUT" ""
+# v4.5: test files count toward NEITHER cap (receipt 2026-07-12: a margin
+# tweak = 6 files / 55 lines, only 29 non-test, blocked on both caps)
+py_lines 40 > "$R2/test_tweak.py"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2q: test lines don't count (60 total lines, 20 business)" "$OUT" ""
+# suffix-style test names count for the languages with that convention
+# (codex review finding 2026-07-12); ABTest.ts is NOT such a language
+for ((i=1; i<=40; i++)); do echo "class L$i {}"; done > "$R2/TweakTest.java"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2q: suffix-style Java test file doesn't count" "$OUT" ""
+rm -f "$R2/TweakTest.java"
 py_lines 5 > "$R2/tweak3.py"
+py_lines 5 > "$R2/tweak4.py"
+run_hook "$VF" "$STOP_JSON"
+assert_eq "h2q: test file doesn't count toward file cap (5 paths, 4 business)" "$OUT" ""
+py_lines 5 > "$R2/tweak5.py"
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
-assert_eq "h2q: third business file crosses the file cap and blocks" "$DEC" "block"
-rm -f "$R2/tweak3.py"
+assert_eq "h2q: fifth business file crosses the file cap and blocks" "$DEC" "block"
+rm -f "$R2/tweak3.py" "$R2/tweak4.py" "$R2/tweak5.py"
 py_lines 45 >> "$R2/tweak.py"
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
@@ -431,7 +446,7 @@ assert_eq "h2q: one review covers the accumulated batch" "$OUT" ""
 # gate's "nothing to review" path advances the baseline by itself. NO
 # marker here: on that path the marker check is never reached, so a
 # marker written now would linger and falsely satisfy the next scenario.
-rm -f "$R2/tweak.py" "$R2/tweak2.py"
+rm -f "$R2/tweak.py" "$R2/tweak2.py" "$R2/test_tweak.py"
 run_hook "$VF" "$STOP_JSON"
 assert_eq "h2q cleanup: post-cleanup state certified" "$OUT" ""
 assert_file_absent "h2q cleanup: no marker left behind" "$SELF_M2"
@@ -449,6 +464,13 @@ run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
 assert_eq "h2r: tiny change on oauth path still blocks" "$DEC" "block"
 rm -f "$R2/oauth.py"
+# sensitive-named TEST files get no test exclusion: the sensitive check
+# runs before the v4.5 test-path skip
+py_lines 5 > "$R2/test_auth.py"
+run_hook "$VF" "$STOP_JSON"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2r: tiny sensitive-named test file still blocks" "$DEC" "block"
+rm -f "$R2/test_auth.py"
 
 # (s) protected path stays size-blind: a 3-line change in a
 # .claude/protected-paths zone must block
