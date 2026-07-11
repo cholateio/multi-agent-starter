@@ -49,7 +49,7 @@ smoke test 把關(≤20KB)。
   流程、keeps running the full review)再比對——描述工作流的句子不是
   指令(2026-07-10 實際誤觸收據見 tests/evals.md)。
 - **Workflow sizing 反偏壓**(`kit-workflow.md`)——給小任務可操作判準
-  (≤2 檔、無新依賴、不碰 schema/auth/payment/constraints → 直接做),
+  (≤4 檔不計測試檔、無新依賴、不碰 schema/auth/payment/constraints → 直接做),
   並依 superpowers 自己承認的優先權(專案指示 > skills)明文解除小任務的
   brainstorming/TDD 強制觸發。防的是強觸發規則把瑣事拉進全套流程。
 - **主導模型/effort 配置提案**(`kit-workflow.md`,v4.3)——feature 級
@@ -118,7 +118,8 @@ API 呼叫都重複攜帶,越肥 → compact 越早 → 迷航越早。這層專
   hash,gate 聯集「未 commit + baseline 以來的 commits」)、審過用 content
   hash 記住不重複煩你、baseline 損毀則 **fail-closed**(退化方向是「多審」
   不是「漏審」)。v4.3 加**小改自動放行**:距上次認證的**累積** diff
-  (git numstat 實測,模型話術無效)≤50 行、≤2 個業務檔、未碰敏感 stem
+  (git numstat 實測,模型話術無效)≤50 行、≤4 個業務檔(v4.5:測試檔兩個
+  計數皆不計,敏感命名的測試檔除外)、未碰敏感 stem
   (auth/payment/migrat/…)或 protected-paths → 放行但**不推進 baseline**
   ——小改持續累積,破檻那次 review 批次涵蓋全部(防切香腸);無 baseline
   或 binary 一律 fail-closed 回到 size-blind block。

@@ -2,6 +2,12 @@
 
 > 踩坑記錄（格式見 kit-evolution 規則）。同一個坑踩第二次之前寫入。
 
+### 2026-07-12 小改門檻把測試檔算進業務檔，越補測試越容易破檻
+- Context: 部署專案裡一次 margin 調整（真正的 CSS 改動 19 行）觸發跨模型 review——共用元件連動 3 個測試檔，合計 6 檔 55 行，SMALL_MAX_FILES=2 先爆
+- Error: small_change_allow 的 business file 判定只看副檔名，測試檔照算；「元件 + 其測試」= 2 檔即頂格，誘因反向（越認真補測試越容易被罰跑 review）
+- Solution: v4.5 測試檔（test_*/_test./.test./.spec./tests?/ 等）從檔案數與行數兩個計數排除、SMALL_MAX_FILES 2→4；敏感命名測試檔（test_auth.py）不享排除；行數上限 50 與敏感路徑 size-blind 不動。smoke RED-GREEN：兩條新斷言在舊 hook 下失敗、新 hook 下通過，並以事故原 numstat 形狀重放驗證放行
+- Rule: gate 門檻的計數單位要對齊它想擋的東西（未審業務邏輯），別讓驗證產物（測試）成為破檻主力；照字面只排除檔案數會修不到行數那半（55>50 照樣擋）。
+
 ### 2026-07-10 `git add .claude` 會一併收進執行期狀態檔
 - Context: 機隊決定把 `.claude/` 從 gitignore 翻成 track（settings.json 的核可清單與 protected-paths 不可重建，不該只存在一顆硬碟上）
 - Error: `git add .claude` 在 kaf-observatory 收進 `.claude/scheduled_tasks.lock`——內容是 `{"sessionId":...,"pid":16304,"acquiredAt":...}`，5 月殘留的執行期鎖檔，pid 與 sessionId 對別台機器毫無意義

@@ -40,7 +40,9 @@
 # certified tree stays within SMALL_MAX_LINES/SMALL_MAX_FILES across
 # business files and touches no sensitive or protected path, the stop is
 # allowed WITHOUT advancing the baseline — small changes accumulate until
-# one review covers the whole batch. Sensitive paths and unmeasurable
+# one review covers the whole batch. v4.5: test files count toward
+# NEITHER cap (they are verification, not business logic — but sensitive-
+# named test files stay size-blind). Sensitive paths and unmeasurable
 # states (no baseline, binary rows) stay size-blind. See the
 # small_change_allow section below.
 #
@@ -208,7 +210,18 @@ fi
 # Fail closed: no baseline, unresolvable CERT_TREE, or a binary numstat
 # row ("-") all fall through to the size-blind block below.
 SMALL_MAX_LINES=50
-SMALL_MAX_FILES=2
+SMALL_MAX_FILES=4
+# v4.5: test files count toward NEITHER cap. The gate guards unreviewed
+# BUSINESS logic; "one component + its tests" was the most common false
+# trigger (receipt 2026-07-12: a margin tweak touched 6 files / 55 lines,
+# only 29 of them non-test — blocked on both caps). Excluded tests still
+# ride along in the batch the next triggered review covers. Order matters
+# in the loop below: the sensitive check runs BEFORE this exclusion, so
+# auth/payment-named test files (test_auth.py) stay size-blind.
+# Suffix-style names (FooTest.java, FooTests.cs, FooSpec.scala — codex
+# review finding, 2026-07-12) are recognized only for the languages where
+# that convention holds, so business names like ABTest.ts stay counted.
+TEST_PATH_REGEX='(^|/)(tests?|__tests__|__mocks__|spec)/|(^|/)(test|spec)_[^/]*$|_(test|spec)\.[^/.]+$|\.(test|spec)\.[^/.]+$|(^|/)conftest\.py$|(Test|Tests|Spec)\.(java|kt|kts|scala|cs|swift)$'
 # Sensitive stems stay size-blind. No right boundary on purpose: "auth"
 # catches authentication/authorize (and false-positives like authors.py —
 # acceptable, it errs toward review). "oauth"/"sso" listed explicitly:
@@ -250,6 +263,7 @@ small_change_allow() {
         [[ "$add" == "-" || "$del" == "-" ]] && return 1   # binary: fail closed
         echo "$path" | grep -qiE "$SENSITIVE_PATH_REGEX" && return 1
         matches_protected "$path" && return 1
+        echo "$path" | grep -qE "$TEST_PATH_REGEX" && continue
         total=$((total + add + del))
         files=$((files + 1))
     done <<< "$numstat"

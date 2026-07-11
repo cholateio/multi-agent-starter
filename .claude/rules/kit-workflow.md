@@ -34,7 +34,8 @@ A `TASK_CLASSIFICATION` hint appears only for explicit user overrides —
 `explicit_skip` / `explicit_full` — honor it. Otherwise use judgment:
 
 - Small (trivial / mechanical / docs, or a code change meeting ALL of:
-  ≤2 files, roughly ≤50 changed lines, no new dependency, no schema/data
+  ≤4 files and roughly ≤50 changed lines — test files count toward
+  neither — no new dependency, no schema/data
   migration, no auth/payment/security surface, no public API or behavior
   contract change, nothing in the project CLAUDE.md "Project-specific
   constraints") → just do it, verify yourself (run the tests), brief
@@ -71,7 +72,8 @@ review the spec itself — isolation applies to it too.
   (`verify-final-review.sh`) sees committed and uncommitted work alike, and only
   accepts a marker carrying a `reviewed-by=` evidence line, which `/kit-review`
   writes after the review actually runs — a bare `touch` does not pass. The gate auto-allows while the CUMULATIVE
-  unreviewed change stays small (≤50 lines / ≤2 business files, no sensitive
+  unreviewed change stays small (≤50 lines / ≤4 business files — test files
+  count toward neither — no sensitive
   or protected path): small tweaks accumulate, and the review that fires once
   the threshold is crossed covers the whole batch. Do not run ceremonial
   reviews under that threshold, and do not slice work to stay under it —
