@@ -56,6 +56,16 @@ smoke test 把關(≤20KB)。
   以上計畫送簽核時必附各 phase「主導模型 + effort + 一句理由 + 卡關
   升級條件」,phase 交界一行提醒「要切請 /model」。純建議、user 執行
   ——讓成本可見,把「哪段可以用便宜檔」的決策交回 user 手上。
+- **re-review 範圍收斂**(`kit-workflow.md`,v4.5)——round 1 審全集,之後
+  只審 fix delta +「fix 改動的下游」(呼叫端=stale-green 的正門)+ findings
+  碰過的碼;**不要每輪把 reviewer 指向整條分支**——重掃已審舊碼會挖出新
+  角度,輪數自我繁殖(收據:3 個小 UI 需求走成 6 輪 review/87 分鐘,
+  2026-07-11)。敏感路徑每輪維持全集。
+- **註解紀律**(`kit-workflow.md` + dispatch 模板 2/3,v4.5)——代碼的讀者
+  是**未來的 AI session**,不是人:它讀 code 比讀散文快,敘述性註解是純
+  噪音。只寫代碼顯示不了的四類(不變量/外部約束、跨檔耦合、非顯然 why、
+  附日期收據),辯護性註解歸 commit message/LESSONS。防的是「每次寫 code
+  都產生大量沒人讀的註解」(user 2026-07-12 逐字回報)。
 - **規則變更紀律**(`kit-evolution.md`)——改 kit 規則前先查覆蓋(已有條目
   = 規則被無視,不是缺席)、要 RED-GREEN 收據(拿不出失敗證據 = 不知道
   在修什麼,不加)、逐字記藉口(paraphrase 會丟觸發詞)、rules/ 20KB 總量

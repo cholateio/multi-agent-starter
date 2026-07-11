@@ -291,7 +291,7 @@ Fable 判斷蒸餾——但只收 kit 未覆蓋的機制，不照搬。核心產
 schema 讀取路徑、bug 連環卡交接、SaaS 成本卡、業務邏輯可觸達性）——
 kit-judgment 通用證據紀律在領域層的實例化。
 
-### v4.3（當前）：成本感知層
+### v4.3：成本感知層
 
 痛點（2026-07-07 真實 session）：調適期小改也被 size-blind Stop gate
 逼跑跨模型 review；模型/effort 配置只在 user 主動要求時出現。三個產出：
@@ -307,6 +307,57 @@ kit-judgment 通用證據紀律在領域層的實例化。
    收據見 tests/evals.md）。
 3. **classify-task 描述語境濾網**：遮罩「頻率/進行式標記 + 觸發詞」
    再比對——「一直在走完整流程」是描述不是指令（2026-07-10 實際誤觸）。
+
+### v4.4：專案 manifest 體系
+
+痛點：機隊擴到十個專案後，「哪個在跑、怎麼啟動、誰在燒錢」只存在人的
+記憶裡。決策：**狀態要機器可讀，維護不靠記性**。
+
+1. **`PROJECT.toml`**（專案根，**user-owned**，`--update` deploy-if-absent
+   ——比照 settings.json 先例，kit 永不覆蓋）：status / status_note /
+   `[commands]` / `[[paid]]`。
+2. **`bin/proj`** 跨專案彙總：`proj`（狀態總覽 + 過時偵測）/ `proj money`
+   （燒錢視圖）/ `proj remote`（gh 對照未 clone）。
+3. **`rules/project-manifest.md`**（kit-owned，隨 --update 推平）：session
+   結束前狀態/指令/付費服務有變就同步。維護慣例做成規則，而不是靠人記得。
+   收錄判準：`[commands]` 只收「**用它**」的指令，不收「**開發它**」的
+   （dev/build/test 查 package.json 就有）；`status_note` 固定兩段
+   「目前進度;下一步」，細節歸 LESSONS/commit。
+
+### v4.5：proj html dashboard
+
+`bin/proj html` 產出自包含 HTML dashboard（WSL 自動開瀏覽器）——終端太窄
+時看不下十個專案的橫排資訊。同版把 manifest 的收錄規範從渲染端啟發式
+過濾**上移到 schema**（kit rule）：規則寫在 manifest 規範裡，渲染層有
+什麼顯什麼，不再猜。
+
+### v4.6（當前）：review 經濟學——輪數、門檻、註解噪音
+
+三個痛點都指向同一件事：**流程的成本要和它擋下的風險成比例**。
+
+1. **re-review 範圍收斂**（kit-workflow）：收據是 anatomy-rag 真實 session
+   （2026-07-11，Opus 4.8）——3 個小 UI 需求走成 6 輪 codex review／87
+   分鐘，每輪 `--scope branch` 重掃全分支，已審舊碼被反覆再挖新角度，
+   輪數自我繁殖。修法：round 1 審全集，之後只審 fix delta +「fix 改動的
+   下游」（呼叫端＝stale-green 的正門）+ findings 碰過的碼；敏感路徑
+   每輪維持全集。同輪在 kit-judgment 藉口表加「同根因第 2 個變體」列
+   （反覆拿螢幕寬度當輸入能力的代理 → 停下列完整取值一次覆蓋）。
+2. **Stop gate 小改門檻修形**（verify-final-review.sh）：收據是 margin
+   調整（實改 19 行）因共用元件連動 3 個測試檔成 6 檔 55 行而被罰跑跨
+   模型 review。**測試檔是驗證產物，不是業務邏輯**，卻是破檻主力——
+   誘因反向（越認真補測試越容易被罰）。修法：測試檔從**檔案數與行數
+   兩個計數**排除（只排檔案數會漏掉行數那半邊：55 > 50 照樣擋）、
+   `SMALL_MAX_FILES` 2→4；敏感命名的測試檔（`test_auth.py`）不享排除
+   ——敏感檢查先於測試排除。判準延續 v4.3：門檻由 git numstat 實測，
+   模型話術無效。
+3. **註解紀律**（kit-workflow + dispatch 模板 2/3）：user 逐字收據
+   「vibe coding 的模式下…實在沒必要每次撰寫 code 都產生大量註解」。
+   關鍵洞察：**「對 AI 友善」與「減量」是同一刀**——代碼的實際讀者是
+   未來的 AI session，它讀 code 比讀散文快，敘述性註解是純噪音；它需要
+   的是代碼顯示不了的四類（不變量/外部約束、跨檔耦合、非顯然 why、
+   附日期收據）。辯護性註解歸 commit message／LESSONS。
+4. **rules/ 精簡**（20253B→18962B）：砍字不砍義務，把 20KB 預算的餘裕
+   還回來——規則檔是每 session 的固定 context 稅，新增前先還債。
 
 ## 三、角色設計
 
