@@ -21,7 +21,9 @@ import tomllib
 import unicodedata
 from pathlib import Path
 
-VALID_STATUSES = {"active", "mvp", "done", "paused", "abandoned"}
+# idle = 上線自走、無人開發、等訊號或新需求。與 active（有人正在動它）、
+# paused（擱置，連跑都不跑了）、done（結案，不再動）都不同——它還活著、還在花錢。
+VALID_STATUSES = {"active", "mvp", "idle", "done", "paused", "abandoned"}
 STALE_DAYS = 30
 
 
@@ -218,7 +220,7 @@ def cmd_remote(root):
 
 # --- proj html: 自包含 HTML dashboard ---
 
-STATUS_ORDER = ["active", "mvp", "done", "paused", "abandoned"]
+STATUS_ORDER = ["active", "mvp", "idle", "done", "paused", "abandoned"]
 
 _CSS = """
 :root{--bg:#f7f7f6;--surf:#fff;--ink:#1a1a1a;--mut:#6b6b6b;--line:#e3e3e0;--warn-i:#b45309}
@@ -245,6 +247,7 @@ button.kpi{cursor:pointer}
 .dot{width:8px;height:8px;border-radius:999px;display:inline-block;background:var(--s-i)}
 [data-status="active"]{--s-i:#15803d;--s-b:#dcfce7}
 [data-status="mvp"]{--s-i:#1d4ed8;--s-b:#dbeafe}
+[data-status="idle"]{--s-i:#0f766e;--s-b:#ccfbf1}
 [data-status="done"]{--s-i:#525252;--s-b:#ececec}
 [data-status="paused"]{--s-i:#b45309;--s-b:#fef3c7}
 [data-status="abandoned"]{--s-i:#737373;--s-b:#f0f0f0}
@@ -253,6 +256,7 @@ button.kpi{cursor:pointer}
 @media(prefers-color-scheme:dark){
 [data-status="active"]{--s-i:#4ade80;--s-b:#0f2f1a}
 [data-status="mvp"]{--s-i:#60a5fa;--s-b:#14243d}
+[data-status="idle"]{--s-i:#2dd4bf;--s-b:#0c2b28}
 [data-status="done"]{--s-i:#a3a3a3;--s-b:#2c2c2a}
 [data-status="paused"]{--s-i:#fbbf24;--s-b:#3a2c07}
 [data-status="abandoned"]{--s-i:#8a8a87;--s-b:#262624}

@@ -2,7 +2,9 @@
 # user-owned:kit 永不覆蓋。狀態/指令/付費服務改變時同步本檔,並更新 updated。
 
 name = "[專案名]"
-status = "active"          # active | mvp | done | paused | abandoned
+status = "active"          # active | mvp | idle | done | paused | abandoned
+                           # idle = 上線自走、無人開發、等訊號或新需求（還活著、還在花錢，
+                           #        跟 paused「連跑都不跑了」與 done「結案」都不同）
 status_note = "[目前進度];[下一步]"   # 固定兩段以分號隔開;細節歸 LESSONS/commit,不寫這裡
 updated = 2026-07-11       # 最後一次人工確認本檔內容的日期
 
