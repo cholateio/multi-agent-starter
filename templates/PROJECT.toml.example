@@ -15,7 +15,7 @@ updated = 2026-07-11       # 最後一次人工確認本檔內容的日期
 
 # 每個付費/可能付費的外部服務一節 [[paid]];完全沒有就整段刪掉
 # [[paid]]
-# service = "OpenAI API"
+# service = "OpenAI API"   # 只放服務名(dashboard 的 badge);說明歸註解 / cancel
 # billing = "按用量"        # 按用量 | 月費 | 年費 | free-tier
 # monthly_est = "~$3"
 # cancel = "拿掉 .env 的 key 即停"

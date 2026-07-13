@@ -27,6 +27,8 @@ VALID_STATUSES = {"active", "mvp", "idle", "done", "paused", "abandoned"}
 STALE_DAYS = 30
 # status_note 每段字數上限。基準：life-tracker 的 27|25 字就足以說清楚進度與下一步。
 NOTE_SEG_MAX = 60
+# service 名稱上限。基準：「Google Cloud Storage」20 字,已是最長的真實服務名。
+SERVICE_MAX = 24
 
 
 def warn(msg):
@@ -72,6 +74,18 @@ def load_manifest(d):
             if len(s) > NOTE_SEG_MAX:
                 warn(f"{d.name}: status_note 第 {i+1} 段 {len(s)} 字 "
                      f"(上限 {NOTE_SEG_MAX})——細節歸 LESSONS / commit message")
+
+    # service 只放**服務名稱**,不放說明。括號幾乎必然是說明（"Supabase (PostgreSQL)"、
+    # "GitHub Pro（repo 已轉 private → ...）"）,而 badge 是拿來一眼認出服務的,不是拿來讀的。
+    # 說明降級成 TOML 註解,或寫進 monthly_est / cancel——那裡本來就該有。
+    for p in data.get("paid", []):
+        s = p.get("service")
+        if not isinstance(s, str) or not s:
+            continue
+        if "(" in s or "（" in s:
+            warn(f'{d.name}: service "{s}" 含括號說明——只放服務名,說明歸註解')
+        elif len(s) > SERVICE_MAX:
+            warn(f'{d.name}: service "{s}" {len(s)} 字(上限 {SERVICE_MAX})——只放服務名')
     return data, None
 
 
