@@ -32,6 +32,9 @@ SERVICE_MAX = 24
 # billing 是封閉枚舉——_paid_bucket() 對認不得的值一律當「按用量」,所以一個
 # 自由發揮的值（"訂閱制"）會讓固定月費**靜默掉進錯的桶子**,在花錢總覽裡消失。
 VALID_BILLING = {"按用量", "月費", "年費", "free-tier"}
+# monthly_est 字數上限。只放金額與用量（"NT$128/月;Actions 用量估 2000+ 分/月"）——
+# 怎麼算出來的、確認日期、月上限設定,全歸 TOML 註解。表格欄位不是註腳。
+MONTHLY_EST_MAX = 40
 
 
 def warn(msg):
@@ -93,6 +96,10 @@ def load_manifest(d):
         if b is not None and b not in VALID_BILLING:
             warn(f'{d.name}: {s} 的 billing "{b}" 不在 {sorted(VALID_BILLING)}'
                  f'——會被當成「按用量」,固定月費就從花錢總覽消失了')
+        m = p.get("monthly_est")
+        if isinstance(m, str) and len(m) > MONTHLY_EST_MAX:
+            warn(f"{d.name}: {s} 的 monthly_est {len(m)} 字(上限 {MONTHLY_EST_MAX})"
+                 f"——只放金額與用量,算法與依據歸註解")
     return data, None
 
 
@@ -449,14 +456,16 @@ def _render_money(rows):
         # 原本連它一起藏掉,理由是「估計恆為 ?」——那個假設 2026-07-13 失效了(case-pick 的
         # Gemini 有實測的 ~NT$200/月)。按用量正是最該盯的一組,把唯一的金額欄藏起來,
         # 等於讓「待盯」變成「看不到」。
+        #
+        # **cancel 不渲染**:dashboard 是「這個月花多少」的掃視面板,不是操作手冊。取消步驟
+        # 又長又只在真的要停用時才需要——那時去看 `proj money`(終端)或 PROJECT.toml。
         def cells(name, p):
             row = [_e(name), _e(p.get("service", "?"))]
             if with_billing:
                 row.append(_e(p.get("billing", "?")))
-            row += [_e(p.get("monthly_est", "?")), _e(p.get("cancel", ""))]
+            row.append(_e(p.get("monthly_est", "?")))
             return "".join(f'<td>{c}</td>' for c in row)
-        heads = (["專案", "服務"] + (["計費"] if with_billing else [])
-                 + ["月費估計", "取消方式"])
+        heads = ["專案", "服務"] + (["計費"] if with_billing else []) + ["月費估計"]
         body = "".join(f'<tr>{cells(name, p)}</tr>' for name, p in items)
         return (f'<table class="{cls}"><thead><tr>'
                 + "".join(f'<th>{h}</th>' for h in heads)
