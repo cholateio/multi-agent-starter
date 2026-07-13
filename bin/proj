@@ -25,6 +25,8 @@ from pathlib import Path
 # paused（擱置，連跑都不跑了）、done（結案，不再動）都不同——它還活著、還在花錢。
 VALID_STATUSES = {"active", "mvp", "idle", "done", "paused", "abandoned"}
 STALE_DAYS = 30
+# status_note 每段字數上限。基準：life-tracker 的 27|25 字就足以說清楚進度與下一步。
+NOTE_SEG_MAX = 60
 
 
 def warn(msg):
@@ -56,6 +58,20 @@ def load_manifest(d):
     if status is not None and (not isinstance(status, str)
                                or status not in VALID_STATUSES):
         warn(f'{d.name}: status "{status}" 不在 {sorted(VALID_STATUSES)},照列')
+
+    # status_note 的形狀檢查。規則（rules/project-manifest.md）本來就寫著「固定兩段、
+    # 以分號隔開,細節歸 LESSONS / commit message」,但 2026-07-13 實測 12 個專案有 11 個
+    # 違反——全靠模型自律的規則不會被遵守,因為每次都覺得「這個細節很重要」。
+    # 這裡不擋、只吵：dashboard 是拿來掃一眼的,一段 60 字以上就不是「一句話」了。
+    note = data.get("status_note")
+    if isinstance(note, str) and note:
+        segs = note.split(";")
+        if len(segs) != 2:
+            warn(f"{d.name}: status_note 應為「目前進度;下一步」兩段,實際 {len(segs)} 段")
+        for i, s in enumerate(segs):
+            if len(s) > NOTE_SEG_MAX:
+                warn(f"{d.name}: status_note 第 {i+1} 段 {len(s)} 字 "
+                     f"(上限 {NOTE_SEG_MAX})——細節歸 LESSONS / commit message")
     return data, None
 
 
