@@ -3,7 +3,7 @@
 
 name = "multi-agent-starter"
 status = "active"
-status_note = "kit 本體 v4.6:review 經濟學(re-review 範圍收斂、gate 測試檔不計數、註解紀律)完成;下一步:push 後 --update 鋪開機隊(含欠 update 的 anatomy-rag、cholate-blog)"
+status_note = "kit v4.7:manifest 欄位有牙齒了(idle 狀態、長度檢查);--update 鋪開機隊(anatomy-rag、cholate-blog 欠 update)"
 updated = 2026-07-12
 
 [commands]                 # 只收「用它」的指令;測試指令見 tests/
