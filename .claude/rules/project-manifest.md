@@ -29,4 +29,9 @@ Session 結束前，若本次工作觸發以下任一事件，同步更新 PROJE
 `docker compose up`——package.json/Makefile 查得到的不用抄）。
 判準：半年後回來「用」它需要的才收。
 
+`[[paid]]` 的 `service` 只放**服務名稱**（`Supabase`、`Cloudflare Pages`、
+`GitHub Pro`、`Google Gemini API`），不放說明——那是 dashboard 上的 badge，
+用來一眼認出服務，不是拿來讀的。「這個 Supabase 存什麼」「這個 Pro 為什麼要買」
+歸 TOML 註解、`monthly_est` 或 `cancel`。`proj` 會對含括號的 service 發警告。
+
 只更新事實，不改 schema。不確定某服務是否付費：照列，加 `# 待確認`。
