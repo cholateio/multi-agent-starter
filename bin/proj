@@ -29,6 +29,9 @@ STALE_DAYS = 30
 NOTE_SEG_MAX = 60
 # service 名稱上限。基準：「Google Cloud Storage」20 字,已是最長的真實服務名。
 SERVICE_MAX = 24
+# billing 是封閉枚舉——_paid_bucket() 對認不得的值一律當「按用量」,所以一個
+# 自由發揮的值（"訂閱制"）會讓固定月費**靜默掉進錯的桶子**,在花錢總覽裡消失。
+VALID_BILLING = {"按用量", "月費", "年費", "free-tier"}
 
 
 def warn(msg):
@@ -86,6 +89,10 @@ def load_manifest(d):
             warn(f'{d.name}: service "{s}" 含括號說明——只放服務名,說明歸註解')
         elif len(s) > SERVICE_MAX:
             warn(f'{d.name}: service "{s}" {len(s)} 字(上限 {SERVICE_MAX})——只放服務名')
+        b = p.get("billing")
+        if b is not None and b not in VALID_BILLING:
+            warn(f'{d.name}: {s} 的 billing "{b}" 不在 {sorted(VALID_BILLING)}'
+                 f'——會被當成「按用量」,固定月費就從花錢總覽消失了')
     return data, None
 
 
@@ -277,7 +284,7 @@ button.kpi{cursor:pointer}
 .dot{width:8px;height:8px;border-radius:999px;display:inline-block;background:var(--s-i)}
 [data-status="active"]{--s-i:#15803d;--s-b:#dcfce7}
 [data-status="mvp"]{--s-i:#1d4ed8;--s-b:#dbeafe}
-[data-status="idle"]{--s-i:#0f766e;--s-b:#ccfbf1}
+[data-status="idle"]{--s-i:#7c3aed;--s-b:#ede9fe}
 [data-status="done"]{--s-i:#525252;--s-b:#ececec}
 [data-status="paused"]{--s-i:#b45309;--s-b:#fef3c7}
 [data-status="abandoned"]{--s-i:#737373;--s-b:#f0f0f0}
@@ -286,7 +293,7 @@ button.kpi{cursor:pointer}
 @media(prefers-color-scheme:dark){
 [data-status="active"]{--s-i:#4ade80;--s-b:#0f2f1a}
 [data-status="mvp"]{--s-i:#60a5fa;--s-b:#14243d}
-[data-status="idle"]{--s-i:#2dd4bf;--s-b:#0c2b28}
+[data-status="idle"]{--s-i:#a78bfa;--s-b:#241a3d}
 [data-status="done"]{--s-i:#a3a3a3;--s-b:#2c2c2a}
 [data-status="paused"]{--s-i:#fbbf24;--s-b:#3a2c07}
 [data-status="abandoned"]{--s-i:#8a8a87;--s-b:#262624}
