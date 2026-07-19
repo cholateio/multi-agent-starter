@@ -1,4 +1,4 @@
-# Multi-Agent Starter Kit (v4.7)
+# Multi-Agent Starter Kit (v4.7.4)
 
 讓 **Claude Code + Superpowers + Codex Plugin** 乾淨分工地一起工作的起手包。
 你只描述任務、approve plan;AI 之間自己協作——你不再當人肉訊息路由器。
@@ -148,12 +148,12 @@ AI session 在狀態/指令/付費服務變動時順手更新 manifest。
 |------|------|------|
 | `README.md` | 你 | 你正在看的——裝機、開專案、日常操作、卡點 |
 | [`DEFENSES.md`](DEFENSES.md) | 想看工程 | prompt / context / harness 三層防護清單 + 誠實條款 |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 想深入 | 為什麼這樣設計、v1→v4.7 完整取捨、四維 isolation |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 想深入 | 為什麼這樣設計、v1→v4.7.4 完整取捨、四維 isolation |
 | `docs/harness-diagnosis.md` | 想深入 | v4.0 防線設計依據:三大弱模型失敗場景 → 物理痛點 → 阻斷方案 |
 | `docs/handover-from-fable.md` | 未來的模型與你 | 高階模型交接信:三件關鍵事 + 制度腐化偵測法 |
 | `CLAUDE.md` | AI(每 session) | 專案內容範本(goal / stack / constraints);workflow 規則另放 `.claude/rules/`(kit-owned) |
 
 ---
 
-*版本:**v4.7**(manifest 的欄位有牙齒了:idle 狀態、status_note 與 service
-的形狀檢查)。完整版本演進見 [`ARCHITECTURE.md §二`](ARCHITECTURE.md)。*
+*版本:**v4.7.4**(manifest 的欄位有牙齒了:idle 狀態、billing 封閉枚舉執法、
+status_note 與 service 的形狀檢查;Stop gate 閘門放寬到 150 行 / 8 檔)。完整版本演進見 [`ARCHITECTURE.md §二`](ARCHITECTURE.md)。*
