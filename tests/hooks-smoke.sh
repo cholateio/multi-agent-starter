@@ -77,8 +77,8 @@ valid_marker() {
 
 # py_lines <n>: n lines of trivial python on stdout. v4.3: the Stop gate
 # auto-allows small cumulative changes, so every block-expecting business
-# fixture must exceed the threshold (50 lines) to keep testing the block
-# path; 1-line fixtures now legitimately pass the gate.
+# fixture must exceed the threshold (150 lines since 2026-07-20) to keep testing
+# the block path; 1-line fixtures now legitimately pass the gate.
 py_lines() { local i; for ((i=1; i<=$1; i++)); do echo "print('line $i')"; done; }
 
 # git_f: git against a fixture dir under the same isolation
@@ -217,7 +217,7 @@ assert_eq "h2a: clean tree allows stop" "$CODE" "0"
 assert_eq "h2a: no block JSON emitted" "$OUT" ""
 
 # (b) uncommitted business file, no marker -> block (and stays blocked on rerun)
-py_lines 60 > "$R2/app.py"
+py_lines 200 > "$R2/app.py"
 run_hook "$VF" "$STOP_JSON"
 assert_eq "h2b: exit 0 (block via JSON, not exit code)" "$CODE" "0"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
@@ -252,7 +252,7 @@ run_hook "$VF" "$STOP_JSON"
 assert_eq "h2c2: commit of certified content still allows" "$OUT" ""
 
 # (c3) new edits after certification re-block
-py_lines 60 >> "$R2/app.py"
+py_lines 200 >> "$R2/app.py"
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
 assert_eq "h2c3: post-certification edit blocks again" "$DEC" "block"
@@ -292,7 +292,7 @@ git_f "$R2" mv renamed.py app.py   # restore
 
 # (g) untracked file inside a NEW directory must be seen (porcelain -uall)
 mkdir -p "$R2/newdir"
-py_lines 60 > "$R2/newdir/deep.py"
+py_lines 200 > "$R2/newdir/deep.py"
 run_hook "$VF" "$STOP_JSON"
 REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
 assert_contains "h2g: file inside new directory is caught" "$REASON" "newdir/deep.py"
@@ -305,7 +305,7 @@ assert_eq "h2h: docs-only change allows stop" "$OUT" ""
 git_f "$R2" checkout -q -- README.md
 
 # (i) bypass flag: bare touch rejected (v4.0), user-approved line honored
-py_lines 60 > "$R2/app2.py"
+py_lines 200 > "$R2/app2.py"
 touch "$BYPASS2"
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
@@ -346,7 +346,7 @@ assert_eq "h2l: review heals the broken baseline" "$OUT" ""
 assert_eq "h2l: healed baseline line1 is HEAD" "$(baseline_head "$BASELINE2")" "$(git_f "$R2" rev-parse HEAD)"
 
 # (m) solo profile block message discloses reduced isolation
-py_lines 60 >> "$R2/app.py"
+py_lines 200 >> "$R2/app.py"
 run_hook "$VF" "$STOP_JSON" solo
 REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
 assert_contains "h2m: solo block mentions isolation OFF" "$REASON" "ISOLATION IS OFF"
@@ -354,7 +354,7 @@ assert_not_contains "h2m: solo block has no touch incantation" "$REASON" "touch 
 git_f "$R2" checkout -q -- app.py
 
 # (n) filename with a space survives the porcelain parse
-py_lines 60 > "$R2/my app.py"
+py_lines 200 > "$R2/my app.py"
 run_hook "$VF" "$STOP_JSON"
 REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
 assert_contains "h2n: space-containing filename listed intact" "$REASON" "my app.py"
@@ -370,7 +370,7 @@ git_f "$R2" commit -q -m "fixture: tracked-but-ignored file"
 valid_marker "$SELF_M2" solo
 run_hook "$VF" "$STOP_JSON"   # certify the clean state (also heals baseline)
 assert_eq "h2o setup: clean state certified" "$OUT" ""
-py_lines 60 >> "$R2/legacy.py"
+py_lines 200 >> "$R2/legacy.py"
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
 REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
@@ -381,7 +381,7 @@ rm -f "$BASELINE2"
 
 # (p) v4.0 anti-forgery: a BARE-TOUCHED marker must not pass — it is
 # discarded, called out, and only an evidence marker heals the state
-py_lines 60 >> "$R2/app.py"
+py_lines 200 >> "$R2/app.py"
 touch "$CODEX_M2"
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
@@ -426,16 +426,15 @@ for ((i=1; i<=40; i++)); do echo "class L$i {}"; done > "$R2/TweakTest.java"
 run_hook "$VF" "$STOP_JSON"
 assert_eq "h2q: suffix-style Java test file doesn't count" "$OUT" ""
 rm -f "$R2/TweakTest.java"
-py_lines 5 > "$R2/tweak3.py"
-py_lines 5 > "$R2/tweak4.py"
+for n in 3 4 5 6 7 8; do py_lines 5 > "$R2/tweak$n.py"; done
 run_hook "$VF" "$STOP_JSON"
-assert_eq "h2q: test file doesn't count toward file cap (5 paths, 4 business)" "$OUT" ""
-py_lines 5 > "$R2/tweak5.py"
+assert_eq "h2q: test file doesn't count toward file cap (9 paths, 8 business)" "$OUT" ""
+py_lines 5 > "$R2/tweak9.py"
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
-assert_eq "h2q: fifth business file crosses the file cap and blocks" "$DEC" "block"
-rm -f "$R2/tweak3.py" "$R2/tweak4.py" "$R2/tweak5.py"
-py_lines 45 >> "$R2/tweak.py"
+assert_eq "h2q: ninth business file crosses the file cap and blocks" "$DEC" "block"
+for n in 3 4 5 6 7 8 9; do rm -f "$R2/tweak$n.py"; done
+py_lines 145 >> "$R2/tweak.py"
 run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
 assert_eq "h2q: cumulative lines past the threshold block" "$DEC" "block"
