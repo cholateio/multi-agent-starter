@@ -80,7 +80,7 @@ docstring 只給 public API 寫契約（參數/回傳/raises）。
   (`verify-final-review.sh`) sees committed and uncommitted work alike, and only
   accepts a marker carrying a `reviewed-by=` evidence line, which `/kit-review`
   writes after the review actually runs — a bare `touch` does not pass. The gate auto-allows while the CUMULATIVE
-  unreviewed change stays small (≤50 lines / ≤4 business files — test files
+  unreviewed change stays small (≤150 lines / ≤8 business files — test files
   count toward neither — no sensitive
   or protected path): small tweaks accumulate, and the review that fires once
   the threshold is crossed covers the whole batch. Do not run ceremonial

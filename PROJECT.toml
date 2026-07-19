@@ -3,11 +3,10 @@
 
 name = "multi-agent-starter"
 status = "active"
-status_note = "kit v4.7:manifest 欄位有牙齒了(idle 狀態、長度檢查);--update 鋪開機隊(anatomy-rag、cholate-blog 欠 update)"
-updated = 2026-07-12
+status_note = "codex 呼叫路徑修好,review 閘門放寬到 150/8;重啟 session 生效後鋪回機隊"
+updated = 2026-07-20
 
 [commands]                 # 只收「用它」的指令;測試指令見 tests/
 init-new = "./init.sh <target-dir>"
-update-all = "for d in /home/cholate/*/; do [ -f \"$d/.claude/kit-version\" ] && ./init.sh \"$d\" --update; done"
 
 # 無付費外部服務(codex/claude 訂閱屬機器層,不算專案綁定)

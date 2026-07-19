@@ -21,9 +21,35 @@ re-block.
    announced it, along with this session's exact marker paths.
 
 2. **Run the review**:
-   - **full** → invoke `/codex:review` on the change set
-     (`/codex:adversarial-review` instead for high-stakes work: auth,
-     payments, schema/data migration, security boundaries).
+   - **full** → run the codex companion script directly with Bash. Do NOT
+     try to invoke `/codex:review` or `/codex:adversarial-review` via the
+     Skill tool: both carry `disable-model-invocation: true`, so the call
+     fails with "cannot be used with Skill tool" and the model ends up
+     improvising a detour through `codex:codex-rescue` (receipt
+     2026-07-20). Those two slash commands are for the USER to type.
+
+     Resolve the plugin root dynamically — the path carries a version
+     number that moves on every plugin update, so never hardcode it.
+     Resolve it with node, not python3: node is already required to run
+     the companion script, while python3 is absent on supported Windows /
+     Git Bash installs (codex review finding, 2026-07-20).
+
+     ```bash
+     ROOT=$(node -e "const os=require('os'),fs=require('fs');const p=JSON.parse(fs.readFileSync(os.homedir()+'/.claude/plugins/installed_plugins.json','utf8'));process.stdout.write(p.plugins['codex@openai-codex'][0].installPath)")
+     node "$ROOT/scripts/codex-companion.mjs" review --wait
+     ```
+
+     A codex review commonly runs 3-10 minutes: give the Bash call a
+     timeout of at least 900000 ms, or run it with `run_in_background`
+     and collect the output. For high-stakes work (auth, payments,
+     schema/data migration, security boundaries) use `adversarial-review`
+     in place of `review`, appending the focus text.
+
+     If `ROOT` comes back empty or the script path does not exist, the
+     reviewer is UNAVAILABLE — go to "Reviewer unavailable?" below. Do not
+     substitute a Claude self-review, and do not fall back to
+     `codex:codex-rescue`: rescue is the write-capable fix path, not the
+     reviewer, and it bypasses the native reviewer's git scoping.
    - **solo** → spawn the `solo-reviewer` subagent on the diff, and tell the
      user plainly: "solo profile: cross-model isolation is OFF — this is a
      same-model self-review (state/time isolation only)."

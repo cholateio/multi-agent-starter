@@ -209,8 +209,16 @@ fi
 # git-measured — the model calling a change "small" has no effect.
 # Fail closed: no baseline, unresolvable CERT_TREE, or a binary numstat
 # row ("-") all fall through to the size-blind block below.
-SMALL_MAX_LINES=50
-SMALL_MAX_FILES=4
+# 2026-07-20: 50/4 was tuned for "one task per session". It mis-serves the
+# actual dominant workload — continuous UI tuning, where every edit is
+# genuinely small but the session total crosses 50 by mid-afternoon, so the
+# review fires on whichever 3-line tweak happens to be last (receipt
+# 2026-07-20: user reports the gate triggering on pre-commit micro-edits in
+# established projects). Raised to 150/8. The accumulation design is
+# deliberately kept: sensitive and protected paths stay size-blind below,
+# so this loosens only the non-sensitive tuning path.
+SMALL_MAX_LINES=150
+SMALL_MAX_FILES=8
 # v4.5: test files count toward NEITHER cap. The gate guards unreviewed
 # BUSINESS logic; "one component + its tests" was the most common false
 # trigger (receipt 2026-07-12: a margin tweak touched 6 files / 55 lines,
