@@ -99,6 +99,10 @@ billing = "free-tier"
 monthly_est = "$0"
 EOF
 
+# range 中點 ≥10 不得被 int 捨入吃掉小數(US$10-11 → 10.5,不是 10——低估半塊)
+mkdir -p "$ROOT/round-proj"
+printf 'name = "round-proj"\nstatus = "done"\n[[paid]]\nservice = "R"\nbilling = "按用量"\nmonthly_est = "US$10-11/月"\n' > "$ROOT/round-proj/PROJECT.toml"
+
 # 全 free-tier → 花費顯示「免費」
 mkdir -p "$ROOT/freeonly-proj"
 printf 'name = "freeonly-proj"\nstatus = "done"\n[[paid]]\nservice = "OnlyFree"\nbilling = "free-tier"\nmonthly_est = "$0"\n' > "$ROOT/freeonly-proj/PROJECT.toml"
@@ -276,6 +280,8 @@ assert_contains "html: unestimable flagged not zeroed" "$HTML" '<span class="cos
 assert_contains "html: yearly uses monthly equiv" "$HTML" '<div class="cost-sum">NT$22/月</div>'
 # 全 free-tier → 免費
 assert_contains "html: all free shows 免費" "$HTML" '<div class="cost-sum">免費</div>'
+# range 中點 ≥10 保留小數(codex P2:int(round(10.5))=10 銀行家捨入會低估)
+assert_contains "html: fractional midpoint above ten kept" "$HTML" '<div class="cost-sum">US$10.5/月</div>'
 # HTML 轉義:xss-proj 的 <script> 不得原樣注入
 assert_not_contains "html: user script not raw" "$HTML" "<script>alert(1)"
 assert_contains "html: user script escaped" "$HTML" "&lt;script&gt;alert(1)"

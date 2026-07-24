@@ -30,9 +30,8 @@ commit hash）不寫這裡，歸 LESSONS／commit message。
   一眼認出服務用）。
 - `billing`：**封閉枚舉** `按用量 | 月費 | 年費 | free-tier`。填別的值會被
   當成「按用量」，固定月費就從 KPI 的固定月費項**靜默消失**。
-- `monthly_est`：只放金額與用量（`NT$128/月;Actions 用量估 2000+ 分/月`），上限
-  40 字，**不夾確認日期或算法依據**（`proj` 對 `YYYY-MM-DD`／「確認」warn）——
-  那些全歸 TOML 註解。
+- `monthly_est`：金額與用量,以幣別（NT$/US$）+ 週期（/月|/年）起頭，dashboard 才
+  加得進月總和;上限 40 字，**不夾確認日期或算法依據**（`proj` warn `YYYY-MM-DD`／確認）。
 - `cancel`：怎麼停止付錢。dashboard 不渲染，只在 `proj money` 與 TOML 看得到。
 
 只更新事實，不改 schema。不確定某服務是否付費：照列，加 `# 待確認`。
