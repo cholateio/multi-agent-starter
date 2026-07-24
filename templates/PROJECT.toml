@@ -8,6 +8,8 @@ status = "active"          # active | mvp | idle | done | paused | abandoned
 status_note = "[目前進度];[下一步]"   # 兩段以分號隔開,每段一句話、上限 60 字;
                                      # 細節(數據/hash/待辦清單)歸 LESSONS/commit,不寫這裡
 updated = 2026-07-11       # 最後一次人工確認本檔內容的日期
+# lang = ["Python", "Bash"] # 選填,覆蓋 dashboard 的語言 tag。預設從根標記檔自動偵測
+                           # (pyproject/package.json/go.mod…);偵測不到或想手指定時才填
 
 [commands]                 # 只收「用它」的指令(本專案工具/服務的啟動與操作,可直接複製執行)。
                            # 不收「開發它」的指令(dev/build/test/deploy——package.json/Makefile 查得到)。
