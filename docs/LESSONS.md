@@ -2,6 +2,12 @@
 
 > 踩坑記錄（格式見 kit-evolution 規則）。同一個坑踩第二次之前寫入。
 
+### 2026-07-25 Python round() 是銀行家捨入，在 money 顯示上會低估
+- Context: `proj` 卡片把各服務月費解析成數字加總,`_fmt_amount` 對 ≥10 的值用 `int(round(v))`
+- Error: `int(round(10.5)) == 10`(不是 11)——Python3 的 `round` 是 ties-to-even(銀行家捨入),不是四捨五入。range US$10-11 的中點 10.5 被顯示成 US$10,「取中點」悄悄變成「取下界」,money 總和被低估。codex review P2 抓到;真實機隊沒踩到(唯一的 range US$2-3 中點 2.5 <10 走保留小數的分支)
+- Solution: 非整數一律保留 1 位小數(`round(v,1)` 後判斷是否整數),不做 int 捨入
+- Rule: 對金額/計量做四捨五入別用裸 `round()`/`int(round())`——那是銀行家捨入,.5 會往偶數靠而非往上,在錢的顯示上是系統性低估。要真四捨五入用 `Decimal(ROUND_HALF_UP)` 或保留小數不捨。
+
 ### 2026-07-25 在共用路徑上新增驗證，把一個專案的壞欄位變成全機隊當機
 - Context: 給 `proj` 的 manifest 加指令長度上限,檢查寫在 `load_manifest()`——那是 `proj`／`proj money`／`proj html` 全都會走的共用路徑
 - Error: `for k, v in (data.get("commands") or {}).items()` 遇到合法 TOML 但非 table 的 `commands = ["echo hi"]` 直接 `AttributeError`。改動前那個專案只是「沒指令」照樣列出;改動後**整份跨專案總覽**連同其他 15 個健康專案一起掛掉(smoke 52 條連帶失敗)。codex review P2 抓到,我先在 main 版跑同一份 fixture 確認是回歸才修
