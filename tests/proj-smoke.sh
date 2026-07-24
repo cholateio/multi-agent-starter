@@ -270,10 +270,10 @@ assert_not_contains "html: no money tables left" "$HTML" "<table"
 assert_not_contains "html: no per-service amount on card" "$HTML" "cost-amt"
 # 同幣別相加:good-proj 只有 OpenAI NT$150(Supabase free 不計) → NT$150/月
 assert_contains "html: cost total sums same currency" "$HTML" '<div class="cost-sum">NT$150/月</div>'
-# 服務 tag 自成一列在卡片最底,與花費脫鉤:tags-row 直接接在花費 band value 之後,
-# 且 grid-column:1/-1 跨滿卡片寬(按用量保留警示色,free 沉底)
-assert_contains "html: tags row is full-width bottom row" "$HTML" ".tags-row{grid-column:1/-1"
-assert_contains "html: tags row follows the cost band, not nested in it" "$HTML" '<div class="cost-sum">NT$150/月</div></div><div class="tags-row"><span class="paid paid-usage">OpenAI API</span><span class="paid paid-free">Supabase</span></div>'
+# 服務 tag 自成一列、頂到卡片底(margin-top:auto),同列等高卡對齊同一底線。tags-row 是
+# c-body 的姊妹(不巢狀在裡面)——所以接在 c-body 收尾 </div> 之後,多一層 </div>
+assert_contains "html: tags row pinned to card bottom" "$HTML" ".tags-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:auto}"
+assert_contains "html: tags row is a sibling after c-body, not nested" "$HTML" '<div class="cost-sum">NT$150/月</div></div></div><div class="tags-row"><span class="paid paid-usage">OpenAI API</span><span class="paid paid-free">Supabase</span></div>'
 assert_not_contains "html: old cost-tags class gone" "$HTML" "cost-tags"
 # 不同幣別分列 + range 取中點(US$2-3 → 2.5)
 assert_contains "html: mixed currency kept separate" "$HTML" 'NT$100 + US$2.5/月'
