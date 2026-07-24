@@ -7,7 +7,7 @@
 > 為什麼需要：kit 的 prose 分四層（CLAUDE.md 範本、`.claude/rules/`、
 > `judgment-matrix`、dispatch 模板判斷句），外加 superpowers 等 plugin
 > 的注入。層與層之間的重複、矛盾、過時補丁是可預期的腐化路徑
-> （handover-from-fable §二·3「規則稀釋」的近親）——而目前沒有任何
+> （harness-diagnosis §五·3「規則稀釋」的近親）——而目前沒有任何
 > 物理防線能偵測「兩條規則打架」，只能靠例行審計。
 
 ## 怎麼跑
