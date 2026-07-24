@@ -374,7 +374,7 @@ button.kpi{cursor:pointer}
 .copy{border:1px solid var(--line);background:var(--surf);color:var(--mut);border-radius:5px;cursor:pointer;padding:1px 6px}
 .cost-sum{font-size:13px;overflow-wrap:anywhere}
 .cost-warn{color:var(--warn-i)}
-.cost-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
+.tags-row{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:5px;margin-top:2px}
 .paid{font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
 .paid-usage{color:var(--warn-i);border-color:var(--warn-i)}
 .paid-free{color:var(--mut)}
@@ -553,18 +553,20 @@ def _render_bands(r):
                 f'<button class="copy" data-cmd="{_e(v)}" title="複製">C</button>')
         band("指令", f'<div class="band-v"><div class="cmds">{"".join(cmd_cells)}</div></div>')
 
-    # 花費 = 一行按月總和 + 服務 tag 橫排下一列。逐項金額(混幣別、range、費率、?)在卡片上
-    # 掃不出「這個專案花多少」,所以收斂成單一總和;完整逐項在 `proj money` 與 manifest。
-    # 未估項誠實標記不謊報 0——一個把 ? 當 0 的總和會說專案免費,實際是未知(見 A 方案討論)。
+    # 花費 = 一行按月總和。逐項金額(混幣別、range、費率、?)在卡片上掃不出「這個專案花多少」,
+    # 所以收斂成單一總和;完整逐項在 `proj money` 與 manifest。未估項誠實標記不謊報 0——
+    # 一個把 ? 當 0 的總和會說專案免費,實際是未知(見 A 方案討論)。
+    #
+    # 服務 tag 則自成一列、跨滿卡片寬、與花費脫鉤——它答的是「用了哪些服務」,不是「花多少」。
+    # tags-row 的 grid-column:1/-1 從標籤欄左緣起跨兩欄,排在所有 band 之後(卡片最底)。
     if r["paid"]:
         summary, ordered = _cost_summary(r["paid"])
+        band("花費", f'<div class="band-v"><div class="cost-sum">{summary}</div></div>')
         tags = "".join(
             f'<span class="paid paid-{_paid_bucket(str(p.get("billing", "")))}">'
             f'{_e(p.get("service", "?"))}</span>'
             for p in ordered)
-        band("花費",
-             f'<div class="band-v"><div class="cost-sum">{summary}</div>'
-             f'<div class="cost-tags">{tags}</div></div>')
+        cells.append(f'<div class="tags-row">{tags}</div>')
 
     return f'<div class="c-body">{"".join(cells)}</div>' if cells else ''
 
