@@ -14,6 +14,7 @@ PROJECT.toml 者視為專案。Python 3.11+,零第三方依賴。
 import datetime
 import html
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,12 @@ VALID_BILLING = {"按用量", "月費", "年費", "free-tier"}
 # monthly_est 字數上限。只放金額與用量（"NT$128/月;Actions 用量估 2000+ 分/月"）——
 # 怎麼算出來的、確認日期、月上限設定,全歸 TOML 註解。表格欄位不是註腳。
 MONTHLY_EST_MAX = 40
+# 指令長度上限。基準:2026-07-24 機隊量測中位數 24 字,超過 80 的只有一條(quant 的
+# 120 字 taifex_fetch,含兩個 $(date) 展開)——那種長度該包成腳本再收錄,不是貼進 manifest。
+COMMAND_MAX = 80
+# monthly_est 只放金額與用量。確認日期("user 2026-07-11 確認")與算法依據是收據,
+# 歸 TOML 註解——規則本來就這樣寫,但長期只有長度被執法、成分沒有,所以違規值長期存活。
+_EST_RECEIPT = re.compile(r"\d{4}-\d{2}-\d{2}|確認")
 
 
 def warn(msg):
@@ -81,6 +88,11 @@ def load_manifest(d):
                 warn(f"{d.name}: status_note 第 {i+1} 段 {len(s)} 字 "
                      f"(上限 {NOTE_SEG_MAX})——細節歸 LESSONS / commit message")
 
+    for k, v in (data.get("commands") or {}).items():
+        if isinstance(v, str) and len(v) > COMMAND_MAX:
+            warn(f"{d.name}: 指令 {k} {len(v)} 字(上限 {COMMAND_MAX})"
+                 f"——包成腳本再收錄,卡片一行放不下")
+
     # service 只放**服務名稱**,不放說明。括號幾乎必然是說明（"Supabase (PostgreSQL)"、
     # "GitHub Pro（repo 已轉 private → ...）"）,而 badge 是拿來一眼認出服務的,不是拿來讀的。
     # 說明降級成 TOML 註解,或寫進 monthly_est / cancel——那裡本來就該有。
@@ -100,6 +112,9 @@ def load_manifest(d):
         if isinstance(m, str) and len(m) > MONTHLY_EST_MAX:
             warn(f"{d.name}: {s} 的 monthly_est {len(m)} 字(上限 {MONTHLY_EST_MAX})"
                  f"——只放金額與用量,算法與依據歸註解")
+        if isinstance(m, str) and _EST_RECEIPT.search(m):
+            warn(f"{d.name}: {s} 的 monthly_est 夾了確認日期／算法依據"
+                 f"——只放金額與用量,收據歸 TOML 註解")
     return data, None
 
 

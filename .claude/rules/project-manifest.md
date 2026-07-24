@@ -21,7 +21,8 @@ commit hash）不寫這裡，歸 LESSONS／commit message。
 `[commands]`（寧缺勿濫）：只收「**用它**」的指令——專案自己提供的工具/服務
 啟動與操作（例 `uv run yt-summary "<url>"`），不收「**開發它**」的
 （dev/build/test/lint/deploy、`make up`、`docker compose up`——查得到的不抄）。
-判準：半年後回來「用」它需要的才收。
+判準：半年後回來「用」它需要的才收。單條指令上限 **80 字**（`proj` 會 warn）
+——超過代表該包成腳本再收錄，dashboard 卡片一行放不下。
 
 `[[paid]]` 的欄位全都是**表格的一格**，不是註腳。`proj` 會對超標發警告：
 
@@ -30,7 +31,8 @@ commit hash）不寫這裡，歸 LESSONS／commit message。
 - `billing`：**封閉枚舉** `按用量 | 月費 | 年費 | free-tier`。填別的值會被
   當成「按用量」，固定月費就從花錢總覽**靜默消失**。
 - `monthly_est`：只放金額與用量（`NT$128/月;Actions 用量估 2000+ 分/月`），
-  上限 40 字。怎麼算出來的、確認日期、月上限設定——全歸 TOML 註解。
+  上限 40 字，且**不得夾帶確認日期或算法依據**（`proj` 對 `YYYY-MM-DD` 與
+  「確認」二字會 warn）。怎麼算出來的、確認日期、月上限設定——全歸 TOML 註解。
 - `cancel`：怎麼停止付錢。dashboard 不渲染（只在 `proj money` 終端檢視
   與 TOML 看得到）。
 

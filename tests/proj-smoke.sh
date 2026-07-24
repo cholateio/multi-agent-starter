@@ -106,6 +106,9 @@ assert_contains "list: bare-proj is 未登記" "$OUT" "未登記"
 assert_contains "list: broken manifest flagged in table" "$OUT" "manifest 損壞"
 assert_contains "list: parse warning on stderr" "$ERR" "解析失敗"
 assert_contains "list: non-string status warns but stays listed" "$ERR" "weird-proj"
+# schema 執法:指令長度上限、monthly_est 不得夾帶確認日期/算法依據(2026-07-24 量測)
+assert_contains "list: over-long command warns" "$ERR" "上限 80"
+assert_contains "list: monthly_est with a receipt date warns" "$ERR" "收據歸 TOML 註解"
 assert_contains "list: non-string status row present" "$OUT" "weird-proj"
 assert_not_contains "list: hidden dir excluded" "$OUT" ".hidden"
 
