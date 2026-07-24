@@ -458,8 +458,8 @@ def _parse_monthly(est):
 
 
 def _fmt_amount(v):
-    if v >= 10:
-        return str(int(round(v)))
+    # 非整數保留 1 位小數(range 中點如 10.5 不可被 int 捨入吃成 10——那是低估半塊,
+    # 且 Python 的 round 是銀行家捨入,10.5→10)。整數顯整數,免得 218.0 這種噪音。
     r = round(v, 1)
     return str(int(r)) if r == int(r) else str(r)
 
