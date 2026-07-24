@@ -3,8 +3,8 @@
 > **Kit-owned.** Don't edit here — change in the kit repo, then `init.sh --update`.
 
 `PROJECT.toml`（專案根目錄）是專案狀態的機器可讀 manifest，user-owned，`proj`
-靠它做跨專案彙總。Session 結束前若本次工作觸發以下任一事件，同步更新
-PROJECT.toml 並把 `updated` 改成今天：
+靠它做跨專案彙總。Session 結束前若本次工作觸發以下任一事件，更新它並把
+`updated` 改成今天：
 
 - 專案狀態跨越階段（如 MVP 完成、決定擱置）→ `status` / `status_note`
 - 起始指令新增或改變 → `[commands]`
@@ -20,20 +20,19 @@ commit hash）不寫這裡，歸 LESSONS／commit message。
 
 `[commands]`（寧缺勿濫）：只收「**用它**」的指令——專案自己提供的工具/服務
 啟動與操作（例 `uv run yt-summary "<url>"`），不收「**開發它**」的
-（dev/build/test/lint/deploy、`make up`、`docker compose up`——查得到的不抄）。
-判準：半年後回來「用」它需要的才收。單條指令上限 **80 字**（`proj` 會 warn）
-——超過代表該包成腳本再收錄，dashboard 卡片一行放不下。
+（dev/build/test/lint/deploy——查得到的不抄）。
+判準：半年後回來「用」它需要的才收。單條上限 **80 字**（`proj` warn），更長的
+包成腳本再收。
 
-`[[paid]]` 的欄位全都是**表格的一格**，不是註腳。`proj` 會對超標發警告：
+`[[paid]]` 每個欄位都是卡片上的**一格**，不是註腳。`proj` 對超標發警告：
 
-- `service`：只放服務名（`Supabase`、`GitHub Pro`、`Google Gemini API`），
-  不放說明（那是 badge，一眼認出服務用）。
+- `service`：只放服務名（`Supabase`、`GitHub Pro`），不放說明（那是 badge，
+  一眼認出服務用）。
 - `billing`：**封閉枚舉** `按用量 | 月費 | 年費 | free-tier`。填別的值會被
-  當成「按用量」，固定月費就從花錢總覽**靜默消失**。
-- `monthly_est`：只放金額與用量（`NT$128/月;Actions 用量估 2000+ 分/月`），
-  上限 40 字，且**不得夾帶確認日期或算法依據**（`proj` 對 `YYYY-MM-DD` 與
-  「確認」二字會 warn）。怎麼算出來的、確認日期、月上限設定——全歸 TOML 註解。
-- `cancel`：怎麼停止付錢。dashboard 不渲染（只在 `proj money` 終端檢視
-  與 TOML 看得到）。
+  當成「按用量」，固定月費就從 KPI 的固定月費項**靜默消失**。
+- `monthly_est`：只放金額與用量（`NT$128/月;Actions 用量估 2000+ 分/月`），上限
+  40 字，**不夾確認日期或算法依據**（`proj` 對 `YYYY-MM-DD`／「確認」warn）——
+  那些全歸 TOML 註解。
+- `cancel`：怎麼停止付錢。dashboard 不渲染，只在 `proj money` 與 TOML 看得到。
 
 只更新事實，不改 schema。不確定某服務是否付費：照列，加 `# 待確認`。
