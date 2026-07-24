@@ -34,11 +34,59 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 INPUT=$(cat 2>/dev/null || echo '{}')
+
+# working_tree_hash: content-addressed snapshot of the working tree, kept in
+# sync with the copies in session-start.sh and verify-final-review.sh.
+working_tree_hash() {
+    local idx tree
+    idx=$(mktemp "${TMPDIR:-/tmp}/claude-kit-idx.XXXXXX" 2>/dev/null) || return 0
+    rm -f "$idx"
+    if git rev-parse --verify HEAD >/dev/null 2>&1; then
+        GIT_INDEX_FILE="$idx" git read-tree HEAD 2>/dev/null
+    fi
+    GIT_INDEX_FILE="$idx" git add -A 2>/dev/null \
+        && tree=$(GIT_INDEX_FILE="$idx" git write-tree 2>/dev/null) \
+        && printf '%s\n' "$tree"
+    rm -f "$idx" "$idx.lock"
+    return 0
+}
+
+# take_snapshot: v4.8 turn-start snapshot feeding verify-final-review.sh's
+# turn-scoped enforcement (the Stop gate fires only when THIS turn changed the
+# tree, so brainstorm / read-only turns on prior unreviewed code stop getting
+# blocked). Invoked at the END of this hook — AFTER the KIT_JUDGMENT digest is
+# emitted — so on a pathological repo (100k+ files / slow clean filters) where
+# the git work could approach the 5s hook timeout, the digest is already
+# delivered and the snapshot merely degrades to fail-closed (the Stop gate
+# blocks, the safe direction; such repos should launch KIT_REVIEW_GATE=off).
+# Skipped entirely under KIT_REVIEW_GATE=off (the snapshot is never consumed).
+# Rewritten every prompt (NOT write-if-missing); the old snapshot is DELETED
+# first so a failed recompute leaves the fail-closed empty state, never a stale
+# prior-turn hash. line1 = tree content hash, line2 = HEAD sha — the Stop gate
+# needs BOTH unchanged (content addressing is commit-agnostic, so a commit-only
+# turn would otherwise slip a dirty change into a commit unreviewed). (codex
+# findings, 2026-07-23/24.)
+take_snapshot() {
+    [[ "${KIT_REVIEW_GATE:-on}" == "off" ]] && return 0
+    local sid cwd
+    sid=$(echo "$INPUT" | jq -r '.session_id // "default"' 2>/dev/null || echo "default")
+    cwd=$(echo "$INPUT" | jq -r '.cwd // "."' 2>/dev/null || echo ".")
+    rm -f "/tmp/claude-kit-turnstart-${sid}"
+    (
+        cd "$cwd" 2>/dev/null || exit 0
+        git rev-parse --git-dir >/dev/null 2>&1 || exit 0
+        h=$(working_tree_hash)
+        head=$(git rev-parse --verify HEAD 2>/dev/null || echo "unborn")
+        [[ -n "$h" ]] && printf '%s\n%s\n' "$h" "$head" > "/tmp/claude-kit-turnstart-${sid}"
+    ) 2>/dev/null || true
+}
+
 # The stdin field name has varied across Claude Code versions
 # (.prompt / .user_input) — accept either.
 PROMPT=$(echo "$INPUT" | jq -r '.prompt // .user_input // ""' 2>/dev/null || echo "")
 
 if [[ -z "$PROMPT" ]]; then
+    take_snapshot   # empty prompt: no digest, but still a turn boundary
     exit 0
 fi
 
@@ -87,4 +135,8 @@ fi
 
 jq -n --arg ctx "$CTX" \
   '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $ctx}}'
+
+# Snapshot runs LAST — the digest above is already emitted, so a slow snapshot
+# on a pathological repo can't cost this prompt its KIT_JUDGMENT context.
+take_snapshot
 exit 0

@@ -46,9 +46,29 @@
 # states (no baseline, binary rows) stay size-blind. See the
 # small_change_allow section below.
 #
+# v4.8 turn-scoped enforcement: the gate is working-tree-scoped, so before
+# v4.8 it re-fired on EVERY turn while unreviewed business code sat in the
+# tree — a brainstorming / read-only turn on top of a prior unreviewed change
+# got blocked over and over (receipt 2026-07-23: user reports the gate
+# blocking repeatedly during brainstorming after an earlier feature was
+# implemented but not yet reviewed). Fix: classify-task.sh (UserPromptSubmit)
+# snapshots the working-tree hash at the START of each turn; the block only
+# fires when THIS turn actually changed the tree. See the turn-scoped section
+# just above the block. Content-addressed, so a dispatched subagent's edits
+# count too. v4.8 also adds a user-only escape hatch, KIT_REVIEW_GATE=off,
+# parallel to KIT_PROTECT / KIT_BREAKER.
+#
 # Reference: https://code.claude.com/docs/en/hooks#stop
 
 set -uo pipefail
+
+# Escape hatch (user-only), parallel to protect-paths' KIT_PROTECT and
+# tool-breaker's KIT_BREAKER: start the session with KIT_REVIEW_GATE=off to
+# disable this final-review Stop gate for that session (e.g. a pure
+# exploration / brainstorming session). A model cannot flip it mid-session —
+# hooks inherit the env Claude Code launched with, not the model's Bash
+# exports.
+[[ "${KIT_REVIEW_GATE:-on}" == "off" ]] && exit 0
 
 # If jq is not available, silently allow — don't block stop on missing tooling
 if ! command -v jq >/dev/null 2>&1; then
@@ -111,7 +131,7 @@ CURRENT_TREE=$(working_tree_hash)
 # re-trigger the gate at the next stop.
 advance_baseline() {
     local head_sha
-    head_sha=$(git rev-parse HEAD 2>/dev/null || echo "unborn")
+    head_sha=$(git rev-parse --verify HEAD 2>/dev/null || echo "unborn")
     printf '%s\n%s\n' "$head_sha" "${CURRENT_TREE}" >"$BASELINE_FILE" 2>/dev/null || true
 }
 
@@ -317,6 +337,53 @@ rm -f "$CODEX_MARKER" "$SELF_MARKER"
 # baseline: the change keeps counting toward the next review.
 if small_change_allow; then
     exit 0
+fi
+
+# v4.8 turn-scoped enforcement: at a turn boundary the gate fires only when
+# THIS turn actually changed the working tree. classify-task.sh
+# (UserPromptSubmit) snapshots the tree hash at the START of every turn; if
+# the tree is byte-identical now, this was a conversation / brainstorm /
+# read-only turn and a pending review obligation must NOT interrupt it. The
+# obligation is preserved on purpose — the baseline is NOT advanced, so the
+# next turn that touches code (or a review) still settles the whole batch.
+# Content-addressed on the tree, so a dispatched subagent's edits count too
+# (the main transcript would not show them as Edit/Write tool calls).
+# BOTH the tree content hash AND HEAD must be unchanged: content addressing is
+# commit-agnostic, so a commit-only turn (HEAD moves, tree content identical)
+# would otherwise slip a dirty unreviewed change into a commit — reopening the
+# very commit blind spot the gate exists to close (codex review finding,
+# 2026-07-23). The certified-tree fast path above still allows the legitimate
+# reviewed-then-committed turn.
+# Fail-closed: no turn-start snapshot (hook disabled, first stop before any
+# prompt, or a legacy 1-line snapshot straddling an update) falls through to
+# the block below.
+# Exception: an invalid marker or bypass consumed this turn (INVALID_MARKER /
+# INVALID_BYPASS) must still surface its block + STALE_NOTE even on an
+# unchanged tree — silently allowing it would suppress the "your evidence did
+# not count" feedback and weaken the anti-forgery contract (codex review
+# finding, 2026-07-23).
+#
+# KNOWN GAP (accepted tradeoff, user-approved 2026-07-24; codex P1 flagged it):
+# an unchanged-tree turn is allowed even if it DECLARES THE TASK COMPLETE — the
+# hook cannot tell a "done" turn from brainstorming by tree state alone, so a
+# completion claim made without a further edit can end the turn without
+# /kit-review. This is the price of not blocking every brainstorming turn. It
+# is NOT unguarded: (1) the very next turn that touches code re-blocks the whole
+# pending batch, and (2) the prose layer still requires review before "done"
+# (kit-workflow "Final review"; kit-judgment verified/unverified). Enforcing it
+# in the hook would need fragile completion-language detection that reintroduces
+# the false-blocks this feature removed. Sensitive paths are unaffected — they
+# stay size-blind above and get phase-level review during the work.
+TURNSTART_FILE="/tmp/claude-kit-turnstart-${SESSION_ID}"
+if [[ "$INVALID_MARKER" -eq 0 && "$INVALID_BYPASS" -eq 0 \
+      && -n "$CURRENT_TREE" && -f "$TURNSTART_FILE" ]]; then
+    TURNSTART_TREE=$(sed -n '1p' "$TURNSTART_FILE" 2>/dev/null)
+    TURNSTART_HEAD=$(sed -n '2p' "$TURNSTART_FILE" 2>/dev/null)
+    CURRENT_HEAD=$(git rev-parse --verify HEAD 2>/dev/null || echo "unborn")
+    if [[ -n "$TURNSTART_TREE" && "$CURRENT_TREE" == "$TURNSTART_TREE" \
+          && -n "$TURNSTART_HEAD" && "$TURNSTART_HEAD" == "$CURRENT_HEAD" ]]; then
+        exit 0
+    fi
 fi
 
 # === Block the stop ===

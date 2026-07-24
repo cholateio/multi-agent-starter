@@ -62,7 +62,7 @@ working_tree_hash() {
 BASELINE_FILE="/tmp/claude-kit-baseline-${SESSION_ID}"
 if [[ -n "$CWD" && ! -f "$BASELINE_FILE" ]] && cd "$CWD" 2>/dev/null \
    && git rev-parse --git-dir >/dev/null 2>&1; then
-    HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "unborn")
+    HEAD_SHA=$(git rev-parse --verify HEAD 2>/dev/null || echo "unborn")
     printf '%s\n%s\n' "$HEAD_SHA" "$(working_tree_hash)" >"$BASELINE_FILE" 2>/dev/null || true
 fi
 

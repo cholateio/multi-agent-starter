@@ -2,6 +2,12 @@
 
 > 踩坑記錄（格式見 kit-evolution 規則）。同一個坑踩第二次之前寫入。
 
+### 2026-07-24 中文行內註解的非 ASCII 位元組滲進 secret，爆 gateway 認證
+- Context: connector 從 `.env` 抓 HERMES_KEY 傳給 Hermes gateway 做 Bearer 認證
+- Error: `.env` 的 key 行尾跟了中文 `#` 註解，`cut -d= -f2` 沒剝行內註解，把中文的 byte `0xA7`（§）一起塞進 token → gateway `token.encode()` 對第 74 位字元爆 500；七輪 curl 全帶著壞 key（中途還踩 MSYS `/d/` 路徑把 KEY 抓成空 → 401，反向印證 500 是壞 key 字元）
+- Solution: 改 connector 的 .env 讀法 `partition('=')→split('#')→strip`（剝引號與行內註解）；真 key 118→64 字元，認證通過。並立語言規則（見 kit-workflow 註解紀律）
+- Rule: 代碼內註解一律英文；config/secret 檔案的值行絕不放非 ASCII（含中文行內註解）——會滲進 token／編碼等 byte 敏感語境。抓 .env 值用 partition/split/strip，不要裸 `cut`
+
 ### 2026-07-12 小改門檻把測試檔算進業務檔，越補測試越容易破檻
 - Context: 部署專案裡一次 margin 調整（真正的 CSS 改動 19 行）觸發跨模型 review——共用元件連動 3 個測試檔，合計 6 檔 55 行，SMALL_MAX_FILES=2 先爆
 - Error: small_change_allow 的 business file 判定只看副檔名，測試檔照算；「元件 + 其測試」= 2 檔即頂格，誘因反向（越認真補測試越容易被罰跑 review）

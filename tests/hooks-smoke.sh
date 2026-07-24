@@ -54,8 +54,9 @@ assert_file_absent() { if [ ! -e "$2" ]; then pass "$1"; else fail "$1" "unexpec
 
 # run_hook <hook-path> <stdin-json> [KIT_PROFILE value] [VAR=val ...]
 # sets OUT (stdout), ERR (stderr) and CODE. Env is controlled: git/HOME
-# isolation, an explicit KIT_PROFILE (default full), v4.0 kit toggles forced
-# to their defaults (a developer's shell could carry KIT_PROTECT=off), and
+# isolation, an explicit KIT_PROFILE (default full), the kit toggles forced
+# to their defaults (a developer's shell could carry KIT_PROTECT=off or the
+# v4.8 KIT_REVIEW_GATE=off, which would silently pass every block test), and
 # CLAUDE_PROJECT_DIR cleared so hooks fall back to the fixture cwd instead
 # of the kit repo this suite runs from. Extra VAR=val args override any of
 # these (env(1): later assignments win).
@@ -64,7 +65,7 @@ run_hook() {
   shift 3 2>/dev/null || shift $#
   OUT="$(printf '%s' "$json" | GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$GIT_ID_CFG" \
         HOME="$FAKE_HOME" env KIT_PROFILE="$profile" KIT_PROTECT=on KIT_BREAKER=on \
-        CLAUDE_PROJECT_DIR= "$@" bash "$hook" 2>"$WORK/last-stderr")"
+        KIT_REVIEW_GATE=on CLAUDE_PROJECT_DIR= "$@" bash "$hook" 2>"$WORK/last-stderr")"
   CODE=$?
   ERR="$(cat "$WORK/last-stderr" 2>/dev/null)"
 }
@@ -480,7 +481,104 @@ run_hook "$VF" "$STOP_JSON"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
 assert_eq "h2s: tiny change on protected path still blocks" "$DEC" "block"
 rm -rf "$R2/src" "$R2/.claude"
-rm -f "$BASELINE2"
+
+# (t/u) v4.8 TURN-SCOPED enforcement + escape hatch. Uses a DEDICATED fresh
+# fixture: R2's accumulated history (hundreds of committed "print('line N')"
+# lines) would let a similar-looking 300-line change slip under the v4.3
+# small-change threshold and mask the block — a clean baseline makes the diff
+# genuinely exceed it.
+R2T="$WORK/h2-turnscope"; make_repo "$R2T"
+SID2T="${SID_PREFIX}-h2t"
+BASELINE2T="/tmp/claude-kit-baseline-${SID2T}"
+TURNSTART2T="/tmp/claude-kit-turnstart-${SID2T}"
+CODEX_M2T="/tmp/claude-codex-reviewed-${SID2T}"
+STOP2T="{\"session_id\":\"${SID2T}\",\"cwd\":\"${R2T}\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
+rm -f "$BASELINE2T" "$TURNSTART2T"
+run_hook "$SS" "{\"session_id\":\"${SID2T}\",\"cwd\":\"${R2T}\"}"   # fresh baseline, clean tree
+BT_BEFORE="$(baseline_tree "$BASELINE2T")"
+# the big change is already in the tree at THIS turn's start: classify-task
+# snapshots it, so the current tree equals the turn-start snapshot
+py_lines 200 > "$R2T/app.py"
+run_hook "$HOOKS/classify-task.sh" "{\"session_id\":\"${SID2T}\",\"cwd\":\"${R2T}\",\"prompt\":\"lets brainstorm the next feature\"}"
+assert_file_exists "h2t: classify-task recorded a turn-start snapshot" "$TURNSTART2T"
+run_hook "$VF" "$STOP2T"
+assert_eq "h2t: no-change turn on a big unreviewed diff allows (turn-scoped)" "$OUT" ""
+assert_eq "h2t: obligation preserved — baseline tree NOT advanced" "$(baseline_tree "$BASELINE2T")" "$BT_BEFORE"
+
+# (t2) a turn that DOES change the tree still blocks: the current tree now
+# diverges from the turn-start snapshot recorded above
+py_lines 100 >> "$R2T/app.py"
+run_hook "$VF" "$STOP2T"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2t2: a turn that changed the tree still blocks" "$DEC" "block"
+
+# (t3) fail-closed: no turn-start snapshot at all -> block as before v4.8
+rm -f "$TURNSTART2T"
+run_hook "$VF" "$STOP2T"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2t3: absent snapshot fails closed (blocks)" "$DEC" "block"
+
+# (u) v4.8 escape hatch: KIT_REVIEW_GATE=off disables the gate for the session
+run_hook "$VF" "$STOP2T" full KIT_REVIEW_GATE=off
+assert_eq "h2u: KIT_REVIEW_GATE=off disables the final-review gate" "$OUT" ""
+run_hook "$VF" "$STOP2T"   # default (on) still blocks the same dirty state
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2u: gate ON by default still blocks the same dirty state" "$DEC" "block"
+
+# (t4) invalid evidence on an UNCHANGED-tree turn must still block — the
+# turn-scoped allowance must not swallow the anti-forgery block + STALE_NOTE
+run_hook "$HOOKS/classify-task.sh" "{\"session_id\":\"${SID2T}\",\"cwd\":\"${R2T}\",\"prompt\":\"snapshot the current tree\"}"
+touch "$CODEX_M2T"   # bare marker == invalid evidence (no reviewed-by line)
+run_hook "$VF" "$STOP2T"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "h2t4: invalid marker on an unchanged tree still blocks (anti-forgery)" "$DEC" "block"
+assert_contains "h2t4: block still surfaces the STALE_NOTE" "$REASON" "did not certify"
+assert_file_absent "h2t4: invalid marker consumed" "$CODEX_M2T"
+
+# (t5) commit-only turn must NOT escape: a dirty unreviewed change at turn
+# start that is only committed has an identical tree content hash before/after
+# (commit doesn't change content) but HEAD moved — the turn-scope check must
+# see the HEAD move and still block (codex P1, round 2)
+rm -f "$CODEX_M2T"
+git_f "$R2T" reset -q --hard HEAD && git_f "$R2T" clean -fdq
+rm -f "$BASELINE2T" "$TURNSTART2T"
+run_hook "$SS" "{\"session_id\":\"${SID2T}\",\"cwd\":\"${R2T}\"}"   # fresh baseline, clean tree
+py_lines 200 > "$R2T/app.py"                                        # big dirty unreviewed change
+run_hook "$HOOKS/classify-task.sh" "{\"session_id\":\"${SID2T}\",\"cwd\":\"${R2T}\",\"prompt\":\"commit it\"}"
+git_f "$R2T" add -A && git_f "$R2T" commit -q -m "commit-only turn"  # HEAD moves, tree content identical
+run_hook "$VF" "$STOP2T"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2t5: commit-only turn (HEAD moved, tree hash same) still blocks" "$DEC" "block"
+# and reviewing it settles the commit
+valid_marker "$CODEX_M2T" codex
+run_hook "$VF" "$STOP2T"
+assert_eq "h2t5: reviewing the commit-only change satisfies the gate" "$OUT" ""
+
+git_f "$R2T" reset -q --hard HEAD && git_f "$R2T" clean -fdq
+rm -f "$BASELINE2T" "$TURNSTART2T" "$CODEX_M2T"
+
+# (t6) turn-scoping must work in an UNBORN repo (no commits yet — a brand-new
+# project, the kit's own starting state). Plain `git rev-parse HEAD` prints the
+# literal "HEAD" in an unborn repo, so writer and reader must both use the
+# quiet --verify form to agree on the "unborn" sentinel (codex P2, round 3).
+R2U="$WORK/h2-unborn"; mkdir -p "$R2U"; git_f "$R2U" init -q -b main
+SID2U="${SID_PREFIX}-h2u2"
+BASELINE2U="/tmp/claude-kit-baseline-${SID2U}"
+TURNSTART2U="/tmp/claude-kit-turnstart-${SID2U}"
+STOP2U="{\"session_id\":\"${SID2U}\",\"cwd\":\"${R2U}\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
+rm -f "$BASELINE2U" "$TURNSTART2U"
+run_hook "$SS" "{\"session_id\":\"${SID2U}\",\"cwd\":\"${R2U}\"}"   # baseline on an unborn repo
+py_lines 200 > "$R2U/app.py"   # big unreviewed change, still uncommitted (unborn)
+run_hook "$HOOKS/classify-task.sh" "{\"session_id\":\"${SID2U}\",\"cwd\":\"${R2U}\",\"prompt\":\"brainstorm\"}"
+assert_eq "h2t6: unborn HEAD serialized as the clean 'unborn' sentinel" "$(sed -n '2p' "$TURNSTART2U" 2>/dev/null)" "unborn"
+run_hook "$VF" "$STOP2U"
+assert_eq "h2t6: no-change turn in an unborn repo allows (turn-scoped)" "$OUT" ""
+py_lines 100 >> "$R2U/app.py"   # this turn changes the tree
+run_hook "$VF" "$STOP2U"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "h2t6: tree change in an unborn repo still blocks" "$DEC" "block"
+rm -f "$BASELINE2U" "$TURNSTART2U"
 
 # ===========================================================================
 # H3 - classify-task.sh (explicit overrides + per-turn judgment digest)
@@ -541,6 +639,50 @@ assert_contains "h3: .user_input field accepted" "$CTX" "explicit_skip"
 # empty / missing prompt -> fully silent (no digest on empty input)
 run_hook "$CT" "{}"
 assert_eq "h3: empty input silent" "$OUT" ""
+
+# v4.8: classify-task snapshots the working tree at turn start (feeds the
+# Stop gate's turn-scoped enforcement). Runs regardless of prompt content.
+CT_R="$WORK/h3-turnstart-repo"; make_repo "$CT_R"
+CT_SID="${SID_PREFIX}-h3ts"; CT_TS="/tmp/claude-kit-turnstart-${CT_SID}"
+rm -f "$CT_TS"
+run_hook "$CT" "{\"session_id\":\"${CT_SID}\",\"cwd\":\"${CT_R}\",\"prompt\":\"hello\"}"
+assert_file_exists "h3: classify-task writes turn-start snapshot in a git repo" "$CT_TS"
+if sed -n '1p' "$CT_TS" 2>/dev/null | grep -qE '^[0-9a-f]{40}$'; then
+  pass "h3: snapshot is a tree hash"
+else
+  fail "h3: snapshot is a tree hash" "got [$(cat "$CT_TS" 2>/dev/null)]"
+fi
+# rewritten every prompt (NOT write-if-missing): an edit changes the hash
+FIRST_TS="$(cat "$CT_TS" 2>/dev/null)"
+py_lines 3 > "$CT_R/new.py"
+run_hook "$CT" "{\"session_id\":\"${CT_SID}\",\"cwd\":\"${CT_R}\",\"prompt\":\"again\"}"
+if [ "$(cat "$CT_TS" 2>/dev/null)" != "$FIRST_TS" ]; then
+  pass "h3: snapshot rewritten each prompt (reflects the new edit)"
+else
+  fail "h3: snapshot rewritten each prompt" "hash unchanged after an edit"
+fi
+# snapshotting must not disturb the classification/digest output
+CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
+assert_contains "h3: snapshot side-channel leaves the digest intact" "$CTX" "KIT_JUDGMENT"
+# non-git cwd: no snapshot, no error
+NG="$WORK/h3-nongit-ts"; mkdir -p "$NG"; NG_SID="${SID_PREFIX}-h3ng"
+run_hook "$CT" "{\"session_id\":\"${NG_SID}\",\"cwd\":\"${NG}\",\"prompt\":\"hi\"}"
+assert_eq "h3: non-git classify still exit 0" "$CODE" "0"
+assert_file_absent "h3: non-git writes no snapshot" "/tmp/claude-kit-turnstart-${NG_SID}"
+# gate disabled: the snapshot is unused work, so it must be skipped — but the
+# judgment digest must still be emitted (codex finding, 2026-07-24)
+GOFF_SID="${SID_PREFIX}-h3goff"; GOFF_TS="/tmp/claude-kit-turnstart-${GOFF_SID}"
+rm -f "$GOFF_TS"
+run_hook "$CT" "{\"session_id\":\"${GOFF_SID}\",\"cwd\":\"${CT_R}\",\"prompt\":\"hi\"}" full KIT_REVIEW_GATE=off
+assert_file_absent "h3: gate-off skips the unused turn snapshot" "$GOFF_TS"
+CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
+assert_contains "h3: gate-off still emits the judgment digest" "$CTX" "KIT_JUDGMENT"
+# fail-closed: a recompute that can't run (non-git cwd) CLEARS a stale prior
+# snapshot rather than leaving it for the Stop gate to misread (codex finding)
+STALE_SID="${SID_PREFIX}-h3stale"; STALE_TS="/tmp/claude-kit-turnstart-${STALE_SID}"
+printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n' > "$STALE_TS"
+run_hook "$CT" "{\"session_id\":\"${STALE_SID}\",\"cwd\":\"${NG}\",\"prompt\":\"hi\"}"
+assert_file_absent "h3: stale snapshot cleared when recompute can't run" "$STALE_TS"
 
 # ===========================================================================
 # H4 - protect-paths.sh (v4.0 no-touch-zone enforcement)

@@ -1,7 +1,6 @@
 # Harness Self-Update Rules
 
-> **Kit-owned.** Do not edit this copy — customize in the kit repo, then
-> `init.sh --update`.
+> **Kit-owned.** Don't edit here — change in the kit repo, then `init.sh --update`.
 
 ## 誰可以改什麼
 
@@ -13,23 +12,20 @@
 | `docs/LESSONS.md` | 可自由 append（格式見下）。 |
 | 任何工作流 / 架構層級的調整 | 必須先徵得 user 同意，無例外。 |
 
-規則背後的威脅模型：長期運作的模型會在「優化」名義下把擋住自己的規則
-改軟——這是 harness 腐化的頭號路徑。所以規則檔的修改權不在執行規則的
-模型手上。
+威脅模型：長期運作的模型會在「優化」名義下把擋住自己的規則改軟——harness
+腐化的頭號路徑。所以規則檔的修改權不在執行規則的模型手上。
 
 ## 規則變更紀律（kit repo 側，源自 fable-soul 的 capture loop）
 
 向 user 提案修改 kit 規則、或在 kit repo 動手改規則時：
 
-1. **先查覆蓋**：新失敗模式先搜現有 rules / kit-judgment 條目。已有
-   條目覆蓋 = 規則被無視，不是規則缺席——加強措辭或補藉口表列，
-   不新增重複條目。
-2. **RED-GREEN 收據**：prompt-level 規則（rules/、dispatch 模板判斷句）
-   的新增或改寫，需先確立失敗證據（RED：合成壓力場景重現，**或**
-   真實 session 的失敗紀錄——LESSONS / toollog / 外部已發表收據，
-   註明日期與模型），再驗證新措辭翻轉行為（GREEN）——場景與格式見
-   kit repo 的 `tests/evals.md`。兩種失敗證據都拿不出 = 不知道自己
-   在修什麼，不加。「這個措辭顯然沒問題」本身就是一句藉口。
+1. **先查覆蓋**：新失敗模式先搜現有 rules／kit-judgment。已有條目覆蓋＝規則
+   被無視非缺席——加強措辭或補藉口表列，不新增重複條目。
+2. **RED-GREEN 收據**：prompt-level 規則（rules/、dispatch 判斷句）的新增／
+   改寫，需先立失敗證據（RED：合成壓力場景重現，**或**真實 session 失敗紀錄
+   ——LESSONS／toollog／外部收據，註明日期與模型），再驗證新措辭翻轉行為
+   （GREEN，場景見 `tests/evals.md`）。兩種都拿不出＝不知在修什麼，不加。
+   「這個措辭顯然沒問題」本身就是藉口。
 3. **逐字記錄**：捕捉到模型的失敗藉口時，LESSONS 的 Error 欄記逐字
    原話——paraphrase 會丟失觸發詞。
 4. **總量預算**：`.claude/rules/` 是每個 session 的固定 context 稅，
@@ -55,7 +51,6 @@
 
 - `docs/LESSONS.md` 超過 **300 行或 8KB**（`wc -l` / `wc -c` 自查）：
   **先精簡再新增**。
-- 精簡 = 抽象化，不是刪光：把重複出現的教訓合併成一條通用 Rule，收進
-  檔頭的「Rules 清單」段；被合併的舊條目才可刪除。每條被刪的教訓必須
-  能對應到一條存活的 Rule，否則不准刪。
+- 精簡 = 抽象化不是刪光：重複的教訓合併成一條通用 Rule 收進檔頭「Rules
+  清單」；被合併的舊條目才可刪，每條被刪必須對應一條存活 Rule。
 - 精簡後在 LESSONS.md 檔頭記一行：`<!-- compacted YYYY-MM-DD: N 條 -> M 條 -->`。

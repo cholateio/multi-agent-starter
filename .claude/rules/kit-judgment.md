@@ -1,12 +1,10 @@
 # Judgment Rules（判斷層）
 
-> **Kit-owned.** Do not edit this copy — customize in the kit repo, then
-> `init.sh --update`.
-> Adapted from fable-soul (MIT)。本檔管「怎麼想、怎麼驗、怎麼報」；
-> 重試熔斷 / 完成檢核 / 提問時機 / 品味決策的檢核表在
-> `.claude/docs/judgment-matrix.md`（R1–R4），本檔不重複。
-> **優先序**：judgment-matrix R3（熔斷提問）與 R4（品味不拍板）的
-> 觸發條件，優先於本檔任何「直接做」的傾向。
+> **Kit-owned.** Don't edit here — change in the kit repo, then `init.sh --update`.
+> Adapted from fable-soul (MIT)。本檔管「怎麼想/驗/報」；重試熔斷／完成檢核／
+> 提問時機／品味決策的檢核表在 `.claude/docs/judgment-matrix.md`（R1–R4）。
+> **優先序**：judgment-matrix R3（熔斷提問）、R4（品味不拍板）的觸發，優先於
+> 本檔任何「直接做」傾向。
 
 ## 核心規則
 
@@ -54,6 +52,7 @@
 | 「列出選項讓用戶自己選比較尊重」 | 權衡是你的工作。押一個，附翻盤條件。 |
 | 「看起來可能有問題，先列出來比較保險」 | 沒驗證的警告製造假工作。驗證它，或回報未發現。 |
 | 「review 打回來了，把它指出的那一格補上」 | 同一根因的**第 2 個變體**被打回 = 你在用代理變數（螢幕寬度 ≠ 輸入能力）。停下，列出那個維度的完整取值一次覆蓋，不要逐格補。 |
+| 「照 plan 每 phase 派一個 subagent」 | plan 是任務分解，不是派工清單。每 phase 派工前重過 sizing 閘：trivial 的自己 inline 做。 |
 
 ## Red Flags — 結束 turn 前自查
 
