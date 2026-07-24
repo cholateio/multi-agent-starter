@@ -66,6 +66,14 @@ status = "active"
 status_note = "note with <script>alert(1)</script> & ampersand"
 EOF
 
+# 排序測試用:與 xss-proj 同為 active,但有 git commit(xss-proj 無 → "-" 沉組底)
+mkdir -p "$ROOT/recent-proj"
+cat > "$ROOT/recent-proj/PROJECT.toml" <<'EOF'
+name = "recent-proj"
+status = "active"
+updated = 2026-07-24
+EOF
+
 # run: $@ = proj args; sets OUT / ERR / CODE
 run() {
   OUT="$(env PROJ_ROOT="$ROOT" "$PROJ" "$@" 2>"$WORK/stderr")"; CODE=$?
@@ -88,14 +96,15 @@ assert_not_contains "list: hidden dir excluded" "$OUT" ".hidden"
 # --- stale 偵測: good-proj 給一個今天的 commit,updated=2020 → ⚠ ---
 GIT_ID="$WORK/gitcfg"
 printf '[user]\n\tname = T\n\temail = t@t.test\n' > "$GIT_ID"
-gitq() { GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$GIT_ID" git -C "$ROOT/good-proj" "$@" >/dev/null 2>&1; }
+gitq() { GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$GIT_ID" git -C "$ROOT/$1" "${@:2}" >/dev/null 2>&1; }
 rmdir "$ROOT/good-proj/.git" 2>/dev/null || true
-if gitq init -q -b main && gitq add -A && gitq commit -q -m x; then
+if gitq good-proj init -q -b main && gitq good-proj add -A && gitq good-proj commit -q -m x; then
   run
   assert_contains "list: stale manifest marked" "$OUT" "⚠"
 else
   fail "list: stale manifest marked" "git fixture setup failed"
 fi
+gitq recent-proj init -q -b main && gitq recent-proj add -A && gitq recent-proj commit -q -m x
 
 # --- proj <name> ---
 run good-proj
@@ -141,12 +150,37 @@ assert_contains "html: project name present" "$HTML" "good-proj"
 assert_contains "html: status value present" "$HTML" "mvp"
 assert_contains "html: paid service present" "$HTML" "OpenAI API"
 assert_contains "html: broken manifest flagged" "$HTML" "manifest 損壞"
-assert_contains "html: status_note split into list items" "$HTML" "<li>批次待做"
 # v4.5.2:收錄規範移到 manifest schema(kit rule),渲染層不再啟發式過濾——有什麼顯什麼
 assert_contains "html: all manifest commands shown (no heuristic filter)" "$HTML" "pnpm dev"
 assert_contains "html: special command shown" "$HTML" "uv run good-proj"
-assert_not_contains "html: no three-column grid (single-row layout)" "$HTML" "repeat(auto-fill"
+assert_contains "html: three-column card grid" "$HTML" "grid-template-columns:repeat(3,minmax(0,1fr))"
+assert_contains "html: grid degrades on narrow viewports" "$HTML" "@media(max-width:760px){.cards{grid-template-columns:1fr}}"
+assert_contains "html: cards stretch to equal height" "$HTML" ".cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:stretch}"
 assert_contains "html: card body column present" "$HTML" "c-body"
+# 卡片骨架:四條 band 標籤固定,值欄共用同一條左邊界(CSS grid 的第二欄)
+assert_contains "html: body is a label/value grid" "$HTML" ".c-body{display:grid;grid-template-columns:max-content minmax(0,1fr)"
+assert_contains "html: 現況 band labelled" "$HTML" '<span class="band-k">現況</span>'
+assert_contains "html: 下一步 band labelled" "$HTML" '<span class="band-k">下一步</span>'
+assert_contains "html: 指令 band labelled" "$HTML" '<span class="band-k">指令</span>'
+assert_contains "html: 花費 band labelled" "$HTML" '<span class="band-k">花費</span>'
+# status_note 兩段拆進兩條 band,不再是無標籤 bullet
+assert_contains "html: note seg1 goes to 現況" "$HTML" '<div class="band-v now">單影片可用</div>'
+assert_contains "html: note seg2 goes to 下一步" "$HTML" '<div class="band-v next">批次待做</div>'
+assert_not_contains "html: old bullet note list gone" "$HTML" "note-list"
+# 空的 band 整條不出現:只有 good-proj(2 條指令)該長出「指令」band,
+# recent/xss/weird/broken 四個 fixture 都沒有指令
+CMD_BANDS="$(printf '%s\n' "$HTML" | grep -c '<span class="band-k">指令</span>')"
+assert_eq "html: 指令 band only for projects with commands" "$CMD_BANDS" "1"
+# dashboard 只收有 manifest 的專案:bare-proj(純 git,無 PROJECT.toml)不該出現在卡片區
+assert_not_contains "html: unregistered project hidden" "$HTML" "bare-proj"
+# 卡片排序:狀態活躍度 → commit 日期新舊 → 名稱。fixture 對應:
+# broken-proj(損壞,排最前) / recent-proj(active,有 commit) / xss-proj(active,無 git)
+# / good-proj(mvp) / weird-proj(status 認不得,排最後)
+CARD_ORDER="$(printf '%s\n' "$HTML" | grep -o '<h3>[^<]*</h3>' | sed 's/<[^>]*>//g' | tr '\n' ' ')"
+assert_contains "html: broken manifest surfaces first" "$CARD_ORDER" "broken-proj recent-proj"
+assert_contains "html: active sorts above mvp" "$CARD_ORDER" "xss-proj good-proj"
+assert_contains "html: newer commit first within a status" "$CARD_ORDER" "recent-proj xss-proj"
+assert_contains "html: unknown status sinks last" "$CARD_ORDER" "good-proj weird-proj"
 assert_not_contains "html: cmd code has no nowrap scroll" "$HTML" "white-space:nowrap"
 assert_contains "html: path printed on non-WSL" "$OUT" "dashboard.html"
 # 自包含:零外部引用
@@ -154,10 +188,13 @@ assert_not_contains "html: no external http" "$HTML" "http://"
 assert_not_contains "html: no external https" "$HTML" "https://"
 assert_not_contains "html: no external src=" "$HTML" "src="
 assert_not_contains "html: no external stylesheet" "$HTML" "<link"
-# 按用量待盯表:「計費」欄不渲染(恆為「按用量」,組標題已言明);但「月費估計」
-# 要顯示——按用量正是最該盯的一組,藏起唯一金額欄=讓「待盯」變「看不到」(ea0f8f2)
-assert_not_contains "html: usage table has no billing cell" "$HTML" "<td>按用量</td>"
-assert_contains "html: usage table SHOWS the monthly_est cell" "$HTML" "<td>~\$3</td>"
+# 花費長在卡片上,不再有底部總表——金額與專案在同一張卡,不用跨區塊對照專案名。
+# 「按用量要看得到金額」的舊教訓(ea0f8f2)在新版面照樣成立,只是換成 .cost-amt
+assert_not_contains "html: bottom money section removed" "$HTML" "花錢總覽"
+assert_not_contains "html: no money tables left" "$HTML" "<table"
+assert_contains "html: usage cost shown on the card" "$HTML" '<span class="paid paid-usage">OpenAI API</span><span class="cost-amt">~$3</span>'
+# free-tier 排在付費項之後;金額欄以 — 佔位(恆為 $0,寫出來是雜訊,但空著格線會斷)
+assert_contains "html: free-tier sorts last, shows dash" "$HTML" '<span class="paid paid-free">Supabase</span><span class="cost-amt">—</span>'
 # HTML 轉義:xss-proj 的 <script> 不得原樣注入
 assert_not_contains "html: user script not raw" "$HTML" "<script>alert(1)"
 assert_contains "html: user script escaped" "$HTML" "&lt;script&gt;alert(1)"
