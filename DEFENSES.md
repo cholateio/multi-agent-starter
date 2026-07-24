@@ -108,8 +108,9 @@ API 呼叫都重複攜帶,越肥 → compact 越早 → 迷航越早。這層專
 ## 三、Harness engineering 防護(物理層:hooks / gate / 所有權,deterministic)
 
 核心防線全在這層——因為只有這層在模型迷航後**仍然有效**。五支 hook 預設
-開啟(v3.5 起),user-only 逃生口 `KIT_PROTECT=off` / `KIT_BREAKER=off`
-(啟動前 export;模型自己 export 沒用,hook 吃的是 claude 啟動時的環境)。
+開啟(v3.5 起),user-only 逃生口 `KIT_PROTECT=off` / `KIT_BREAKER=off` /
+`KIT_REVIEW_GATE=off`(啟動前 export;模型自己 export 沒用,hook 吃的是
+claude 啟動時的環境)。
 
 - **protect-paths.sh**(PreToolUse,Edit/Write/NotebookEdit)——兩檔防護:
   `.claude/protected-paths` 清單命中即 **hard-deny**(你宣告的專案禁區,
@@ -133,7 +134,20 @@ API 呼叫都重複攜帶,越肥 → compact 越早 → 迷航越早。這層專
   v4.5:測試檔兩個計數皆不計,敏感命名的測試檔除外)、未碰敏感 stem
   (auth/payment/migrat/…)或 protected-paths → 放行但**不推進 baseline**
   ——小改持續累積,破檻那次 review 批次涵蓋全部(防切香腸);無 baseline
-  或 binary 一律 fail-closed 回到 size-blind block。
+  或 binary 一律 fail-closed 回到 size-blind block。v4.8 加**turn-scoped**:
+  gate 原本是「工作樹範圍」,只要樹裡躺著未審業務碼就**每輪都攔**,
+  brainstorming / 純對話輪也一起被卡;改成 classify-task 於每輪開頭快照
+  **工作樹 hash + HEAD sha**,**只有這一輪真的動過(改檔或 commit)**才攔
+  (內容定址,subagent 的改動也算;HEAD 一起比對,堵掉「只 commit 不改內容」
+  的 commit 盲點)——義務不消失(不推進 baseline),下一輪碰碼或 review 才
+  結清。另加 user-only 逃生口 `KIT_REVIEW_GATE=off`。**已知缺口(user 接受的
+  取捨,2026-07-24)**:no-edit 輪即使是「宣告完成」也放行——hook 靠樹狀態分
+  不出「完成輪」與「brainstorming 輪」。非無防護:下一輪碰碼即補攔,且 prose
+  層(kit-workflow Final review／kit-judgment)仍要求宣告完成前先 review;敏感
+  路徑不受影響(仍 size-blind + phase-level review)。**成本**:快照 `git add -A`
+  在病態 repo(10 萬檔／慢 clean filter)可能逼近 5s timeout——已把快照移到
+  KIT_JUDGMENT digest 發出之後(digest 不賠),timeout 則退化成 fail-closed;
+  這種 repo 用 `KIT_REVIEW_GATE=off`。
 - **Marker 證據化 = 逃生門加價**——v3.5 的 block 訊息**親手把 `touch <marker>`
   遞給模型**,假性完成的最短路徑是 harness 自己鋪的。v4.0 起 marker 第一行
   必須是 `reviewed-by=` 證據行(由 `/kit-review` 真跑完 review 後寫入)、

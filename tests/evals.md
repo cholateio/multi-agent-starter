@@ -75,6 +75,21 @@ session 啟動時的指令快照，session 中途新增的 rules 檔到不了 su
     任務（greenfield 函式）。過：零敘述性註解（「下一行在做什麼」），
     docstring 僅 public API 契約；敗：逐段敘述註解、用註解辯護改動。
 
+13. **Per-task review 過度觸發**（kit-workflow「Phase-level review 不是
+    per-task」，v4.8）。給一個 6-phase 計畫（皆一般業務邏輯、無敏感路徑、
+    後續 phase 不互相依賴），逐 phase 執行並決定每 phase 是否 review。過：
+    一般 phase 不單獨 review，攢進 Final review（只在敏感/依賴邊界審）；敗：
+    每 phase 各跑一次獨立 review（與 Final review 重疊）。
+14. **複審 resume 重放**（kit-workflow re-review「fresh context 不 resume」，
+    v4.8）。round 1 reviewer 已在場（完整 transcript），fix 是 9KB delta，要
+    對 delta 複審；可選「SendMessage 叫回原 reviewer」或「開新 fresh reviewer
+    只餵 delta+findings」。過：開 fresh reviewer；敗：resume 原 agent（整份
+    先前 transcript 被復放）。
+15. **Trivial phase 照派工**（kit-delegation「每 phase 派工前重過 sizing 閘」
+    + 藉口表，v4.8）。計畫含一個 3 行改動的 phase，決定怎麼執行。過：指揮官
+    inline 做或併進相鄰 task，不開 implementer+reviewer；敗：為 3 行 phase 派
+    一個 implementer + 一個獨立 reviewer。
+
 ## Recorded runs
 
 | Date | Scenario | Model | Condition | Result |
@@ -98,6 +113,7 @@ session 啟動時的指令快照，session 中途新增的 rules 檔到不了 su
 | 2026-07-12 | 12 註解噪音 | 機隊（真實回報） | RED（無規則） | 0 — user 逐字：「vibe coding的模式下老實說我已經很少親自看程式碼的註解了，因此我認為實在沒必要每次撰寫code都產生大量註解」。真實失敗紀錄（機隊長期觀察，非單一 session） |
 | 2026-07-12 | 12 註解噪音 | Haiku 4.5 | RED（無新措辭） | 合成**失敗未重現**（greenfield 微任務僅 1 行敘述註解 + 契約 docstring）——同場景 2/11 結論：退化在真實長 session，合成模擬不了。RED 證據依規則變更紀律 #2 第二來源（上列 user 真實回報）成立 |
 | 2026-07-12 | 12 註解噪音 | Haiku 4.5 | GREEN（新措辭入 prompt） | 2 — 敘述註解 1→0，public API 契約 docstring 正常保留（未過度刪除），測試照綠 |
+| 2026-07-23 | 13/14/15 派工+review 成本 | Opus 4.8（真實 session，機隊部署專案） | RED（真實 session，profile=full） | 0 — 4 檔基本功能（api router+DB+分流）跑 1.5h／~2M token：9 次 per-task review（553k，與 final 重疊）、resume 複審 9KB delta（148k）、3 個 10 行 phase 各走完整派工+review（205k）。**真實失敗紀錄**（user 事後 token 拆解截圖存證） |
 
 ### 2026-07-05 採納註記（誠實條款）
 
@@ -136,6 +152,18 @@ session 啟動時的指令快照，session 中途新增的 rules 檔到不了 su
   藉口對照表 + Red Flags 加一列（kit-evolution #1「已有條目覆蓋 = 規則被
   無視，不是規則缺席」）。UI 專屬的能力矩陣做法放 read-on-demand 的
   `verification-signals.md` S1.4，不進每 session 的 context 稅。
+
+### 2026-07-23 採納註記（誠實條款）
+
+- 三條槓桿是**指揮官層**決策（派工／review 粒度），非弱模型執行行為——
+  同 2026-07-05／07-11 的已知極限，fresh-context 合成 eval 模擬不了長
+  session 的過度派工。GREEN 為**規格層**（場景 13-15 定義過／敗判準），
+  未跑合成行為評測。
+- RED 依規則變更紀律 #2 第二來源成立：2026-07-23 真實 session 的 2M-token
+  拆解（9×per-task review 553k + resume 148k + trivial 派工 205k）。
+- 定性（#1 先查覆蓋）：14 是真缺口（re-review 沒講「怎麼跑」）→ 新增一句；
+  13／15 是「規則被無視」（批次閘門、別為儀式感派工已存在）→ 強化措辭 +
+  藉口表加列，未新增重複條目。加法用等量精簡騰出（rules/ 20356B < cap 20480）。
 
 ## Rejected（透明紀錄：測了但沒加的規則）
 
