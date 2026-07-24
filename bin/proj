@@ -88,7 +88,13 @@ def load_manifest(d):
                 warn(f"{d.name}: status_note 第 {i+1} 段 {len(s)} 字 "
                      f"(上限 {NOTE_SEG_MAX})——細節歸 LESSONS / commit message")
 
-    for k, v in (data.get("commands") or {}).items():
+    # commands 可能是合法 TOML 但不是 table(`commands = ["echo hi"]`)。這裡是 cmd_list
+    # 也會走的路徑,直接 .items() 會讓**一個**專案的壞欄位炸掉整份跨專案總覽。
+    cmds = data.get("commands")
+    if cmds is not None and not isinstance(cmds, dict):
+        warn(f"{d.name}: commands 不是 table(得是 `key = \"指令\"`),整段忽略")
+        cmds = None
+    for k, v in (cmds or {}).items():
         if isinstance(v, str) and len(v) > COMMAND_MAX:
             warn(f"{d.name}: 指令 {k} {len(v)} 字(上限 {COMMAND_MAX})"
                  f"——包成腳本再收錄,卡片一行放不下")
@@ -116,6 +122,12 @@ def load_manifest(d):
             warn(f"{d.name}: {s} 的 monthly_est 夾了確認日期／算法依據"
                  f"——只放金額與用量,收據歸 TOML 註解")
     return data, None
+
+
+def _commands(data):
+    """commands 必須是 table;不是就當成沒有(load_manifest 已 warn 過,這裡不重複吵)。"""
+    c = data.get("commands")
+    return c if isinstance(c, dict) else {}
 
 
 def last_commit_date(d):
@@ -244,7 +256,7 @@ def cmd_detail(root, name):
         print(data["status_note"])
     print(f"updated: {data.get('updated', '?')}   "
           f"最後 commit: {cdate.isoformat() if cdate else '-'}")
-    if data.get("commands"):
+    if isinstance(data.get("commands"), dict) and data["commands"]:
         print("\n指令:")
         for k, v in data["commands"].items():
             print(f"  {k}:")
@@ -401,7 +413,7 @@ def _collect(root):
                 "status": st,
                 "skey": st if st in STATUS_ORDER else "unregistered",
                 "note": str(data.get("status_note", "")),
-                "commands": {str(k): str(v) for k, v in (data.get("commands") or {}).items()},
+                "commands": {str(k): str(v) for k, v in _commands(data).items()},
                 "paid": data.get("paid", []),
                 "commit": cstr,
                 "stale": is_stale(data, cdate),
@@ -468,11 +480,13 @@ def _render_bands(r):
         if value_html:
             cells.append(f'<span class="band-k">{label}</span>{value_html}')
 
-    segs = [s.strip() for s in str(r["note"]).replace("；", ";").split(";") if s.strip()]
-    band("現況", f'<div class="band-v now">{_e(segs[0])}</div>' if segs else '')
+    # 不可先濾掉空段:";deploy next" 濾完會把第 2 段推到 index 0,「下一步」就被標成
+    # 「現況」——語意反轉。段序是位置資訊,只決定「哪一條 band 不顯示」,不重排。
+    segs = [s.strip() for s in str(r["note"]).replace("；", ";").split(";")]
+    band("現況", f'<div class="band-v now">{_e(segs[0])}</div>' if segs[0] else '')
     # 3 段以上是違規資料(load_manifest 已 warn),渲染端不吞——併進「下一步」照顯,別靜默丟資料
-    band("下一步",
-         f'<div class="band-v next">{_e("；".join(segs[1:]))}</div>' if len(segs) > 1 else '')
+    rest = "；".join(s for s in segs[1:] if s)
+    band("下一步", f'<div class="band-v next">{_e(rest)}</div>' if rest else '')
 
     # 收錄規範在 manifest schema 端執法(kit rule:只收「用它」的指令),
     # 渲染端不做啟發式過濾——manifest 有什麼顯什麼

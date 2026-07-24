@@ -66,6 +66,16 @@ status = "active"
 status_note = "note with <script>alert(1)</script> & ampersand"
 EOF
 
+# 合法 TOML 但 commands 不是 table(codex review P2):新的長度檢查會對它呼叫 .items(),
+# 讓整個 proj 列表掛掉——壞掉一個專案的欄位不該炸掉其他 15 個專案的總覽
+mkdir -p "$ROOT/badcmd-proj"
+printf 'name = "badcmd-proj"\nstatus = "done"\ncommands = ["echo hi"]\n' > "$ROOT/badcmd-proj/PROJECT.toml"
+
+# status_note 首段為空(codex review P2):過濾空段會把第 2 段推到 index 0,
+# 於是「下一步」被標成「現況」——語意反轉
+mkdir -p "$ROOT/note-proj"
+printf 'name = "note-proj"\nstatus = "done"\nstatus_note = ";deploy next"\n' > "$ROOT/note-proj/PROJECT.toml"
+
 # 夾擊測試用:120 字指令與 37 字 monthly_est(真實機隊資料的形狀,見 2026-07-24 量測)
 mkdir -p "$ROOT/longtext-proj"
 cat > "$ROOT/longtext-proj/PROJECT.toml" <<'EOF'
@@ -108,6 +118,10 @@ assert_contains "list: parse warning on stderr" "$ERR" "解析失敗"
 assert_contains "list: non-string status warns but stays listed" "$ERR" "weird-proj"
 # schema 執法:指令長度上限、monthly_est 不得夾帶確認日期/算法依據(2026-07-24 量測)
 assert_contains "list: over-long command warns" "$ERR" "上限 80"
+# 壞掉的 commands 欄位不得炸掉整份列表(其餘 fixture 仍要列出來)
+assert_contains "list: non-table commands warns" "$ERR" "commands 不是 table"
+assert_contains "list: non-table commands does not abort listing" "$OUT" "badcmd-proj"
+assert_not_contains "list: no traceback leaks" "$ERR" "Traceback"
 assert_contains "list: monthly_est with a receipt date warns" "$ERR" "收據歸 TOML 註解"
 assert_contains "list: non-string status row present" "$OUT" "weird-proj"
 assert_not_contains "list: hidden dir excluded" "$OUT" ".hidden"
@@ -209,7 +223,11 @@ assert_contains "html: broken manifest surfaces first" "$CARD_ORDER" "broken-pro
 assert_contains "html: active sorts above mvp" "$CARD_ORDER" "xss-proj good-proj"
 # active 組內:recent-proj 有 commit 排前,其餘無 git("-")按名稱 longtext → xss
 assert_contains "html: newer commit first within a status" "$CARD_ORDER" "recent-proj longtext-proj xss-proj"
-assert_contains "html: unknown status sinks last" "$CARD_ORDER" "good-proj weird-proj"
+CARD_LAST="$(printf '%s' "$CARD_ORDER" | awk '{print $NF}')"
+assert_eq "html: unknown status sinks last" "$CARD_LAST" "weird-proj"
+# 空的首段不得讓第 2 段被標成「現況」——band 位置照 status_note 的段序,不是壓縮後的序
+assert_contains "html: empty first segment keeps 下一步 semantics" "$HTML" '<span class="band-k">下一步</span><div class="band-v next">deploy next</div>'
+assert_not_contains "html: empty first segment does not become 現況" "$HTML" '<div class="band-v now">deploy next</div>'
 assert_not_contains "html: cmd code has no nowrap scroll" "$HTML" "white-space:nowrap"
 assert_contains "html: path printed on non-WSL" "$OUT" "dashboard.html"
 # 自包含:零外部引用

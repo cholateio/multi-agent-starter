@@ -2,6 +2,18 @@
 
 > 踩坑記錄（格式見 kit-evolution 規則）。同一個坑踩第二次之前寫入。
 
+### 2026-07-25 在共用路徑上新增驗證，把一個專案的壞欄位變成全機隊當機
+- Context: 給 `proj` 的 manifest 加指令長度上限,檢查寫在 `load_manifest()`——那是 `proj`／`proj money`／`proj html` 全都會走的共用路徑
+- Error: `for k, v in (data.get("commands") or {}).items()` 遇到合法 TOML 但非 table 的 `commands = ["echo hi"]` 直接 `AttributeError`。改動前那個專案只是「沒指令」照樣列出;改動後**整份跨專案總覽**連同其他 15 個健康專案一起掛掉(smoke 52 條連帶失敗)。codex review P2 抓到,我先在 main 版跑同一份 fixture 確認是回歸才修
+- Solution: 型別守門 + 降級忽略(`isinstance(c, dict)`,非 table 就 warn 後當成沒有),三個消費點(`load_manifest`／`cmd_detail`／`_collect`)一起封
+- Rule: 在「彙總多個來源」的共用路徑上新增驗證前,先問**壞資料會炸掉誰**——彙總工具的爆炸半徑是全體來源,不是那一筆。對外部/user-owned 資料一律先驗型別再迭代,壞的那筆降級忽略並 warn,不讓它中止整批。
+
+### 2026-07-24 綁實作字串的否定斷言＝永遠綠的空斷言
+- Context: 把 `proj html` 的卡片列從單欄改成三欄網格，改完跑 proj-smoke
+- Error: `assert_not_contains "html: no three-column grid" "$HTML" "repeat(auto-fill"` 照樣 PASS——它比對的是**舊實作用過的字串**，新寫法 `repeat(3,minmax(0,1fr))` 不含它，所以不管版面變成幾欄都會通過。這是 proj-smoke 第二次出現過期斷言（前次 ea0f8f2/4ed2254：按用量組藏月費估計的斷言活過設計反轉）
+- Solution: 翻成正面斷言，鎖住意圖而非殘骸——`assert_contains ... "grid-template-columns:repeat(3,minmax(0,1fr))"` 再加一條窄視窗降級斷言；1440/900/600 三個寬度各 headless 截圖確認 3/2/1 欄
+- Rule: 否定斷言（assert_not_contains）只有在比對「唯一可能的違規寫法」時才成立——否則寫成正面斷言鎖住想要的狀態。設計反轉時先 grep 測試檔裡描述舊設計的斷言，全綠不代表沒有空斷言。
+
 ### 2026-07-24 中文行內註解的非 ASCII 位元組滲進 secret，爆 gateway 認證
 - Context: connector 從 `.env` 抓 HERMES_KEY 傳給 Hermes gateway 做 Bearer 認證
 - Error: `.env` 的 key 行尾跟了中文 `#` 註解，`cut -d= -f2` 沒剝行內註解，把中文的 byte `0xA7`（§）一起塞進 token → gateway `token.encode()` 對第 74 位字元爆 500；七輪 curl 全帶著壞 key（中途還踩 MSYS `/d/` 路徑把 KEY 抓成空 → 401，反向印證 500 是壞 key 字元）
