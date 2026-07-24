@@ -130,6 +130,28 @@ def _commands(data):
     return c if isinstance(c, dict) else {}
 
 
+def _langs(data, d):
+    """程式語言 tag,hybrid:manifest 的 `lang = [...]` 覆蓋 > 根目錄標記檔自動偵測。
+    偵測只看根標記檔(不走檔案樹,快且不受 node_modules 汙染);同時命中多個 = 多語專案,
+    全列出不挑一個。偵測不到(如純 shell 的 kit repo)就空白,由 manifest 補 `lang` 覆蓋。"""
+    lang = data.get("lang") if isinstance(data, dict) else None
+    if isinstance(lang, list):
+        return [str(x) for x in lang]
+    langs = []
+    has = lambda *names: any((d / n).is_file() for n in names)
+    if has("pyproject.toml", "requirements.txt", "setup.py"):
+        langs.append("Python")
+    if has("package.json"):
+        langs.append("TypeScript" if has("tsconfig.json") else "JavaScript")
+    if has("go.mod"):
+        langs.append("Go")
+    if has("Cargo.toml"):
+        langs.append("Rust")
+    if has("pom.xml", "build.gradle", "build.gradle.kts"):
+        langs.append("Java")
+    return langs
+
+
 def last_commit_date(d):
     if not (d / ".git").exists():
         return None
@@ -380,6 +402,8 @@ button.kpi{cursor:pointer}
 .paid{font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
 .paid-usage{color:var(--warn-i);border-color:var(--warn-i)}
 .paid-free{color:var(--mut)}
+/* 語言 chip 填色(無邊框),與服務 chip(描邊)一眼區分:「用什麼建」vs「付什麼錢」 */
+.lang{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--line);color:var(--ink)}
 @media(max-width:1100px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.cards{grid-template-columns:1fr}}
 """
@@ -404,7 +428,8 @@ def _collect(root):
         cstr = cdate.isoformat() if cdate else "-"
         if err:
             rows.append({"name": d.name, "status": "manifest 損壞", "skey": "broken",
-                         "note": "", "commands": {}, "paid": [], "commit": cstr, "stale": False})
+                         "note": "", "commands": {}, "paid": [], "langs": _langs(data, d),
+                         "commit": cstr, "stale": False})
         elif data is None:
             continue
         else:
@@ -416,6 +441,7 @@ def _collect(root):
                 "note": str(data.get("status_note", "")),
                 "commands": {str(k): str(v) for k, v in _commands(data).items()},
                 "paid": data.get("paid", []),
+                "langs": _langs(data, d),
                 "commit": cstr,
                 "stale": is_stale(data, cdate),
             })
@@ -559,18 +585,20 @@ def _render_bands(r):
     # 所以收斂成單一總和;完整逐項在 `proj money` 與 manifest。未估項誠實標記不謊報 0——
     # 一個把 ? 當 0 的總和會說專案免費,實際是未知(見 A 方案討論)。
     #
-    # 服務 tag 答的是「用了哪些服務」不是「花多少」,所以脫鉤獨立成列。它是 c-body 的姊妹、
-    # .card(flex column)的直接子元素,靠 margin-top:auto 頂到卡片底——同列卡片等高,於是
-    # 各卡的 tag 列對齊在同一條底線(回傳與 c-body 分離,才能當 .card 的獨立 flex child)。
-    tags_row = ''
+    # tag 列答的是「這專案用了什麼」不是「花多少」,所以與花費脫鉤、自成一列。它是 c-body 的
+    # 姊妹、.card(flex column)的直接子元素,靠 margin-top:auto 頂到卡片底——同列卡片等高,
+    # 各卡 tag 對齊同一條底線(與 c-body 分離,才能當 .card 的獨立 flex child)。
+    # 語言 chip(.lang,填色)排在服務 chip(.paid,描邊)前,一眼分「用什麼建的」與「付什麼錢」。
+    ordered = []
     if r["paid"]:
         summary, ordered = _cost_summary(r["paid"])
         band("花費", f'<div class="band-v"><div class="cost-sum">{summary}</div></div>')
-        tags = "".join(
-            f'<span class="paid paid-{_paid_bucket(str(p.get("billing", "")))}">'
-            f'{_e(p.get("service", "?"))}</span>'
-            for p in ordered)
-        tags_row = f'<div class="tags-row">{tags}</div>'
+    lang_chips = "".join(f'<span class="lang">{_e(l)}</span>' for l in r.get("langs", []))
+    svc_chips = "".join(
+        f'<span class="paid paid-{_paid_bucket(str(p.get("billing", "")))}">'
+        f'{_e(p.get("service", "?"))}</span>'
+        for p in ordered)
+    tags_row = f'<div class="tags-row">{lang_chips}{svc_chips}</div>' if (lang_chips or svc_chips) else ''
 
     body = f'<div class="c-body">{"".join(cells)}</div>' if cells else ''
     return body + tags_row

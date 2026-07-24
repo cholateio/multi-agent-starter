@@ -81,6 +81,7 @@ mkdir -p "$ROOT/cost-proj"
 cat > "$ROOT/cost-proj/PROJECT.toml" <<'EOF'
 name = "cost-proj"
 status = "done"
+lang = ["Go", "Rust"]
 [[paid]]
 service = "Fixed NT"
 billing = "月費"
@@ -130,6 +131,15 @@ name = "recent-proj"
 status = "active"
 updated = 2026-07-24
 EOF
+
+# 語言 tag 自動偵測的標記檔(所有 fixture 目錄都已建立後才佈置)。hybrid:manifest 的
+# lang=[...] 覆蓋 > 根標記檔。good→pyproject=Python;freeonly→package.json only=JavaScript;
+# round→package.json+tsconfig=TypeScript;note(無 paid)→package.json=JS,驗證只有語言也長 tag 列;
+# cost-proj 走 manifest lang=[Go,Rust] 覆蓋(它沒有標記檔)
+: > "$ROOT/good-proj/pyproject.toml"
+: > "$ROOT/freeonly-proj/package.json"
+: > "$ROOT/round-proj/package.json"; : > "$ROOT/round-proj/tsconfig.json"
+: > "$ROOT/note-proj/package.json"
 
 # run: $@ = proj args; sets OUT / ERR / CODE
 run() {
@@ -273,8 +283,21 @@ assert_contains "html: cost total sums same currency" "$HTML" '<div class="cost-
 # 服務 tag 自成一列、頂到卡片底(margin-top:auto),同列等高卡對齊同一底線。tags-row 是
 # c-body 的姊妹(不巢狀在裡面)——所以接在 c-body 收尾 </div> 之後,多一層 </div>
 assert_contains "html: tags row pinned to card bottom" "$HTML" ".tags-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:auto}"
-assert_contains "html: tags row is a sibling after c-body, not nested" "$HTML" '<div class="cost-sum">NT$150/月</div></div></div><div class="tags-row"><span class="paid paid-usage">OpenAI API</span><span class="paid paid-free">Supabase</span></div>'
+# 三層 </div>(cost-sum → band-v → c-body)後才是 tags-row = 姊妹非巢狀;good-proj 以語言 chip 起頭
+assert_contains "html: tags row is a sibling after c-body, not nested" "$HTML" '<div class="cost-sum">NT$150/月</div></div></div><div class="tags-row"><span class="lang">Python</span><span class="paid paid-usage">OpenAI API</span><span class="paid paid-free">Supabase</span></div>'
 assert_not_contains "html: old cost-tags class gone" "$HTML" "cost-tags"
+# 語言 tag(hybrid 偵測):填色 .lang chip,排在服務 chip 前
+assert_contains "html: lang chip styled distinct from service" "$HTML" '.lang{font-size:11px'
+# 自動偵測:good-proj 有 pyproject → Python,且語言排在服務 chip 前
+assert_contains "html: language auto-detected precedes services" "$HTML" '<div class="tags-row"><span class="lang">Python</span><span class="paid paid-usage">OpenAI API</span>'
+# package.json 無 tsconfig → JavaScript
+assert_contains "html: package.json alone is JavaScript" "$HTML" '<span class="lang">JavaScript</span>'
+# package.json + tsconfig → TypeScript
+assert_contains "html: tsconfig means TypeScript" "$HTML" '<span class="lang">TypeScript</span>'
+# manifest lang=[...] 覆蓋偵測(cost-proj 無標記檔,靠 manifest 給 Go+Rust,多語全列)
+assert_contains "html: manifest lang overrides detection" "$HTML" '<span class="lang">Go</span><span class="lang">Rust</span>'
+# 只有語言、沒有付費的專案(note-proj)也長出 tag 列
+assert_contains "html: langs-only project still gets a tags row" "$HTML" '<div class="tags-row"><span class="lang">JavaScript</span></div>'
 # 不同幣別分列 + range 取中點(US$2-3 → 2.5)
 assert_contains "html: mixed currency kept separate" "$HTML" 'NT$100 + US$2.5/月'
 # ? 項誠實標未估,不謊報 0(cost-proj 的 Unknown 按用量無月額)
