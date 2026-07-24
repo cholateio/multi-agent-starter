@@ -171,7 +171,6 @@ def pad(s, width):
 # 12px 等寬字約 34 格/行。折行的指令是卡片最大的視覺噪音來源,所以寧可截短——
 # 完整值在 title 與複製 payload 裡,`proj <name>` 也照印全文。
 CARD_CMD_MAX = 34
-CARD_EST_MAX = 22
 
 
 def _clamp(s, width):
@@ -369,16 +368,16 @@ button.kpi{cursor:pointer}
 .cmds{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;gap:5px 8px;align-items:baseline}
 .cmds>*{min-width:0}
 .cmd-k{color:var(--mut);font-size:11px}
-/* grid cell 預設 stretch 會把 badge 與 code 的背景拉成整欄寬(短名字後面拖一條空白條)。
-   justify-self:start 讓它們縮回內容寬,欄位對齊仍由 grid 保證 */
-.cmds code,.paid{justify-self:start}
+/* grid cell 預設 stretch 會把 code 背景拉成整欄寬(短指令後拖一條空白條);縮回內容寬 */
+.cmds code{justify-self:start}
 .cmds code{background:var(--bg);padding:2px 6px;border-radius:5px;font-family:ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 .copy{border:1px solid var(--line);background:var(--surf);color:var(--mut);border-radius:5px;cursor:pointer;padding:1px 6px}
-.costs{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:5px 8px;align-items:baseline}
-.paid{flex:0 0 auto;font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
+.cost-sum{font-size:13px;overflow-wrap:anywhere}
+.cost-warn{color:var(--warn-i)}
+.cost-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
+.paid{font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
 .paid-usage{color:var(--warn-i);border-color:var(--warn-i)}
 .paid-free{color:var(--mut)}
-.cost-amt{font-size:12px;color:var(--mut);min-width:0;overflow-wrap:anywhere}
 @media(max-width:1100px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.cards{grid-template-columns:1fr}}
 """
@@ -435,6 +434,60 @@ def _status_rank(skey):
         return STATUS_ORDER.index(skey)
     except ValueError:
         return len(STATUS_ORDER)
+
+
+# 幣別顯示順序(固定,總和不因 dict 順序漂移)。只認明確前綴的 NT$／US$——裸 $ 在真實
+# 資料裡不是 free 的 "$0" 就是費率 "in$0.4 每1M tok"(無週期),都不該計入某幣別的月總和。
+_CUR_ORDER = ["NT$", "US$"]
+_MONTHLY_RE = re.compile(r"(NT\$|US\$)\s*(\d+(?:\.\d+)?)(?:\s*[-~]\s*(\d+(?:\.\d+)?))?\s*/\s*月")
+_YEARLY_RE = re.compile(r"(NT\$|US\$)\s*(\d+(?:\.\d+)?)(?:\s*[-~]\s*(\d+(?:\.\d+)?))?\s*/\s*年")
+
+
+def _parse_monthly(est):
+    """從自由文字抽一個(幣別, 月額 float);抽不出回 (None, None)=未估。
+    先找 /月(順帶吃到「NT$260/年（≈NT$22/月）」括號裡的人給月額),再退而找 /年 ÷12。
+    range 取中點。無週期標記(費率 每1M tok、純 ?、裸額)一律未估——不猜、不謊報 0。"""
+    s = str(est).replace(",", "")
+    for rx, div in ((_MONTHLY_RE, 1), (_YEARLY_RE, 12)):
+        m = rx.search(s)
+        if m:
+            lo = float(m.group(2))
+            hi = float(m.group(3)) if m.group(3) else lo
+            return m.group(1), (lo + hi) / 2 / div
+    return None, None
+
+
+def _fmt_amount(v):
+    if v >= 10:
+        return str(int(round(v)))
+    r = round(v, 1)
+    return str(int(r)) if r == int(r) else str(r)
+
+
+def _cost_summary(paid):
+    """回傳 (總和 HTML, 已排序的 paid 清單)。同幣別相加、不同幣別以 + 分列;
+    非 free 但抽不出月額的計入「未估」不謊報 0;全 free 顯「免費」。"""
+    totals, unest = {}, 0
+    for p in paid:
+        b = _paid_bucket(str(p.get("billing", "")))
+        if b == "free":
+            continue
+        cur, val = _parse_monthly(p.get("monthly_est", ""))
+        if cur is None:
+            unest += 1
+        else:
+            totals[cur] = totals.get(cur, 0.0) + val
+    segs = [f"{c}{_fmt_amount(totals[c])}" for c in _CUR_ORDER if c in totals]
+    if segs:
+        html_out = _e(" + ".join(segs) + "/月")
+        if unest:
+            html_out += f' <span class="cost-warn">+{unest}未估</span>'
+    elif unest:
+        html_out = f'<span class="cost-warn">未估（{unest} 項）</span>'
+    else:
+        html_out = "免費"
+    ordered = sorted(paid, key=lambda p: _paid_bucket(str(p.get("billing", ""))) == "free")
+    return html_out, ordered
 
 
 def _paid_bucket(billing):
@@ -500,21 +553,18 @@ def _render_bands(r):
                 f'<button class="copy" data-cmd="{_e(v)}" title="複製">C</button>')
         band("指令", f'<div class="band-v"><div class="cmds">{"".join(cmd_cells)}</div></div>')
 
-    # 花費就長在卡片上——原本卡片只掛服務名、金額另開一張表,要看「這個專案花多少」
-    # 得在兩個區塊之間對照專案名。free-tier 沉底且以 — 佔住金額欄(恆為 $0,寫出來是雜訊,
-    # 但空著會讓格線斷掉);按用量靠 .paid-usage 的警示色標示,不需要獨立的「計費」欄。
+    # 花費 = 一行按月總和 + 服務 tag 橫排下一列。逐項金額(混幣別、range、費率、?)在卡片上
+    # 掃不出「這個專案花多少」,所以收斂成單一總和;完整逐項在 `proj money` 與 manifest。
+    # 未估項誠實標記不謊報 0——一個把 ? 當 0 的總和會說專案免費,實際是未知(見 A 方案討論)。
     if r["paid"]:
-        ordered = sorted(r["paid"],
-                         key=lambda p: _paid_bucket(str(p.get("billing", ""))) == "free")
-        items = []
-        for p in ordered:
-            b = _paid_bucket(str(p.get("billing", "")))
-            amt = "—" if b == "free" else str(p.get("monthly_est", "?"))
-            disp, full = _clamp(amt, CARD_EST_MAX)
-            t = f' title="{_e(full)}"' if full else ''
-            items.append(f'<span class="paid paid-{b}">{_e(p.get("service", "?"))}</span>'
-                         f'<span class="cost-amt"{t}>{_e(disp)}</span>')
-        band("花費", f'<div class="band-v"><div class="costs">{"".join(items)}</div></div>')
+        summary, ordered = _cost_summary(r["paid"])
+        tags = "".join(
+            f'<span class="paid paid-{_paid_bucket(str(p.get("billing", "")))}">'
+            f'{_e(p.get("service", "?"))}</span>'
+            for p in ordered)
+        band("花費",
+             f'<div class="band-v"><div class="cost-sum">{summary}</div>'
+             f'<div class="cost-tags">{tags}</div></div>')
 
     return f'<div class="c-body">{"".join(cells)}</div>' if cells else ''
 

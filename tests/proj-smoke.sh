@@ -43,7 +43,7 @@ summary = "uv run good-proj <url>"
 [[paid]]
 service = "OpenAI API"
 billing = "按用量"
-monthly_est = "~$3"
+monthly_est = "NT$150/月"
 cancel = "拿掉 .env 的 key"
 
 [[paid]]
@@ -75,6 +75,33 @@ printf 'name = "badcmd-proj"\nstatus = "done"\ncommands = ["echo hi"]\n' > "$ROO
 # 於是「下一步」被標成「現況」——語意反轉
 mkdir -p "$ROOT/note-proj"
 printf 'name = "note-proj"\nstatus = "done"\nstatus_note = ";deploy next"\n' > "$ROOT/note-proj/PROJECT.toml"
+
+# 花費總和測試用:同幣別相加、不同幣別分列、range 取中點、? 標未估、free 不計入
+mkdir -p "$ROOT/cost-proj"
+cat > "$ROOT/cost-proj/PROJECT.toml" <<'EOF'
+name = "cost-proj"
+status = "done"
+[[paid]]
+service = "Fixed NT"
+billing = "月費"
+monthly_est = "NT$100/月"
+[[paid]]
+service = "Usage US"
+billing = "按用量"
+monthly_est = "US$2-3/月"
+[[paid]]
+service = "Unknown"
+billing = "按用量"
+monthly_est = "?"
+[[paid]]
+service = "FreeSvc"
+billing = "free-tier"
+monthly_est = "$0"
+EOF
+
+# 全 free-tier → 花費顯示「免費」
+mkdir -p "$ROOT/freeonly-proj"
+printf 'name = "freeonly-proj"\nstatus = "done"\n[[paid]]\nservice = "OnlyFree"\nbilling = "free-tier"\nmonthly_est = "$0"\n' > "$ROOT/freeonly-proj/PROJECT.toml"
 
 # 夾擊測試用:120 字指令與 37 字 monthly_est(真實機隊資料的形狀,見 2026-07-24 量測)
 mkdir -p "$ROOT/longtext-proj"
@@ -152,7 +179,7 @@ assert_eq "detail: unknown project exits 1" "$CODE" "1"
 run money
 assert_eq "money: exit 0" "$CODE" "0"
 assert_contains "money: service row shown" "$OUT" "OpenAI API"
-assert_contains "money: monthly_est shown" "$OUT" "~\$3"
+assert_contains "money: monthly_est shown" "$OUT" "NT\$150/月"
 assert_contains "money: cancel shown" "$OUT" "拿掉 .env 的 key"
 
 # --- proj remote: gh 缺席的降級路徑(比照 smoke.sh 的受控 PATH 手法) ---
@@ -210,9 +237,6 @@ assert_eq "html: 指令 band only for projects with commands" "$CMD_BANDS" "2"
 assert_contains "html: long command clamped in display" "$HTML" "…</code>"
 assert_contains "html: full command kept in title" "$HTML" 'title="uv run python -m quant.data.taifex_fetch --root data/raw --start'
 assert_contains "html: copy payload stays complete" "$HTML" 'data-cmd="uv run python -m quant.data.taifex_fetch --root data/raw --start'
-assert_contains "html: long monthly_est clamped" "$HTML" '<span class="cost-amt" title="NT$260/年（≈NT$22/月，user 2026-07-11 確認）">'
-# 短值不掛 title(沒截斷就不掛,否則整片 hover 提示變噪音)
-assert_contains "html: short cost has no title" "$HTML" '<span class="cost-amt">~$3</span>'
 # dashboard 只收有 manifest 的專案:bare-proj(純 git,無 PROJECT.toml)不該出現在卡片區
 assert_not_contains "html: unregistered project hidden" "$HTML" "bare-proj"
 # 卡片排序:狀態活躍度 → commit 日期新舊 → 名稱。fixture 對應:
@@ -235,13 +259,23 @@ assert_not_contains "html: no external http" "$HTML" "http://"
 assert_not_contains "html: no external https" "$HTML" "https://"
 assert_not_contains "html: no external src=" "$HTML" "src="
 assert_not_contains "html: no external stylesheet" "$HTML" "<link"
-# 花費長在卡片上,不再有底部總表——金額與專案在同一張卡,不用跨區塊對照專案名。
-# 「按用量要看得到金額」的舊教訓(ea0f8f2)在新版面照樣成立,只是換成 .cost-amt
+# 花費長在卡片上,不再有底部總表
 assert_not_contains "html: bottom money section removed" "$HTML" "花錢總覽"
 assert_not_contains "html: no money tables left" "$HTML" "<table"
-assert_contains "html: usage cost shown on the card" "$HTML" '<span class="paid paid-usage">OpenAI API</span><span class="cost-amt">~$3</span>'
-# free-tier 排在付費項之後;金額欄以 — 佔位(恆為 $0,寫出來是雜訊,但空著格線會斷)
-assert_contains "html: free-tier sorts last, shows dash" "$HTML" '<span class="paid paid-free">Supabase</span><span class="cost-amt">—</span>'
+# 花費 = 一行按月總和 + 服務 tag 橫排下一列(不再逐項顯示金額)
+assert_not_contains "html: no per-service amount on card" "$HTML" "cost-amt"
+# 同幣別相加:good-proj 只有 OpenAI NT$150(Supabase free 不計) → NT$150/月
+assert_contains "html: cost total sums same currency" "$HTML" '<div class="cost-sum">NT$150/月</div>'
+# 服務 tag 橫排,按用量保留警示色,free 沉底
+assert_contains "html: cost tags row present" "$HTML" '<div class="cost-tags"><span class="paid paid-usage">OpenAI API</span><span class="paid paid-free">Supabase</span></div>'
+# 不同幣別分列 + range 取中點(US$2-3 → 2.5)
+assert_contains "html: mixed currency kept separate" "$HTML" 'NT$100 + US$2.5/月'
+# ? 項誠實標未估,不謊報 0(cost-proj 的 Unknown 按用量無月額)
+assert_contains "html: unestimable flagged not zeroed" "$HTML" '<span class="cost-warn">+1未估</span>'
+# 年費且附月額等值 → 用月額(longtext NT$260/年（≈NT$22/月）→ NT$22)
+assert_contains "html: yearly uses monthly equiv" "$HTML" '<div class="cost-sum">NT$22/月</div>'
+# 全 free-tier → 免費
+assert_contains "html: all free shows 免費" "$HTML" '<div class="cost-sum">免費</div>'
 # HTML 轉義:xss-proj 的 <script> 不得原樣注入
 assert_not_contains "html: user script not raw" "$HTML" "<script>alert(1)"
 assert_contains "html: user script escaped" "$HTML" "&lt;script&gt;alert(1)"
