@@ -11,344 +11,73 @@
 
 ## 二、版本演進
 
-### v1（已淘汰）：PAL MCP 路線
+### 前史：v1–v3.5（已被取代，壓縮存查）
 
-最初考慮使用社群熱門的 PAL MCP server，提供 `consensus`、`codereview`、`clink` 等多模型協作工具。
-
-**淘汰原因**：
-- 維護者回應疑慮
-- 隔了一層黑盒子難以 debug
-- 5000+ 行 Python 對「跨模型 review」這個簡單需求過重
-
-### v2（已被取代）：自寫 wrapper + subagent
-
-寫 ~150 行 Python 的 MCP server 跟兩個 bash wrapper，搭配自訂 subagent
-（codex-coder、codex-reviewer、gemini-reviewer）和 skill
-（plan-with-review、cross-model-review、handoff-context-format）。
-
-**問題**：
-- 三個環境問題（trusted-directory、stdin handling、權限提示）需要 debug
-- 同模型 self-review 陷阱（codex-coder + codex-reviewer 看似 multi-agent
-  但本質是同模型分兩次呼叫，沒有真正的 isolation）
-- 維護成本：1600+ 行的 kit
-
-### v3（已被精簡）：基於官方整合的精簡版
-
-OpenAI 在 2026/3/30 發布 `codex-plugin-cc`——直接整合 Codex 進 Claude
-Code 的官方 plugin。提供 `/codex:review`、`/codex:adversarial-review`、
-`/codex:rescue` 等 slash commands。
-
-這讓 v2 大部分自製元件**完成歷史任務、可以光榮退役**：
-
-| v2 元件 | v3 取代 |
-|---------|---------|
-| `.claude/scripts/codex_exec.sh` | Codex Plugin 內建 |
-| `codex-reviewer` subagent | `/codex:review` |
-| `codex-coder` subagent | `/codex:rescue` |
-| `gemini-reviewer` subagent | 不再需要（codex 取而代之） |
-| `handoff-context-format` skill | Plugin 自己處理 context 傳遞 |
-| `cross-model-review` skill | `/codex:review` 直接 invoke |
-| `plan-with-review` skill | superpowers writing-plans + auto `/codex:review` |
-
-v3 從 1600+ 行縮到 ~900 行。**少即是多**——之前我們設計的東西被官方做掉了，這是好消息。
-
-### v3.1（已被擴充）：profile 切換 + 一鍵 init + 文件精簡
-
-v3 證明「基於官方整合的精簡版」方向正確，但實戰暴露出兩個**不在執行階段、
-而在邊界**的痛點：啟動成本（每開專案要手動搬檔、填 CLAUDE.md）與人機溝通
-（USAGE.md 太繁雜，沒人真的照著用）。v3.1 專打這兩端，不動執行核心。
-
-三個關鍵決策：
-
-1. **Profile 切換取代 fork。** full（gemini+codex+claude）是日常預設；但公司
-   環境不能用 codex、或 token 用完時需要降級成只有 claude 的 solo。直覺是
-   「維護兩份 `.claude`/`CLAUDE.md`」，但那會讓使用者退化成兩份檔案的人肉
-   同步器（drift 陷阱）。改用單一 per-machine 環境變數 `KIT_PROFILE=full|solo`：
-   **同一份 committed repo**，靠環境變數決定行為。reviewer 角色因此被抽象化——
-   CLAUDE.md 不再寫死 `/codex:review`，而是「依 active profile 解讀 review」。
-   solo 的 review 降級成 fresh-context subagent 自審（保留狀態/時間隔離、失去
-   模型隔離），且**明文宣告降級、不靜默**。
-
-2. **選擇性 init 取代 `cp -r`。** v3 把整個 kit `cp -r` 進專案，連
-   README/ARCHITECTURE/USAGE 這些「kit 自己的文件」都被拖進去，造成使用者
-   分不清哪些能改。v3.1 把 kit 定位成「留在原地的工具」，用 `init.sh` 只吐出
-   **安裝層**（`.claude/` + `CLAUDE.md` + `PROMPTING.md`），kit 文件永遠留在
-   kit repo。這同時根除「哪些檔案能改」的困惑——專案裡只剩「該填的」跟
-   「別碰的」。
-
-3. **PROMPTING.md 取代 USAGE 的 prompt cookbook。** USAGE.md 把一個小小的
-   「控制文法」攤平成六個情境範本（A–F），又是 illustrative 而非 parametric，
-   導致沒人照用。v3.1 抽出底層文法——「一句話描述任務 + 可選修飾語覆寫 +
-   介入指令」——收成一頁參數化 cheat sheet。
-
-文件結構連帶精簡：`ADOPTION.md` 砍掉（精華併入 README 既有專案段），
-`USAGE.md` 砍掉（prompt cookbook 由 PROMPTING.md 取代、operations/debug 併入
-README）。從 v3「一堆會被複製進專案的文件」收斂成「kit repo 留文件、專案只
-進安裝層」。
-
-> v3.1 的核心仍是同一條心法：**少即是多**。差別在 v3 簡化的是「實作」
-> （自製 wrapper 退役），v3.1 簡化的是「介面」（啟動與溝通）。
-
-### v3.2（已被擴充）：所有權二分 + 更新回流 + 文件模板
-
-v3.1 讓開專案跟日常溝通變輕，但 kit 鋪進多個專案之後，暴露出下一層痛點：
-**kit repo 更新了，已經跑過 `init.sh` 的專案卻拿不到**——workflow rules
-埋在 CLAUDE.md 的段落裡，沒有回流機制，只能人工比對貼過去（drift 陷阱的
-另一種形式）；同時各專案的 README 形狀不一，讓「隔幾個月回來」的重啟成本
-又悄悄爬回來；而 PROMPTING.md 這份 v3.1 才推出的一頁速查，實戰下來也沒人
-回去翻——控制文法就那幾條，內化一次之後就記住了，速查卡反而是多餘的一層。
-
-三個關鍵決策：
-
-1. **檔案級所有權二分取代段落級約定。** v3.1 的 CLAUDE.md 是「上半使用者
-   填、下半 kit 塞」的單一檔案，靠人自律不去動下半段——但沒有工具強制，
-   `init.sh` 也無從得知使用者是否手滑改了下半段，該不該覆蓋。v3.2 把
-   workflow rules 整段搬進 kit-owned 的 `.claude/rules/kit-workflow.md`
-   （`.claude/rules/` 由 Claude Code 自動載入，不需額外接線），CLAUDE.md
-   歸零成純專案內容。**所有權從「檔案內的段落」升格成「檔案本身」**：
-   `init.sh --update` 因此可以對 kit-owned 檔案直接 add-or-overwrite，不用
-   再猜哪段能動、哪段不能動——這正是回流機制原本缺的那塊拼圖。
-
-2. **PROMPTING.md 光榮退役。** 它的存在理由是教使用者一套控制文法；這個
-   教學任務跑了幾輪專案之後已經完成——文法內化了，速查卡就沒人翻。與其
-   放著佔一個檔案位置，不如把僅存的殘值（回來複習的那句 prompt、
-   `--update` 指令）併進 `templates/README.md` 的「叫 AI 接手」段，讓它
-   跟其他「回來 30 秒重啟」的資訊待在同一個地方。這是教訓 3（使用者文件
-   要符合使用時的形態）的下一步：連「一頁速查」都可能太重，真正常駐的
-   落點是使用者本來就會回去看的專案 README。
-
-3. **`--existing` 移除，改自動偵測。** `init.sh` 原本要求使用者自己判斷
-   「這是不是既有專案」再選對 flag，但這個判斷 `init.sh` 自己看一眼目標
-   目錄是不是空的就能做——多一個 flag 只是多一次使用者會選錯的機會。冗餘
-   的決策不該留在介面上。
-
-> 這條路走下來，「少即是多」換了第三種樣貌：v3 簡化的是**實作**（自製
-> wrapper 退役），v3.1 簡化的是**介面**（啟動與溝通），v3.2 簡化的是
-> **所有權**（誰能改哪個檔案，從一條靠自律遵守的約定變成一條工具能執行
-> 的規則）。
-
-### v3.3（已被擴充）：harness 閉環——review gate 修復 + session onboarding + 權限基線
-
-v3.2 解決了「檔案怎麼進專案、怎麼更新」；實戰下一個痛點在 harness 層：kit
-最重要的紀律機制（Stop review gate）其實有三個洞，而且 hooks/skills/agents
-之間沒有形成閉環。v3.3 全部針對這一層：
-
-1. **Review gate 修成真的閉環。** 三個洞：(a) marker 無人寫——hook 檢查
-   `/tmp/claude-codex-reviewed-<id>` 但沒有任何流程會寫它，審完照樣過不了；
-   (b) commit 盲區——只看 `git status`，頻繁 commit 的 workflow 下 gate 全盲；
-   (c) rename/空白檔名解析錯誤。修法：SessionStart hook 記 session 起點
-   baseline（HEAD + working-tree content hash），Stop hook 聯集「未 commit
-   （`-uall`）+ baseline 以來的 commits」，gate 滿足時推進 baseline。審過的
-   狀態用 content hash 記住——「審完才 commit」不會被重複追殺（tree hash
-   不因 commit 而變），baseline 損毀則 fail closed（全部列管，一次 review
-   自癒）。cross-model review 在 plan 階段就抓到「審過的未 commit 變更會
-   永遠重複 block」與「新目錄內檔案逃逸」兩個 P1——隔離的實證價值再 +1。
-
-2. **SessionStart hook 兌現。** v3 時代它在「為什麼不做更多」清單裡（沒踩到
-   痛點）；v3.3 踩到了——Claude 無法知道自己的 session_id，所以 marker 檔
-   永遠只有 hook 單方面知道路徑。SessionStart 廣播 KIT_CONTEXT（profile、
-   codex/gemini 可用性、marker 路徑）+ 記 baseline，一支 hook 同時解掉
-   「onboarding」跟「gate 盲區」兩個問題。
-
-3. **修飾語 skills 化。** `/kit-review`（依 profile 跑對的 review + touch
-   marker）、`/kit-skip-review`（user 授權的 gate 跳過）。marker 的讀寫從此
-   有唯一的家；classify-task.sh 同步瘦成 explicit-override only——關鍵字
-   啟發式（button→small、refactor→large）判斷力不如模型本身，刪；連
-   `quick fix`/`small change` 這類描述詞也不再觸發，只認祈使句。
-
-4. **solo-reviewer 從敘述變正式 agent 檔。** solo profile 的自審之前只存在
-   於規則文字裡；現在是 `.claude/agents/solo-reviewer.md`（read-only 工具、
-   輸出格式、「不因為 writer 是自己就手軟」的明文協議）。
-
-5. **權限基線 + autoMode 評估。** settings 模板直接內建 read-only
-   `permissions.allow`（git status/diff/log/show、ls、timeout、gemini_exec）。
-   `defaultMode: "auto"`（background 分類器自動核可，research preview）評估後
-   **不採用**：(a) preview 語義可能變動，kit 承諾的是可預期性；(b)
-   settings.json 裝機後歸使用者，kit 不該替使用者選權限哲學；(c) kit 的信任
-   邊界在 review gate，不在權限放寬——顯式 read-only allowlist 用零驚訝換掉
-   八成摩擦。等 auto 轉 GA 再回頭評。
-
-kit-workflow.md 同步瘦身成 landmines-only（~60 行）：留下的是模型自己推不出
-的高風險規則（isolation 地雷、gate 機制、STOP 條件），刪掉的是模型本來就會
-的（任務大小判斷表、能力清單）。
-
-### v3.4（已被擴充）：gemini 退役——研究回歸 Claude 原生
-
-使用者決定將 gemini 自工具鏈移除。**這是使用者環境的個人因素決策，不是
-模型能力問題**——研究員角色本身留任，由 Claude 原生的 `research-scout`
-子代理（WebSearch + WebFetch）接手執行。
-
-介面刻意不動（「換心臟不換介面」）：觸發條件、輸入（Topic / Context /
-2-5 個問題 / Constraints）、輸出格式、「研究是 nice-to-have 不是 gate」
-的失敗語義全數保留，只換掉執行者。連帶的結構紅利：
-
-1. **Profile 從此只決定一件事：誰當 reviewer。** 研究不再是 full 限定
-   （不依賴外部 CLI 之後，solo 也能用），full/solo 的差異收斂成單一開關。
-2. **少一個外部依賴面**：GEMINI_API_KEY、gemini CLI 安裝、quota debug
-   全部消失；init.sh 環境檢查與 session-start 廣播同步瘦身。
-3. 同輪收掉 v3.3 的三個 fix-later（`--help` 噪音、`--update` 補缺失
-   settings.json、smoke env 隔離），並為已鋪 kit 的專案加 `--update`
-   遷移提示（孤兒 gemini 檔不代刪、只講明去向）。
-
-### v3.5（已被擴充）：sizing 防偏壓 + hooks 預設開啟
-
-對照《AI Coding Agent》的 Harness Engineering 框架做了一輪 gap 分析，
-修的是兩個「機制正常、效果打折」的點：
-
-1. **Workflow sizing 被 superpowers 的觸發規則結構性壓過。** v3.3 把
-   關鍵字啟發式刪掉、交給模型自判是對的；但實戰發現 default 路徑上有
-   一股不對等的力量——superpowers 的 using-superpowers 每個 session 以
-   EXTREMELY_IMPORTANT 級別注入「1% 可能適用就必須 invoke」，而
-   brainstorming 的 description（creating features / adding functionality
-   / modifying behavior）幾乎 match 所有改 code 的任務。kit-workflow.md
-   的 sizing 表只有四行、語氣弱，單檔小 feature 這種灰色地帶就被拉進
-   brainstorm→spec→TDD 全套。修法是「把模型需要的授權文字放進它會讀、
-   優先權最高的位置」：sizing 段給小任務可操作判準（≤2 檔、無新依賴、
-   不碰 schema/auth/payment/constraints → 直接做 + 自行驗證），並引用
-   superpowers 自己承認的優先權順序（專案指示 > skills）明文解除小任務
-   的強制觸發；模糊地帶則「問一句」而非默默走全流程。同輪清掉
-   research-before-planning 與 research-scout 裡引用已廢除分類器的
-   `large_task`/`small_task` 標籤。
-
-2. **Hooks 從 opt-in 改為預設開啟。** 「最少必要」在 v3 選擇 default-off
-   的理由是 gate 有洞、debug 複雜；v3.3 把三個洞修完、hooks-smoke.sh
-   380 行行為測試蓋住 edge case 之後，opt-in 的前提已不存在——而
-   default-off 的實際代價是大多數部署根本沒有 gate 在跑，kit 最重要的
-   紀律機制形同虛設。settings.json 歸使用者所有的原則不變：`--update`
-   照舊不覆蓋既有 settings.json，只印 diff 讓使用者自己合併。
+| 版本 | 做了什麼 | 結局 / 留下什麼 |
+|------|----------|-----------------|
+| **v1** | 社群 PAL MCP server（consensus / codereview / clink） | 淘汰:維護者回應疑慮、隔一層黑盒難 debug、5000+ 行對「跨模型 review」這個簡單需求過重 |
+| **v2** | 自寫 ~150 行 MCP + bash wrapper + 自訂 subagent/skill | 淘汰:三個環境 bug、1600+ 行維護成本,以及**同模型 self-review 陷阱**（codex-coder + codex-reviewer 看似多代理,本質是同模型分兩次呼叫,沒有真 isolation）——**這條教訓長成了 kit 的承重牆:審查的人必須跟寫的人是不同模型** |
+| **v3** | OpenAI 2026-03-30 發布官方 `codex-plugin-cc`,自製元件光榮退役,1600+ → ~900 行 | 確立心法**少即是多**——此處簡化的是「實作」 |
+| **v3.1** | `KIT_PROFILE` 環境變數取代「維護兩份 `.claude`」（人肉同步=drift 陷阱）;`init.sh` 只吐安裝層,kit 自己的文件永遠留在 kit repo | 少即是多的第二面:簡化「介面」(啟動與溝通) |
+| **v3.2** | workflow rules 整段搬進 kit-owned `.claude/rules/`,CLAUDE.md 歸零成純專案內容;`--existing` 改自動偵測 | **所有權從「檔案內的段落」升格成「檔案本身」**——`--update` 才能安全 add-or-overwrite。少即是多的第三面:簡化「所有權」 |
+| **v3.3** | 修 review gate 三個洞（marker 無人寫 / commit 盲區 / rename 解析錯誤）;SessionStart 廣播 KIT_CONTEXT + 記 baseline;`/kit-review`、`/kit-skip-review`;solo-reviewer 正式化;read-only 權限基線 | **現行 Stop gate 的骨架在此成形**（baseline + content hash + fail-closed）。`defaultMode:"auto"` 評估後不採用——kit 的信任邊界在 review gate,不在權限放寬 |
+| **v3.4** | gemini 退役（**user 環境的個人因素,非模型能力問題**）,研究改 Claude 原生 `research-scout`,「換心臟不換介面」 | **profile 從此只決定一件事:誰當 reviewer** |
+| **v3.5** | 給小任務可操作的 sizing 判準,並引用 superpowers 自己承認的優先權（專案指示 > skills）解除強制觸發;hooks 從 opt-in 改**預設開啟** | 首次記錄**superpowers 的 EXTREMELY_IMPORTANT 注入會結構性壓過 kit sizing**——這是持續的力學關係而非一次性事件,見 `docs/harness-diagnosis.md §六` |
 
 ### v4.0：弱模型防線——判斷力外化 + 物理熔斷
 
-背景與動機和前幾版不同：這一版**不是踩到痛點後的修補，而是一次預防性
-立法**——由 Fable 5（一次性的高階模型 session）在制度層面外化判斷力，
-供此後長期運營的較弱模型（Opus 4.8 指揮、Sonnet/Haiku 執行、無人值守
-為常態）使用。完整診斷見 `docs/harness-diagnosis.md`（三大失敗場景 →
-三個物理痛點），交接脈絡見 `docs/handover-from-fable.md`。核心決策：
+**不是踩到痛點後的修補，而是一次預防性立法**——由 Fable 5（一次性高階模型
+session）在制度層面外化判斷力，供此後長期運營的較弱模型使用。完整診斷見
+`docs/harness-diagnosis.md`（三大失敗場景 → 三個物理痛點；腐化偵測與長期維護
+見同檔 §五、§六）。
 
-1. **防線分層：hook 管物理，rules 管判斷。** 評估標準明文化——「這條
-   規則被違反時能否被物理偵測？」能 → 做成 hook；不能 → 進 rules，
-   並接受其強度上限。v4.0 新增兩支 hook：`protect-paths.sh`（PreToolUse：
-   `.claude/protected-paths` 專案禁區 hard-deny；kit-owned 檔案轉 ask
-   請示——user 在場一鍵放行、無人值守等同封鎖，避免與 update-config 等
-   內建流程打架；user-only 逃生口 `KIT_PROTECT=off`）與 `tool-breaker.sh`（雙事件：
-   PreToolUse 連續相同調用熔斷 + PostToolUseFailure 失敗密度警示 +
-   全調用埋點日誌）。
-2. **逃生門加價：marker 證據化。** Stop gate 的 block 訊息原本親手印出
-   `touch <marker>`——假性完成的最短路徑是 harness 自己鋪的。v4.0 起
-   marker 必須含 `reviewed-by=` 證據行（由 /kit-review 在 review 真跑完
-   後寫入），block 訊息不再印任何 incantation。誠實路徑從此比造假省力。
-   誠實標註：這是摩擦 + 審計，不是密碼學防偽（模型持 Bash 可偽造一切；
-   最後一層是人對埋點日誌的抽查）。
-3. **compact 重錨定。** SessionStart 偵測 `source=compact|resume` 時注入
-   RE-ANCHOR 指令（重讀 constraints 與 plan、自報 phase）——記憶解體
-   風險最高的時刻，給最強的錨。
-4. **判斷力外化成可比對的檢核表。** `.claude/rules/kit-delegation.md`
-   （指揮官不下場、派工三件套、Haiku→Sonnet→Opus 升降級、implementer≠
-   verifier）、`.claude/rules/kit-evolution.md`（模型可自改什麼、LESSONS
-   格式與精簡協議）、`.claude/docs/judgment-matrix.md`（換路徑信號/完成
-   判準/熔斷提問/品味極限，每條附正例反例）、`/kit-dispatch` skill
-   （四種派工模板）。`init.sh` 的 kit-owned 集合加入 `docs`。
-5. **CLAUDE.md 範本改版**：弱模型需要極度明確的範本——佔位符全部附
-   格式與範例、constraints 要求與 protected-paths 同步執法、加檔案路由
-   表（何時讀哪份文件）。
+- **防線分層：hook 管物理，rules 管判斷。** 評估標準明文化——「這條規則被違反
+  時能否被物理偵測？」能 → 做成 hook；不能 → 進 rules 並接受其強度上限。新增
+  `protect-paths.sh`（專案禁區 hard-deny／kit-owned 轉 ask 請示；user-only 逃生口
+  `KIT_PROTECT=off`）與 `tool-breaker.sh`（連續相同調用熔斷 + 失敗密度警示 +
+  全調用埋點日誌）。
+- **逃生門加價：marker 證據化。** block 訊息原本親手印出 `touch <marker>`——
+  假性完成的最短路徑是 harness 自己鋪的。改為必須含 `reviewed-by=` 證據行，
+  訊息不再印任何 incantation。**誠實路徑從此比造假省力**（是摩擦 + 審計痕跡，
+  不是密碼學防偽——模型持 Bash 可偽造一切，最後一層是人的抽查）。
+- **compact 重錨定**（SessionStart 偵測 `compact|resume` 注入 RE-ANCHOR：重讀
+  constraints 與 plan、自報 phase）、**判斷力外化成檢核表**（kit-delegation／
+  kit-evolution／judgment-matrix／`/kit-dispatch`）、**CLAUDE.md 範本改版**
+  （佔位符附範例、constraints 與 protected-paths 同步執法、加檔案路由表）。
 
 ### v4.1：判斷層採納——fable-soul 蒸餾
 
-v4.0 防的是**結構性失敗**（context 經濟、迷航、重試螺旋、marker 造假）；
-v4.1 補**認知性失敗**（假完成措辭、過期驗證、湊數 findings、hedge 話術）。
-素材採自 fable-soul（MIT）——一份在弱模型上做過 RED-GREEN 行為測試的
-Fable 判斷蒸餾——但只收 kit 未覆蓋的機制，不照搬。核心產出：
+v4.0 防的是**結構性失敗**；v4.1 補**認知性失敗**（假完成措辭、過期驗證、湊數
+findings、hedge 話術）。素材採自 fable-soul（MIT），只收 kit 未覆蓋的機制。
 
-1. **`.claude/rules/kit-judgment.md`**（auto-loaded 第四檔）：八條機制
-   （目標≠指定修法、機制先於動手、verified/unverified 二分、stale-green
-   reset、證據勝過記憶、量測代替 hedge、給判斷不給菜單、先確認再舉報）
-   + 藉口對照表 + Red Flags。與 judgment-matrix 的分工寫死：R3（熔斷
-   提問）/R4（品味不拍板）觸發條件優先於本檔的「直接做」傾向。
-2. **per-turn digest**（classify-task.sh）：每個非空 prompt 注入一行
-   KIT_JUDGMENT 提醒——確定性 re-fire，不依賴模型記得自查。fable-soul
-   原案掛在 Stop hook，但 Stop 的 exit-0 stdout 進不了 model context
-   （transcript-only），實作無效；移到 UserPromptSubmit 才真的送達。
-3. **派工模板判斷句 inline**：snapshot caveat（subagent 只繼承 session
-   啟動時的指令快照，實測 2026-07-03）使模板成為弱執行員判斷規則唯一
-   保證送達的載體。模板 2/3 加措辭紀律（stale-green、hedge 禁令）、
-   模板 4 加「沒驗證的警告=錯誤」、新增模板 5 驗收 read-back（四種
-   造假模式清單：無證據宣稱、跳過的檢查、發明的路徑/數據、被弱化的
-   斷言）。
-4. **prose 層有了 proof surface**：`tests/evals.md`（行為 eval 套件，
-   0–2 評分）+ kit-evolution「規則變更紀律」（先查覆蓋、RED-GREEN
-   收據、逐字記藉口、rules/ 總量 20KB 預算由 smoke test 把關）。
-   誠實條款：2026-07-05 實測 **RED 全數未重現**——fresh Haiku 4.5 +
-   kit v4.0 快照已扛住這些場景；kit-judgment 的目標條件是長 session
-   退化後的模型（合成 eval 無法模擬），失敗證據承接 fable-soul 的
-   外部收據與本 kit 生產史（詳見 tests/evals.md 採納註記）。
-5. **`docs/instruction-audit.md`**：例行規則審計（每 minor 版本前跑）。
-   prose 有四層之後，「兩條規則打架」沒有物理偵測手段，只能例行審計。
+- **`.claude/rules/kit-judgment.md`**（auto-loaded 第四檔）：八條機制 + 藉口對照
+  表 + Red Flags；與 judgment-matrix 的分工寫死（R3 熔斷提問／R4 品味不拍板的
+  觸發優先於本檔的「直接做」傾向）。
+- **per-turn digest**（classify-task）：每個非空 prompt 注入一行 KIT_JUDGMENT，
+  確定性 re-fire 不依賴模型記得自查。**踩到的坑**：fable-soul 原案掛在 Stop
+  hook 無效——Stop 的 exit-0 stdout 是 transcript-only、進不了 model context，
+  移到 UserPromptSubmit 才真的送達。
+- **派工模板判斷句 inline**：subagent 只繼承 session 啟動時的指令快照（實測
+  2026-07-03），模板因此是弱執行員判斷規則**唯一保證送達**的載體。
+- **prose 層有了 proof surface**：`tests/evals.md` + kit-evolution「規則變更紀律」
+  （先查覆蓋、RED-GREEN 收據、逐字記藉口、rules/ 20KB 預算由 smoke 把關）。
+  **誠實條款**：2026-07-05 實測 RED 全數未重現——目標條件是長 session 退化後的
+  模型，fresh-context 合成 eval 模擬不了（詳見 evals.md 採納註記）。
 
-### v4.2：verification-signals 領域層
+### v4.2–v4.5：領域層、成本感知、manifest 體系
 
-`.claude/docs/verification-signals.md`（read-on-demand，經 CLAUDE.md
-路由表觸達）：五個「迴圈裡缺便宜驗證信號」的高風險領域（UI 截圖、
-schema 讀取路徑、bug 連環卡交接、SaaS 成本卡、業務邏輯可觸達性）——
-kit-judgment 通用證據紀律在領域層的實例化。
-
-### v4.3：成本感知層
-
-痛點（2026-07-07 真實 session）：調適期小改也被 size-blind Stop gate
-逼跑跨模型 review；模型/effort 配置只在 user 主動要求時出現。三個產出：
-
-1. **Stop gate 小改自動放行**（verify-final-review.sh）：量測「距上次
-   認證 tree 的累積 numstat」，≤50 行 / ≤2 業務檔 / 無敏感或 protected
-   路徑 → 放行但**不推進 baseline**——小改累積，破檻那次 review 批次
-   涵蓋全部（防切香腸）。無 baseline / binary 一律 fail-closed。門檻
-   是 git 實測，模型話術無效——延續「能用 hook 擋的不靠 rules」判準。
-2. **主導模型/effort 配置提案**（kit-workflow.md）：feature 級以上
-   計畫簽核必附各 phase 主導模型 + effort + 一句理由 + 卡關升級條件；
-   phase 交界一行 /model 提醒。純建議、user 執行（scenario 9 RED-GREEN
-   收據見 tests/evals.md）。
-3. **classify-task 描述語境濾網**：遮罩「頻率/進行式標記 + 觸發詞」
-   再比對——「一直在走完整流程」是描述不是指令（2026-07-10 實際誤觸）。
-
-### v4.4：專案 manifest 體系
-
-痛點：機隊擴到十個專案後，「哪個在跑、怎麼啟動、誰在燒錢」只存在人的
-記憶裡。決策：**狀態要機器可讀，維護不靠記性**。
-
-1. **`PROJECT.toml`**（專案根，**user-owned**，`--update` deploy-if-absent
-   ——比照 settings.json 先例，kit 永不覆蓋）：status / status_note /
-   `[commands]` / `[[paid]]`。
-2. **`bin/proj`** 跨專案彙總：`proj`（狀態總覽 + 過時偵測）/ `proj money`
-   （燒錢視圖）/ `proj remote`（gh 對照未 clone）。
-3. **`rules/project-manifest.md`**（kit-owned，隨 --update 推平）：session
-   結束前狀態/指令/付費服務有變就同步。維護慣例做成規則，而不是靠人記得。
-   收錄判準：`[commands]` 只收「**用它**」的指令，不收「**開發它**」的
-   （dev/build/test 查 package.json 就有）；`status_note` 固定兩段
-   「目前進度;下一步」，細節歸 LESSONS/commit。
-
-### v4.5：proj html dashboard
-
-`bin/proj html` 產出自包含 HTML dashboard（WSL 自動開瀏覽器）——終端太窄
-時看不下十個專案的橫排資訊。同版把 manifest 的收錄規範從渲染端啟發式
-過濾**上移到 schema**（kit rule）：規則寫在 manifest 規範裡，渲染層有
-什麼顯什麼，不再猜。
-
-### v4.7（當前）：manifest 的欄位有牙齒了
-
-兩個小改，同一個道理：**只靠模型自律的規則不會被遵守**。
-
-1. **`idle` 狀態**：原本的五個狀態撐不起一個常見情境——專案上線自走、
-   cron 還在跑、還在花錢，但沒有人在開發它，也還沒到結案（case-pick
-   2026-07-13 進觀察期時發現）。`active` 謊稱有人在動它，`paused` 暗示
-   它連跑都不跑了，`done` 宣告不再有下一步。`idle` 補上這一格。
-
-2. **`status_note` / `service` 的形狀檢查**（`bin/proj`）：收據是
-   2026-07-13 的實測——`status_note` 的「固定兩段、細節歸 LESSONS」這條
-   規則**寫在 rules 裡卻有 11/12 個專案違反**（最糟 362 字，把整個成本
-   調查塞進 dashboard）；`service` 則有 8 個專案、14 個項目把說明寫進
-   badge（`Supabase (Postgres + Storage, project ukmcix...)`）。每次違反
-   的藉口都是「這個細節很重要」——它重要，但 dashboard 是拿來掃一眼的，
-   不是筆記本。修法：`proj` 對「段數 != 2」「單段 > 60 字」「service 含
-   括號或 > 24 字」發警告（同既有的 status 值檢查，不擋、只吵），規則
-   文字補上那個數字——**沒有數字的規範不可檢查**。
+- **v4.2 verification-signals**（read-on-demand，經 CLAUDE.md 路由觸達）：五個
+  「迴圈裡缺便宜驗證信號」的高風險領域——kit-judgment 通用證據紀律的領域實例化。
+- **v4.3 成本感知**：Stop gate **小改自動放行**（累積 numstat ≤50 行／≤2 業務檔、
+  無敏感或 protected 路徑 → 放行但**不推進 baseline**，小改累積、破檻那次批次
+  涵蓋全部＝防切香腸；門檻由 git 實測，模型話術無效）；feature 級以上計畫須附
+  各 phase 主導模型 + effort + 升級條件；classify-task 描述語境濾網（「一直在走
+  完整流程」是描述不是指令——2026-07-10 實際誤觸）。
+- **v4.4 manifest 體系**：`PROJECT.toml`（user-owned，`--update` deploy-if-absent
+  比照 settings.json 先例，kit 永不覆蓋）+ `bin/proj` 跨專案彙總 +
+  `rules/project-manifest.md`——**狀態要機器可讀，維護不靠記性**。
+- **v4.5 proj html dashboard**：自包含 HTML（WSL 自動開瀏覽器）；同版把 manifest
+  收錄規範從渲染端啟發式**上移到 schema**，渲染層有什麼顯什麼、不再猜。
 
 ### v4.6：review 經濟學——輪數、門檻、註解噪音
 
@@ -367,16 +96,54 @@ kit-judgment 通用證據紀律在領域層的實例化。
    誘因反向（越認真補測試越容易被罰）。修法：測試檔從**檔案數與行數
    兩個計數**排除（只排檔案數會漏掉行數那半邊：55 > 50 照樣擋）、
    `SMALL_MAX_FILES` 2→4；敏感命名的測試檔（`test_auth.py`）不享排除
-   ——敏感檢查先於測試排除。判準延續 v4.3：門檻由 git numstat 實測，
-   模型話術無效。
+   ——敏感檢查先於測試排除。
 3. **註解紀律**（kit-workflow + dispatch 模板 2/3）：user 逐字收據
    「vibe coding 的模式下…實在沒必要每次撰寫 code 都產生大量註解」。
    關鍵洞察：**「對 AI 友善」與「減量」是同一刀**——代碼的實際讀者是
    未來的 AI session，它讀 code 比讀散文快，敘述性註解是純噪音；它需要
    的是代碼顯示不了的四類（不變量/外部約束、跨檔耦合、非顯然 why、
    附日期收據）。辯護性註解歸 commit message／LESSONS。
-4. **rules/ 精簡**（20253B→18962B）：砍字不砍義務，把 20KB 預算的餘裕
-   還回來——規則檔是每 session 的固定 context 稅，新增前先還債。
+
+### v4.7：manifest 的欄位有牙齒了
+
+兩個小改，同一個道理：**只靠模型自律的規則不會被遵守**。
+
+1. **`idle` 狀態**：原本五個狀態撐不起一個常見情境——專案上線自走、cron 還在
+   跑、還在花錢，但沒有人在開發它，也還沒到結案（case-pick 2026-07-13 進觀察期
+   時發現）。`active` 謊稱有人在動它，`paused` 暗示它連跑都不跑，`done` 宣告
+   不再有下一步。`idle` 補上這一格。
+2. **`status_note` / `service` 的形狀檢查**（`bin/proj`）：收據是 2026-07-13
+   實測——`status_note` 的「固定兩段、細節歸 LESSONS」**寫在 rules 裡卻有 11/12
+   個專案違反**（最糟 362 字，把整個成本調查塞進 dashboard）；`service` 則有
+   8 個專案把說明寫進 badge。每次違反的藉口都是「這個細節很重要」——它重要，
+   但 dashboard 是拿來掃一眼的，不是筆記本。修法：`proj` 對超標發警告（不擋、
+   只吵），規則文字補上那個數字——**沒有數字的規範不可檢查**。
+
+### v4.8（當前）：gate 從「工作樹範圍」改成「turn 範圍」+ 成本三槓桿
+
+收據有兩份：一個 4 檔基本功能（api router + DB + 來源分流）跑掉 1.5 小時／
+~2M token；以及 user 回報「brainstorming 階段常被 Stop gate 卡」。
+
+1. **Stop gate turn-scoped**（classify-task + verify-final-review）：gate 原本是
+   「工作樹範圍」——只要樹裡躺著未審業務碼就**每輪都攔**，brainstorming／純對話
+   輪一起被卡。改成 classify-task 於每輪開頭快照**工作樹 hash + HEAD sha**，
+   只有這一輪真的動過（改檔**或** commit）才攔；內容定址故 subagent 的改動也算，
+   HEAD 一起比對堵掉「只 commit 不改內容」的盲點。義務不消失（不推進 baseline）。
+   **已知缺口**（codex P1，user 接受並明文記錄）：no-edit 的「宣告完成」輪也會
+   放行——hook 靠樹狀態分不出「完成」與「brainstorming」，要在 hook 層堵得靠
+   脆弱的完成語彙偵測，反而重造誤擋。
+2. **user-only 逃生口 `KIT_REVIEW_GATE=off`**：與 `KIT_PROTECT`／`KIT_BREAKER`
+   對齊——先前唯獨最會卡人的 Stop gate 沒有 env 開關。
+3. **review／派工成本三槓桿**：per-task review **不是預設**（只在敏感路徑 +
+   依賴邊界審，其餘攢進 final review——收據：9 次 per-task review 553k 幾乎與
+   final 完全重疊）；複審一律**開新 fresh reviewer 只餵 scoped delta**，禁止
+   resume 重放（收據：285 行 transcript 重放去審一個 9KB delta ＝ 148k）；
+   **每 phase 派工前重過 sizing 閘**，trivial／~≤10 行由指揮官 inline 做或併進
+   相鄰 task（收據：3 個 10 行 phase 各走完整派工 + 獨立 review ＝ 205k）。
+4. **註解語言政策**：代碼內註解一律英文——收據是 `.env` 行尾中文 `#` 註解的
+   `0xA7` 被 `cut` 連進 Bearer token、gateway 爆 500；文件／prose／commit 維持中文。
+5. **rules/ 精簡**（20864B→20410B）：加法用等量精簡騰出，順帶修好先前**既有
+   超標**的紅燈（v4.6 那輪之後又漲回線外）。
 
 ## 三、角色設計
 
@@ -403,22 +170,16 @@ kit-judgment 通用證據紀律在領域層的實例化。
 > 子代理（只剩狀態/時間隔離）。solo 不是「壞掉的 full」，是個誠實標註過降級
 > 程度的檔位。
 
-### 為什麼 Gemini 變成研究員
+### 研究員角色：為什麼它可以降級，reviewer 不行
 
-v2 把 gemini 當 reviewer。v3 改成研究員。理由：
+執行者換過三輪（v2 gemini 當 reviewer → v3 改當研究員 → v3.4 退役、Claude
+原生 `research-scout` 接手，見前史表），但判準沒變：
 
-- 前沿模型在 code review 任務上越來越同質——「不同 model」的差異變小
-- 但 gemini 在**網路搜尋整合**上有真實差異化優勢（內建 Google Search 能力）
-- Research 是 nice-to-have（失敗可降級），review 是 must-have（失敗不可降級）
-- 把 review 集中在 codex（有官方 plugin）、研究分給 gemini（發揮搜尋優勢）
-
-這個分工讓**每個 model 做自己最強的事**，而不是強迫它們都能做 review。
-
-> **v3.4 後記**：gemini 已因使用者環境因素退役（非能力問題）。研究員角色
-> 由 Claude 原生 research-scout 接手——「每個 model 做自己最強的事」的分工
-> 邏輯不變，只是研究這件事不再需要跨出 Claude 生態才能做好：WebSearch/
-> WebFetch 已是原生能力，而「研究失敗可降級、review 失敗不可降級」的
-> 判準依然成立。
+- **Research 是 nice-to-have（失敗可降級），review 是 must-have（失敗不可
+  降級）**——這條決定了誰能被替換、誰不能。
+- 「每個 model 做自己最強的事」不等於「每個 model 都要能 review」：review 集中
+  在有官方 plugin 的 codex；研究跟著當代最好的搜尋能力走，現在那是 Claude 原生
+  的 WebSearch/WebFetch，不必再跨出 Claude 生態。
 
 ### 為什麼信任 superpowers 主導 plan
 

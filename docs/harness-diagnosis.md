@@ -6,6 +6,9 @@
 > **長任務以無人值守為常態**、**KIT_PROFILE=full**。
 > 本文件是 v4.0 所有防線的設計依據——後續每個產出（規則、hook、skill、模板）
 > 都應能回指到這裡的某個痛點。這是 kit 自己的文件，留在 kit repo，不進專案。
+> **2026-07-24 併入 `handover-from-fable.md`**（同作者同一場 session、內容重疊）：
+> 腐化路徑表移入 §五、長期維護提醒移入 §六，重複的「證據優先」與 /tmp 揮發性
+> 併進 §三。
 
 ---
 
@@ -145,7 +148,10 @@ rules 只承載 hook 做不到的部分（判斷、派工、格式），CLAUDE.m
    模型就是讀過也會忘。這正是 v4.0 的分層邏輯——核心防線全部做成 hook
    （deterministic），rules 只做 hook 做不到的部分。評估任何未來防線時
    先問：「這條規則被違反時，能被物理偵測嗎？」不能的話，它的強度上限
-   就是模型當下的清醒程度。
+   就是模型當下的清醒程度，而長 session 後段的清醒程度趨近於零。
+   **推論：想強化 harness，優先投資可驗證性（讓謊言更難說），不是條文量。**
+   回報要求測試輸出原文、marker 要求證據行、驗收要求 read-back——這些
+   「要證據」的設計，比再寫十條「請認真」的規則都有效。
 
 ---
 
@@ -176,8 +182,48 @@ PreToolUse 硬熔斷不受影響。
 
 ---
 
+## 五、制度腐化路徑與偵測
+
+制度不會一夜壞掉，它會被日常的小便宜磨掉。按可能性排序：
+
+| # | 腐化方式 | 徵兆 | 防線 / 偵測 |
+|---|----------|------|-------------|
+| 1 | **Marker 造假**：模型讀了 skill 原始碼，不跑 review 直接寫證據行 | review 耗時異常短；findings 永遠是零 | marker 內容 + 埋點日誌交叉比對（tool log 裡沒有 codex 調用卻有 marker = 實錘）。user 每月抽查一次即可 |
+| 2 | **假性驗證**：驗收 subagent 跑了測試但沒看結果，或轉述而非貼原文 | 回報裡「全部通過」但沒有輸出原文 | kit-dispatch 模板強制貼原文；指揮官看到轉述式回報一律退回 |
+| 3 | **規則稀釋**：模型在「優化」「精簡」名義下把擋住自己的規則改軟 | LESSONS 精簡後規則變少了；CLAUDE.md constraints 被「整理」 | protect-paths 物理擋 kit 檔；kit-evolution 明定 constraints 只能加嚴。user 審 `git diff` 時特別看刪除行 |
+| 4 | **熔斷疲勞**：學會每次微改一個無意義字元繞過 breaker | 埋點日誌出現大量 near-identical hash 序列 | 日誌審計可見；若成真，breaker 可升級為模糊比對（等踩到再做） |
+| 5 | **TASTE-DECISION 消失**：品味決策不再被標記，靜默混進交付 | 交付物有明顯風格選擇但報告無標記 | 抽查交付物 vs 報告；發現一次就把該模型的無人值守權限收緊一級 |
+
+共同解毒劑只有一個：**埋點日誌 + git diff 是不會說謊的兩份紀錄**。模型的一切
+自我報告都可能是幻覺或修飾，這兩份不是。人的月度十分鐘抽查（挑一個 session
+的 toollog 對照它的交付報告）比任何自動防線都難繞。
+
+---
+
+## 六、長期維護提醒
+
+- **Superpowers 是強力但強勢的房客**：它以 EXTREMELY_IMPORTANT 級別注入的 skill
+  觸發壓力，會結構性壓過 kit 的 sizing 規則（v3.5 已修過一次）。這是**持續的
+  力學關係**，不是一次性事件——弱模型比強模型更容易被最大聲的指令拉走。
+  superpowers 每次升版後，用一個小任務實測：sizing 是否還被尊重、brainstorming
+  是否又開始攔截小任務。同樣的警覺適用於任何新裝的 plugin：**每個 plugin 都在
+  跟 kit 搶弱模型的注意力**。
+- **全域 settings 的兩顆地雷**（與 kit 無關，但會影響 kit 成敗）：
+  `~/.claude/settings.json` 的 `model` pin 用完要改回日常檔位（否則之後每個
+  session 都在燒最貴的模型；換模型時 `effortLevel` 也要重估）；
+  `skipDangerousModePermissionPrompt: true` 在「強模型 + 人在場」是效率設定，
+  在「弱模型 + 無人值守」是風險放大器——無人值守跑長任務前建議關掉，或至少
+  確認 `permissions.allow` 只有 read-only 基線。
+- **給接手模型的三條**：(1) 你沒有修改 harness 的權限，這是設計不是誤會——
+  protect-paths 擋你是正常運作；想改就向 user 提案、在 kit repo 改、`--update`
+  鋪回。(2) 加防線遵守痛點驅動：**真實踩到 + 可物理偵測**，缺一就先記 LESSONS
+  等下一次。(3) 本文件也會過時——發現斷言與現實不符時記一條 LESSONS 並提醒
+  user 更新，不要自己動它。
+
+---
+
 *引用關係：B（CLAUDE.md 範本）落實痛點 1/2 的路由與 constraints 同步；
 C（kit-delegation.md）落實痛點 1 與痛點 3 的升降級；D（judgment-matrix.md）
 落實極限 6 與痛點 2/3 的判斷外化；E（/kit-dispatch）落實痛點 1 的派工
 三件套；F（kit-evolution.md）防的是本文件未列的第四種腐化——模型「優化」
-規則時把規則改軟；G（handover-from-fable.md）承接極限 2 的人工審計建議。*
+規則時把規則改軟；極限 2 的人工審計建議見 §五。*

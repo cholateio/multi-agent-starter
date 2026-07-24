@@ -2,9 +2,9 @@
 # user-owned:kit 永不覆蓋。狀態/指令/付費服務改變時同步本檔,並更新 updated。
 
 name = "multi-agent-starter"
-status = "active"
-status_note = "codex 呼叫路徑修好,review 閘門放寬到 150/8;重啟 session 生效後鋪回機隊"
-updated = 2026-07-20
+status = "done"
+status_note = "v4.8.0 上線並鋪滿 15 專案,文件瘦身完成;無主動開發計畫,按痛點維護"
+updated = 2026-07-24
 
 [commands]                 # 只收「用它」的指令;測試指令見 tests/
 init-new = "./init.sh <target-dir>"
