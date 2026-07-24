@@ -66,6 +66,22 @@ status = "active"
 status_note = "note with <script>alert(1)</script> & ampersand"
 EOF
 
+# 夾擊測試用:120 字指令與 37 字 monthly_est(真實機隊資料的形狀,見 2026-07-24 量測)
+mkdir -p "$ROOT/longtext-proj"
+cat > "$ROOT/longtext-proj/PROJECT.toml" <<'EOF'
+name = "longtext-proj"
+status = "active"
+status_note = "長字串測試;維持現狀"
+
+[commands]
+fetch = "uv run python -m quant.data.taifex_fetch --root data/raw --start $(date -d '-14 days' +%F) --end $(date -d '-1 day' +%F)"
+
+[[paid]]
+service = "Longname Service"
+billing = "月費"
+monthly_est = "NT$260/年（≈NT$22/月，user 2026-07-11 確認）"
+EOF
+
 # 排序測試用:與 xss-proj 同為 active,但有 git commit(xss-proj 無 → "-" 沉組底)
 mkdir -p "$ROOT/recent-proj"
 cat > "$ROOT/recent-proj/PROJECT.toml" <<'EOF'
@@ -169,8 +185,17 @@ assert_contains "html: note seg2 goes to 下一步" "$HTML" '<div class="band-v 
 assert_not_contains "html: old bullet note list gone" "$HTML" "note-list"
 # 空的 band 整條不出現:只有 good-proj(2 條指令)該長出「指令」band,
 # recent/xss/weird/broken 四個 fixture 都沒有指令
-CMD_BANDS="$(printf '%s\n' "$HTML" | grep -c '<span class="band-k">指令</span>')"
-assert_eq "html: 指令 band only for projects with commands" "$CMD_BANDS" "1"
+# grep -c 數的是「行數」,整份 HTML 只有一行 → 恆為 1;要數出現次數必須 grep -o | wc -l
+CMD_BANDS="$(printf '%s\n' "$HTML" | grep -o '<span class="band-k">指令</span>' | wc -l)"
+assert_eq "html: 指令 band only for projects with commands" "$CMD_BANDS" "2"
+# 超長值截斷顯示,完整值進 title;複製 payload 必須完整(截斷只影響顯示)。
+# 斷言字串一律單引號:fixture 裡的 $(date …) 是字面值,雙引號會被 bash 展開成今天日期
+assert_contains "html: long command clamped in display" "$HTML" "…</code>"
+assert_contains "html: full command kept in title" "$HTML" 'title="uv run python -m quant.data.taifex_fetch --root data/raw --start'
+assert_contains "html: copy payload stays complete" "$HTML" 'data-cmd="uv run python -m quant.data.taifex_fetch --root data/raw --start'
+assert_contains "html: long monthly_est clamped" "$HTML" '<span class="cost-amt" title="NT$260/年（≈NT$22/月，user 2026-07-11 確認）">'
+# 短值不掛 title(沒截斷就不掛,否則整片 hover 提示變噪音)
+assert_contains "html: short cost has no title" "$HTML" '<span class="cost-amt">~$3</span>'
 # dashboard 只收有 manifest 的專案:bare-proj(純 git,無 PROJECT.toml)不該出現在卡片區
 assert_not_contains "html: unregistered project hidden" "$HTML" "bare-proj"
 # 卡片排序:狀態活躍度 → commit 日期新舊 → 名稱。fixture 對應:
@@ -179,7 +204,8 @@ assert_not_contains "html: unregistered project hidden" "$HTML" "bare-proj"
 CARD_ORDER="$(printf '%s\n' "$HTML" | grep -o '<h3>[^<]*</h3>' | sed 's/<[^>]*>//g' | tr '\n' ' ')"
 assert_contains "html: broken manifest surfaces first" "$CARD_ORDER" "broken-proj recent-proj"
 assert_contains "html: active sorts above mvp" "$CARD_ORDER" "xss-proj good-proj"
-assert_contains "html: newer commit first within a status" "$CARD_ORDER" "recent-proj xss-proj"
+# active 組內:recent-proj 有 commit 排前,其餘無 git("-")按名稱 longtext → xss
+assert_contains "html: newer commit first within a status" "$CARD_ORDER" "recent-proj longtext-proj xss-proj"
 assert_contains "html: unknown status sinks last" "$CARD_ORDER" "good-proj weird-proj"
 assert_not_contains "html: cmd code has no nowrap scroll" "$HTML" "white-space:nowrap"
 assert_contains "html: path printed on non-WSL" "$OUT" "dashboard.html"

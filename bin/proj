@@ -137,6 +137,32 @@ def pad(s, width):
     return s + " " * (width - disp_width(s))
 
 
+# 卡片欄位的顯示上限(顯示格數,CJK 算 2)。manifest 端也有上限並會 warn,但渲染端必須
+# 自保:dashboard 的整齊度不能綁在 15 個專案的資料紀律上(2026-07-24 量測:monthly_est
+# 1-41 字、指令 14-120 字)。截斷只影響顯示,複製 payload 永遠完整。
+# 34 是量出來的,不是猜的:1440px 三欄卡的指令值欄約 250px(key 欄與複製鈕先吃掉一截),
+# 12px 等寬字約 34 格/行。折行的指令是卡片最大的視覺噪音來源,所以寧可截短——
+# 完整值在 title 與複製 payload 裡,`proj <name>` 也照印全文。
+CARD_CMD_MAX = 34
+CARD_EST_MAX = 22
+
+
+def _clamp(s, width):
+    """回傳 (顯示字串, title)。未截斷時 title 為空字串——沒截斷就不掛 title,
+    否則整片 hover 提示變成噪音。"""
+    s = str(s)
+    if disp_width(s) <= width:
+        return s, ""
+    out, used = [], 0
+    for ch in s:
+        w = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        if used + w > width - 1:
+            break
+        out.append(ch)
+        used += w
+    return "".join(out) + "…", s
+
+
 def print_table(headers, rows):
     widths = [disp_width(h) for h in headers]
     for r in rows:
@@ -436,11 +462,14 @@ def _render_bands(r):
     # 收錄規範在 manifest schema 端執法(kit rule:只收「用它」的指令),
     # 渲染端不做啟發式過濾——manifest 有什麼顯什麼
     if r["commands"]:
-        items = "".join(
-            f'<span class="cmd-k">{_e(k)}</span><code>{_e(v)}</code>'
-            f'<button class="copy" data-cmd="{_e(v)}" title="複製">C</button>'
-            for k, v in r["commands"].items())
-        band("指令", f'<div class="band-v"><div class="cmds">{items}</div></div>')
+        cmd_cells = []
+        for k, v in r["commands"].items():
+            disp, full = _clamp(v, CARD_CMD_MAX)
+            t = f' title="{_e(full)}"' if full else ''
+            cmd_cells.append(
+                f'<span class="cmd-k">{_e(k)}</span><code{t}>{_e(disp)}</code>'
+                f'<button class="copy" data-cmd="{_e(v)}" title="複製">C</button>')
+        band("指令", f'<div class="band-v"><div class="cmds">{"".join(cmd_cells)}</div></div>')
 
     # 花費就長在卡片上——原本卡片只掛服務名、金額另開一張表,要看「這個專案花多少」
     # 得在兩個區塊之間對照專案名。free-tier 沉底且以 — 佔住金額欄(恆為 $0,寫出來是雜訊,
@@ -452,8 +481,10 @@ def _render_bands(r):
         for p in ordered:
             b = _paid_bucket(str(p.get("billing", "")))
             amt = "—" if b == "free" else str(p.get("monthly_est", "?"))
+            disp, full = _clamp(amt, CARD_EST_MAX)
+            t = f' title="{_e(full)}"' if full else ''
             items.append(f'<span class="paid paid-{b}">{_e(p.get("service", "?"))}</span>'
-                         f'<span class="cost-amt">{_e(amt)}</span>')
+                         f'<span class="cost-amt"{t}>{_e(disp)}</span>')
         band("花費", f'<div class="band-v"><div class="costs">{"".join(items)}</div></div>')
 
     return f'<div class="c-body">{"".join(cells)}</div>' if cells else ''
