@@ -28,8 +28,20 @@
    「這個措辭顯然沒問題」本身就是藉口。
 3. **逐字記錄**：捕捉到模型的失敗藉口時，LESSONS 的 Error 欄記逐字
    原話——paraphrase 會丟失觸發詞。
-4. **總量預算**：`.claude/rules/` 是每個 session 的固定 context 稅，
-   總量上限由 kit repo 的 smoke test 把關；超標先精簡再新增。
+4. **總量預算**：見下節「減法紀律」第 4 條（同一條規則，單一出處）。
+
+## 減法紀律（v4.9）
+
+1. **降級是預設，消滅是例外**：刪常駐條款的預設形式 = 全文降級到
+   on-demand 層（judgment-matrix／verification-signals／dispatch 模板），
+   常駐層留一行路由；**真刪僅限 hook 已物理接管的敘述**。
+2. **GREEN-without 收據**：降級前跑隔離成對 A/B（無 .claude 的 headless
+   session，同場景含/不含該條款），不含版不得退化；無對應 eval 場景
+   → 標 `no-eval-coverage`，只降級不真刪。
+3. **回升觸發**：降級條目在真實 session 再犯（LESSONS 條目成立）
+   → 升回常駐層；預算不夠就精簡別處騰出。
+4. **總量棘輪**：`.claude/rules/` 是每 session 固定稅，上限由 smoke test
+   把關；瘦身後 cap 下修至實際值 +5%（不高於舊 cap），超標先精簡再新增。
 
 ## 教訓紀錄格式（docs/LESSONS.md，沒有就建立）
 
