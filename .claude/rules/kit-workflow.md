@@ -71,15 +71,16 @@ commit 用中文。
 
 ## Reviews that are NOT optional
 
-- **Final review**: before declaring a task complete, if the session modified
-  business-logic files not yet reviewed → run `/kit-review` (a bare `touch`
-  marker does not pass; the gate sees committed + uncommitted work). The gate
-  auto-allows while the CUMULATIVE unreviewed change stays small (≤150 lines /
-  ≤8 business files — test files count toward neither — no sensitive or
-  protected path): small tweaks accumulate; the review that fires once the
-  threshold is crossed covers the whole batch. Do not run ceremonial reviews
-  under that threshold, nor slice work to stay under it — sensitive paths
-  (auth/payment/migration/protected-paths) are always size-blind.
+- **Final review**: before declaring a task complete, settle every unreviewed
+  business-logic batch AND any pending defer — via `/kit-review`, or a judged
+  skip via `/kit-skip-review`. The Stop gate (v4.9) asks for ONE decision each
+  time the cumulative unreviewed batch crosses the small threshold — review
+  now / defer (feature mid-flight; the gate re-asks each threshold-distance) /
+  skip (model-judged for non-sensitive batches, audited; mechanics are in the
+  hook's block message). Do not run ceremonial reviews
+  under the threshold, nor slice work to stay under it. Sensitive paths
+  (auth/payment/migration/protected-paths) are size-blind: no defer, no
+  model-skip — review or the user's word only.
 - **Re-review scope**: round 1 covers the whole change set; later rounds scope
   to the fix delta, whatever depends on it (callers of touched functions/types —
   stale-green's front door), and the code the findings touched. Do NOT point the

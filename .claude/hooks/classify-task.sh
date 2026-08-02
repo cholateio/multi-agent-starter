@@ -35,6 +35,10 @@ fi
 
 INPUT=$(cat 2>/dev/null || echo '{}')
 
+# Parsed once, used by the snapshot AND the v4.9 defer reminder below.
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "default"' 2>/dev/null || echo "default")
+CWD=$(echo "$INPUT" | jq -r '.cwd // "."' 2>/dev/null || echo ".")
+
 # working_tree_hash: content-addressed snapshot of the working tree, kept in
 # sync with the copies in session-start.sh and verify-final-review.sh.
 working_tree_hash() {
@@ -68,16 +72,13 @@ working_tree_hash() {
 # findings, 2026-07-23/24.)
 take_snapshot() {
     [[ "${KIT_REVIEW_GATE:-on}" == "off" ]] && return 0
-    local sid cwd
-    sid=$(echo "$INPUT" | jq -r '.session_id // "default"' 2>/dev/null || echo "default")
-    cwd=$(echo "$INPUT" | jq -r '.cwd // "."' 2>/dev/null || echo ".")
-    rm -f "/tmp/claude-kit-turnstart-${sid}"
+    rm -f "/tmp/claude-kit-turnstart-${SESSION_ID}"
     (
-        cd "$cwd" 2>/dev/null || exit 0
+        cd "$CWD" 2>/dev/null || exit 0
         git rev-parse --git-dir >/dev/null 2>&1 || exit 0
         h=$(working_tree_hash)
         head=$(git rev-parse --verify HEAD 2>/dev/null || echo "unborn")
-        [[ -n "$h" ]] && printf '%s\n%s\n' "$h" "$head" > "/tmp/claude-kit-turnstart-${sid}"
+        [[ -n "$h" ]] && printf '%s\n%s\n' "$h" "$head" > "/tmp/claude-kit-turnstart-${SESSION_ID}"
     ) 2>/dev/null || true
 }
 
@@ -131,6 +132,14 @@ if [[ -n "$CLASS" ]]; then
 ${DIGEST}"
 else
     CTX="$DIGEST"
+fi
+
+# v4.9 defer visibility: a pending defer must stay visible without the Stop
+# gate nagging every turn. Merged INTO the single JSON context — a second
+# output document would corrupt the hook protocol (codex finding 2026-08-02).
+if [[ "${KIT_REVIEW_GATE:-on}" != "off" && -f "/tmp/claude-kit-defer-${SESSION_ID}" ]]; then
+    CTX="${CTX}
+KIT_REVIEW: deferred unreviewed batch on file — settle it (review or /kit-skip-review) before declaring the task done."
 fi
 
 jq -n --arg ctx "$CTX" \

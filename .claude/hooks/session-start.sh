@@ -80,9 +80,10 @@ CONTEXT="KIT_CONTEXT (multi-agent kit ${KIT_VERSION})
 - Stop-gate files for THIS session (a bare touch NEVER passes the gate — each needs its evidence line, and only the named skill writes it):
   - cross-model review done:  /tmp/claude-codex-reviewed-${SESSION_ID}   (written by /kit-review)
   - solo self-review done:    /tmp/claude-reviewed-${SESSION_ID}   (written by /kit-review)
-  - user-approved gate skip:  /tmp/claude-skip-review-${SESSION_ID}   (written by /kit-skip-review, ONLY after an explicit user request)
+  - gate skip flag:           /tmp/claude-skip-review-${SESSION_ID}   (written by /kit-skip-review — model-judged skips allowed for non-sensitive batches, audited; sensitive/protected batches remain USER-only)
+  - defer file (v4.9):        /tmp/claude-kit-defer-${SESSION_ID}   (mid-flight batch: gate re-asks every 150 lines; sensitive batches cannot defer)
 - Use /kit-review to run the profile-correct review (it records the evidence marker).
-- Workflow rules: .claude/rules/ (auto-loaded: kit-workflow, kit-delegation, kit-evolution, kit-judgment)."
+- Workflow rules: .claude/rules/ (auto-loaded: kit-workflow, kit-delegation, kit-evolution, kit-judgment, project-manifest)."
 
 # RE-ANCHOR: compact/resume are when a drifting model is most dangerous —
 # the plan details and no-touch zones were just squeezed out of context.
