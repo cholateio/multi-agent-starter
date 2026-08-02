@@ -1,0 +1,183 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 890" font-family="'JetBrains Mono','Noto Sans TC',monospace">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7"
+      markerHeight="7" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#1a1a1a" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="890" fill="#faf8f4"/>
+
+  <text x="600" y="88" text-anchor="middle" font-size="28" letter-spacing="6"
+    fill="#1a1a1a">MULTI-AGENT STARTER KIT</text>
+
+  <!-- ============ zone containers ============ -->
+  <g fill="none" stroke="#1a1a1a" stroke-width="1.2" stroke-dasharray="5 5">
+    <rect x="100" y="140" width="260" height="660" rx="16"/>
+    <rect x="420" y="140" width="700" height="190" rx="16"/>
+    <rect x="420" y="370" width="700" height="200" rx="16"/>
+    <rect x="420" y="610" width="700" height="190" rx="16"/>
+  </g>
+
+  <!-- zone titles -->
+  <g fill="#1a1a1a">
+    <text x="124" y="166" font-size="16" letter-spacing="3">KIT DEPLOYMENT</text>
+    <text x="124" y="184" font-size="12">安裝層</text>
+    <line x1="124" y1="192" x2="174" y2="192" stroke="#1a1a1a" stroke-width="1.2"/>
+
+    <text x="444" y="166" font-size="16" letter-spacing="3">HARNESS</text>
+    <text x="444" y="184" font-size="12">防線層（.claude/）</text>
+    <line x1="444" y1="192" x2="494" y2="192" stroke="#1a1a1a" stroke-width="1.2"/>
+
+    <text x="444" y="396" font-size="16" letter-spacing="3">RUNTIME</text>
+    <text x="444" y="414" font-size="12">執行層</text>
+    <line x1="444" y1="422" x2="494" y2="422" stroke="#1a1a1a" stroke-width="1.2"/>
+
+    <text x="444" y="636" font-size="16" letter-spacing="3">STATE / FEEDBACK</text>
+    <text x="444" y="654" font-size="12">狀態與回饋層</text>
+    <line x1="444" y1="662" x2="494" y2="662" stroke="#1a1a1a" stroke-width="1.2"/>
+  </g>
+
+  <!-- ============ connections ============ -->
+  <g fill="none" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#ah)">
+    <!-- init.sh -> hooks -->
+    <path d="M331 242H454"/>
+    <!-- init.sh -> rules (top corridor) -->
+    <path d="M230 204V118H770V204"/>
+    <!-- hooks -> Main Claude -->
+    <path d="M555 280V350H720V434"/>
+    <!-- rules -> Main Claude -->
+    <path d="M770 280V434"/>
+    <!-- Main Claude -> Subagents -->
+    <path d="M669 472H656"/>
+    <!-- Main Claude -> Reviewer -->
+    <path d="M871 472H884"/>
+    <!-- Main Claude -> PROJECT.toml -->
+    <path d="M740 510V585H555V674"/>
+    <!-- Main Claude -> LESSONS -->
+    <path d="M800 510V597H985V674"/>
+    <!-- templates -> PROJECT.toml -->
+    <path d="M331 712H454"/>
+    <!-- PROJECT.toml -> proj -->
+    <path d="M656 712H669"/>
+  </g>
+  <g fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-dasharray="4 4">
+    <!-- skills+agents .. Main Claude (secondary) -->
+    <path d="M985 280V350H820V434"/>
+    <!-- LESSONS .. back to kit deployment (evolution feedback) -->
+    <path d="M985 750V830H230V806"/>
+  </g>
+
+  <!-- ============ nodes ============ -->
+  <g>
+    <!-- init.sh -->
+    <rect x="135" y="210" width="190" height="64" rx="10" fill="#faf8f4" stroke="#1a1a1a" stroke-width="1.5"/>
+    <g transform="translate(148,230)" fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="4" width="20" height="16" rx="2"/>
+      <path d="M6 10l3 2-3 2"/><line x1="11" y1="15" x2="16" y2="15"/>
+    </g>
+    <text x="185" y="237" font-size="14" font-weight="600" fill="#1a1a1a">init.sh</text>
+    <text x="185" y="256" font-size="11" fill="#1a1a1a" fill-opacity="0.65">鋪設與更新 harness</text>
+
+    <!-- tests -->
+    <rect x="135" y="440" width="190" height="64" rx="10" fill="#faf8f4" stroke="#1a1a1a" stroke-width="1.5"/>
+    <g transform="translate(148,460)" fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.5" y1="15.5" x2="21" y2="21"/>
+    </g>
+    <text x="185" y="467" font-size="14" font-weight="600" fill="#1a1a1a">tests/</text>
+    <text x="185" y="486" font-size="11" fill="#1a1a1a" fill-opacity="0.65">規則預算與 gate 把關</text>
+
+    <!-- templates -->
+    <rect x="135" y="680" width="190" height="64" rx="10" fill="#faf8f4" stroke="#1a1a1a" stroke-width="1.5"/>
+    <g transform="translate(148,700)" fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 2h8l4 4v16H6V2z"/><path d="M14 2v4h4"/>
+      <line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/>
+    </g>
+    <text x="185" y="707" font-size="14" font-weight="600" fill="#1a1a1a">templates/</text>
+    <text x="185" y="726" font-size="11" fill="#1a1a1a" fill-opacity="0.65">manifest 等部署模板</text>
+
+    <!-- hooks -->
+    <rect x="460" y="210" width="190" height="64" rx="10" fill="#faf8f4" stroke="#1a1a1a" stroke-width="1.5"/>
+    <g transform="translate(473,230)" fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/>
+      <path d="M9 12l2 2 4-4"/>
+    </g>
+    <text x="510" y="237" font-size="14" font-weight="600" fill="#1a1a1a">hooks ×5</text>
+    <text x="510" y="256" font-size="11" fill="#1a1a1a" fill-opacity="0.65">物理執法 gate/熔斷</text>
+
+    <!-- rules -->
+    <rect x="675" y="210" width="190" height="64" rx="10" fill="#faf8f4" stroke="#1a1a1a" stroke-width="1.5"/>
+    <g transform="translate(688,230)" fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 2h8l4 4v16H6V2z"/><path d="M14 2v4h4"/>
+      <line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/>
+    </g>
+    <text x="725" y="237" font-size="14" font-weight="600" fill="#1a1a1a">rules ×5</text>
+    <text x="725" y="256" font-size="11" fill="#1a1a1a" fill-opacity="0.65">判斷規則自動載入</text>
+
+    <!-- skills + agents -->
+    <rect x="890" y="210" width="190" height="64" rx="10" fill="#faf8f4" stroke="#1a1a1a" stroke-width="1.5"/>
+    <g transform="translate(903,230)" fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3.2"/>
+      <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1"/>
+    </g>
+    <text x="940" y="237" font-size="14" font-weight="600" fill="#1a1a1a">skills + agents</text>
+    <text x="940" y="256" font-size="11" fill="#1a1a1a" fill-opacity="0.65">派工與 review 入口</text>
+
+    <!-- Subagents -->
+    <rect x="460" y="440" width="190" height="64" rx="10" fill="#faf8f4" stroke="#1a1a1a" stroke-width="1.5"/>
+    <g transform="translate(473,460)" fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"/>
+      <path d="M19 16l.9 2.1L22 19l-2.1.9L19 22l-.9-2.1L16 19l2.1-.9L19 16z"/>
+    </g>
+    <text x="510" y="467" font-size="14" font-weight="600" fill="#1a1a1a">Subagents</text>
+    <text x="510" y="486" font-size="11" fill="#1a1a1a" fill-opacity="0.65">sonnet/haiku 執行員</text>
+
+    <!-- Main Claude -->
+    <rect x="675" y="440" width="190" height="64" rx="10" fill="#faf8f4" stroke="#1a1a1a" stroke-width="1.5"/>
+    <g transform="translate(688,460)" fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="6" y="6" width="12" height="12" rx="2"/>
+      <rect x="9.5" y="9.5" width="5" height="5"/>
+      <path d="M9 6V3M15 6V3M9 21v-3M15 21v-3M6 9H3M6 15H3M21 9h-3M21 15h-3"/>
+    </g>
+    <text x="725" y="467" font-size="14" font-weight="600" fill="#1a1a1a">Main Claude</text>
+    <text x="725" y="486" font-size="11" fill="#1a1a1a" fill-opacity="0.65">指揮官:決策/派工/驗收</text>
+
+    <!-- Reviewer -->
+    <rect x="890" y="440" width="190" height="64" rx="10" fill="#faf8f4" stroke="#1a1a1a" stroke-width="1.5"/>
+    <g transform="translate(903,460)" fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.5" y1="15.5" x2="21" y2="21"/>
+    </g>
+    <text x="940" y="467" font-size="14" font-weight="600" fill="#1a1a1a">Reviewer</text>
+    <text x="940" y="486" font-size="11" fill="#1a1a1a" fill-opacity="0.65">codex 或 solo 自審</text>
+
+    <!-- PROJECT.toml -->
+    <rect x="460" y="680" width="190" height="64" rx="10" fill="#faf8f4" stroke="#1a1a1a" stroke-width="1.5"/>
+    <g transform="translate(473,700)" fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="6" rx="8" ry="3"/>
+      <path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/>
+      <path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>
+    </g>
+    <text x="510" y="707" font-size="14" font-weight="600" fill="#1a1a1a">PROJECT.toml</text>
+    <text x="510" y="726" font-size="11" fill="#1a1a1a" fill-opacity="0.65">機器可讀專案狀態</text>
+
+    <!-- bin/proj -->
+    <rect x="675" y="680" width="190" height="64" rx="10" fill="#faf8f4" stroke="#1a1a1a" stroke-width="1.5"/>
+    <g transform="translate(688,700)" fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="4" width="20" height="16" rx="2"/>
+      <line x1="2" y1="9" x2="22" y2="9"/><circle cx="5.5" cy="6.5" r="0.5"/>
+      <circle cx="8" cy="6.5" r="0.5"/>
+    </g>
+    <text x="725" y="707" font-size="14" font-weight="600" fill="#1a1a1a">bin/proj</text>
+    <text x="725" y="726" font-size="11" fill="#1a1a1a" fill-opacity="0.65">跨專案 dashboard</text>
+
+    <!-- docs/LESSONS.md -->
+    <rect x="890" y="680" width="190" height="64" rx="10" fill="#faf8f4" stroke="#1a1a1a" stroke-width="1.5"/>
+    <g transform="translate(903,700)" fill="none" stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 2h8l4 4v16H6V2z"/><path d="M14 2v4h4"/>
+      <line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/>
+    </g>
+    <text x="940" y="707" font-size="14" font-weight="600" fill="#1a1a1a">LESSONS.md</text>
+    <text x="940" y="726" font-size="11" fill="#1a1a1a" fill-opacity="0.65">教訓紀錄,回饋演化</text>
+  </g>
+</svg>

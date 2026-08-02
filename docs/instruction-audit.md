@@ -48,4 +48,4 @@ digest、verify-final-review.sh 的 block message）。
 
 | Date | Scope | Findings | 處理 |
 |------|-------|----------|------|
-| (尚未跑過) | | | |
+| 2026-08-02 | CLAUDE.md 範本、rules×5、judgment-matrix、verification-signals、skills×4、agents×2、hooks 注入字串、superpowers/codex plugin 交叉 | Q1 矛盾×4、Q2 補償性×5（2 keep 已驗證仍需）、Q3 以身違例×2、Q4 跨層重複×6 組、Q5 留/刪/降 15 條 | v4.9 Task 3-6 執行；明細與逐條 verdict 見 design-history/2026-08-02-audit-findings.md |
