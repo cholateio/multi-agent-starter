@@ -128,19 +128,22 @@ if [[ "$TOOL" == "Bash" && -n "$CMD" ]] \
     # replacement, not deletion, keeps word positions so stripped spans
     # cannot synthesize a phantom "&& git commit". Unterminated quotes
     # swallow the tail (false-negative direction, accepted).
+    # POSIX-portable char walk: substr(), octal \047 — FS="" per-char
+    # splitting and \x27 are gawk extensions and silently no-op the
+    # neutralizer under POSIXLY_CORRECT (codex final-review finding
+    # 2026-08-02: quoted data turned back into shell structure).
     CMD_FLAT=$(printf '%s' "$CMD" | tr '\n' ';' | awk '
-        BEGIN{FS=""}
-        { out=""; st=0
-          for(i=1;i<=NF;i++){ c=$i
+        { out=""; st=0; len=length($0)
+          for(i=1;i<=len;i++){ c=substr($0,i,1)
             if(st==0){
               if(c=="\\"){i++; out=out "C"; continue}
-              if(c=="$" && $(i+1)=="\x27"){st=3; i++; out=out "Q"; continue}
-              if(c=="\x27"){st=1; out=out "Q"; continue}
+              if(c=="$" && substr($0,i+1,1)=="\047"){st=3; i++; out=out "Q"; continue}
+              if(c=="\047"){st=1; out=out "Q"; continue}
               if(c=="\""){st=2; out=out "Q"; continue}
               out=out c; continue }
-            if(st==1){ if(c=="\x27") st=0; continue }
+            if(st==1){ if(c=="\047") st=0; continue }
             if(st==2){ if(c=="\\"){i++; continue} if(c=="\"") st=0; continue }
-            if(st==3){ if(c=="\\"){i++; continue} if(c=="\x27") st=0; continue }
+            if(st==3){ if(c=="\\"){i++; continue} if(c=="\047") st=0; continue }
           }
           print out }' 2>/dev/null)
     if [[ -n "$CMD_FLAT" ]] && printf '%s' "$CMD_FLAT" | grep -qE "(^|[;&([:space:]])${PIPE_GUARD_RUNNER}[^|;&]*[^|]\|[^|].*(&&|;)[[:space:]]*git (commit|push)"; then
