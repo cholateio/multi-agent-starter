@@ -3,8 +3,8 @@
 
 name = "multi-agent-starter"
 status = "done"
-status_note = "v4.8.0 上線並鋪滿 15 專案,文件瘦身完成;無主動開發計畫,按痛點維護"
-updated = 2026-07-24
+status_note = "v4.9.0 完成(gate 決策點化+prose 減法),機隊仍在 v4.8.0;下一步 user 定時機 --update 鋪回 15 專案"
+updated = 2026-08-02
 
 [commands]                 # 只收「用它」的指令;測試指令見 tests/
 init-new = "./init.sh <target-dir>"
