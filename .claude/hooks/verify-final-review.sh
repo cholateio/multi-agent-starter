@@ -190,7 +190,11 @@ if [[ -f "$BASELINE_FILE" ]] && git rev-parse --verify HEAD >/dev/null 2>&1; the
     COMMITTED=$(git diff --name-only "$BASE" HEAD 2>/dev/null | sed -e 's/^"\(.*\)"$/\1/' || echo "")
 fi
 
-CHANGED_FILES=$(printf '%s\n%s\n' "$UNCOMMITTED" "$COMMITTED" | grep -v '^$' | sort -u | head -50)
+# Enforcement scans the FULL set — truncating before the business filter let
+# 50 early-sorting junk paths hide a sensitive business file and advance the
+# baseline (codex finding 2026-08-02, test g13). Only FILE_LIST (display) is
+# truncated, below.
+CHANGED_FILES=$(printf '%s\n%s\n' "$UNCOMMITTED" "$COMMITTED" | grep -v '^$' | sort -u)
 if [[ -z "$CHANGED_FILES" ]]; then
     advance_baseline
     exit 0
