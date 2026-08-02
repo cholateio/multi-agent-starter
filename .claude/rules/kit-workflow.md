@@ -10,7 +10,7 @@ reviewer availability, and this session's marker paths — trust it over guessin
 
 | Profile | "run a review" resolves to |
 |---------|----------------------------|
-| `full`  | `/codex:review` — cross-model, real isolation. `/codex:adversarial-review` for high-stakes work. |
+| `full`  | cross-model codex review, run via `/kit-review`（adversarial variant for high-stakes work）— the raw `/codex:review` slash command is USER-only（`disable-model-invocation`）. |
 | `solo`  | fresh-context `solo-reviewer` subagent — state/time isolation ONLY. Always tell the user: "cross-model isolation is OFF". |
 
 Prefer `/kit-review`: it resolves the profile AND writes the marker the Stop
@@ -85,24 +85,24 @@ commit 用中文。
   to the fix delta, whatever depends on it (callers of touched functions/types —
   stale-green's front door), and the code the findings touched. Do NOT point the
   reviewer at the whole branch every round — re-scanning unchanged, already-
-  reviewed code breeds rounds (receipt 2026-07-11: 6 rounds on 3 small UI
-  changes). It narrows what gets RE-read, not what gets read: every line keeps
+  reviewed code breeds rounds (receipt 2026-07-11, evals.md). It narrows what
+  gets RE-read, not what gets read: every line keeps
   its round-1 review; a redesign earns a fresh whole-set round; sensitive paths
   (auth/payment/migration/protected-paths) stay whole-set every round. Run each
   re-review in a FRESH context fed only the scoped delta + the findings to
-  recheck — never resume/replay the original reviewer (receipt 2026-07-23:
-  replaying 285 lines to recheck a 9KB delta = 148k).
+  recheck — never resume/replay the original reviewer (receipt 2026-07-23).
 - **Phase-level review** during plan execution is NOT per-task. Fire it only
   at (a) sensitive paths — auth/authz/session, payment, migration/schema,
   CLAUDE.md constraints (always, size-blind) — and (b) a dependency boundary a
   later phase builds on. Ordinary phases batch into the Final review; per-task
-  review re-covers it anyway (receipt 2026-07-23: 9 redundant = 553k).
+  review re-covers it anyway (receipt 2026-07-23, evals.md).
 
 ## STOP and ask the user when
 
 - A review flags a critical/high issue you can't resolve from context, or
   challenges the plan's premise.
 - Research suggests a meaningfully better approach than the plan assumed.
-- A phase would modify > 100 lines, or delete/rewrite > 30 existing lines.
+- A phase would modify > 100 lines, or delete/rewrite > 30 existing lines
+  the plan did not explicitly forecast (= judgment-matrix R3.2).
 - The change touches the project CLAUDE.md "Project-specific constraints".
 - (full) codex unavailable — ask whether to proceed or wait.

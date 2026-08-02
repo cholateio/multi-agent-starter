@@ -6,7 +6,7 @@
 
 | 目標 | 模型可否自行修改 |
 |------|------------------|
-| `.claude/rules/`、`hooks/`、`scripts/`、`agents/`、`skills/`、`docs/`、`settings.json`、`kit-version` | **不可自行修改**。kit-owned，PreToolUse hook 會攔下並轉為向 user 請示（user 在場可一鍵放行明確要求過的修改；無人值守時等同封鎖）。常規改法仍是：向 user 說明理由，在 kit repo 修改後 `--update` 鋪回。 |
+| `.claude/rules/`、`hooks/`、`scripts/`、`agents/`、`skills/`、`docs/`、`settings.json`、`kit-version` | **不可自行修改**（protect-paths hook 執法，被攔即向 user 請示）。改法：向 user 說明理由，在 kit repo 修改後 `--update` 鋪回。 |
 | CLAUDE.md 的事實區（stack、file layout） | 可，但必須在回報中明列改了什麼。 |
 | CLAUDE.md 的 constraints 區、`.claude/protected-paths` | 只能**加嚴**（新增禁區）；放寬或刪除任何一條需要 user 明確同意。 |
 | `docs/LESSONS.md` | 可自由 append（格式見下）。 |

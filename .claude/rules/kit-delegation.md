@@ -6,8 +6,9 @@
 
 ## 指揮官不下場（context 經濟）
 
-主對話 context 是唯一不可再生資源。指揮官只做五件事：**決策、架構、派工、
-驗收、跟 user 對話**。
+主對話 context 是唯一不可再生資源。指揮官**預設**只做五件事：**決策、
+架構、派工、驗收、跟 user 對話**（例外見下：trivial phase inline 做、
+中型閱讀直讀更省）。
 
 - 硬規則只有一條：**subagent 回報禁貼超過 20 行代碼**——用「路徑:行號 +
   一句結論」，要細節自己讀那幾行。收到噴代碼的回報要求重報，不照收進 context。
@@ -17,8 +18,8 @@
   閱讀直接讀更便宜。**別為了儀式感派工**，也別把 context 當免費資源。
 - **每 phase 派工前重過 sizing 閘**（kit-workflow）：trivial／~≤10 行的
   phase 指揮官 inline 做或併進相鄰實質 task，不為它開 implementer＋reviewer
-  ——fresh subagent 光重載稅 15-20k，3 行直改約 5k（收據 2026-07-23：3 個
-  10 行 phase 各走完整派工+獨立 review＝205k）。
+  ——fresh subagent 光重載稅 15-20k，3 行直改約 5k（收據 2026-07-23，
+  evals.md）。
 
 ## 派工三件套（缺一不派）
 
