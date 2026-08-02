@@ -3,7 +3,7 @@
 
 name = "multi-agent-starter"
 status = "done"
-status_note = "v4.9+v4.10 完成(gate 決策點化/減法/驗證閉環),機隊仍在 v4.8.0;下一步 user 定時機 --update 鋪回 15 專案"
+status_note = "v4.10.0 已鋪滿 16 專案;下一步觀察 S7 真實 session 後做 v4.11([verify] manifest+交棒食譜)"
 updated = 2026-08-02
 
 [commands]                 # 只收「用它」的指令;測試指令見 tests/
