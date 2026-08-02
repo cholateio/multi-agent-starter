@@ -137,6 +137,9 @@ assert_contains "h1: context announces full profile" "$CTX" "Active profile: ful
 assert_contains "h1: context carries codex marker path" "$CTX" "/tmp/claude-codex-reviewed-${SID1}"
 assert_contains "h1: context carries self marker path" "$CTX" "/tmp/claude-reviewed-${SID1}"
 assert_contains "h1: context carries skip marker path" "$CTX" "/tmp/claude-skip-review-${SID1}"
+assert_contains "h1: context carries defer path (v4.9)" "$CTX" "/tmp/claude-kit-defer-${SID1}"
+assert_contains "h1: skip line covers model-judged mode (v4.9)" "$CTX" "model-judged"
+assert_contains "h1: auto-loaded list includes project-manifest" "$CTX" "project-manifest"
 assert_contains "h1: full context names codex reviewer" "$CTX" "reviewer=codex("
 assert_not_contains "h1: full context has no researcher field" "$CTX" "researcher="
 assert_not_contains "h1: full context has no gemini" "$CTX" "gemini"
@@ -899,6 +902,25 @@ STALE_SID="${SID_PREFIX}-h3stale"; STALE_TS="/tmp/claude-kit-turnstart-${STALE_S
 printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n' > "$STALE_TS"
 run_hook "$CT" "{\"session_id\":\"${STALE_SID}\",\"cwd\":\"${NG}\",\"prompt\":\"hi\"}"
 assert_file_absent "h3: stale snapshot cleared when recompute can't run" "$STALE_TS"
+
+# v4.9 defer reminder rides the SAME single JSON context (a second output
+# document would corrupt the hook protocol — codex finding 2026-08-02)
+DR_SID="${SID_PREFIX}-h3defer"
+DR_DEFER="/tmp/claude-kit-defer-${DR_SID}"
+printf 'deferred-by=model reason=x\n' > "$DR_DEFER"
+run_hook "$CT" "{\"session_id\":\"${DR_SID}\",\"prompt\":\"hello\"}"
+DR_CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
+assert_contains "h3: defer reminder present when defer file exists" "$DR_CTX" "deferred unreviewed batch"
+assert_contains "h3: reminder shares the digest context (merged, not appended)" "$DR_CTX" "KIT_JUDGMENT"
+if printf '%s' "$OUT" | jq -e . >/dev/null 2>&1; then
+  pass "h3: defer-reminder output is a single valid JSON doc"
+else
+  fail "h3: defer-reminder output is a single valid JSON doc" "jq parse failed on stdout"
+fi
+rm -f "$DR_DEFER"
+run_hook "$CT" "{\"session_id\":\"${DR_SID}\",\"prompt\":\"hello\"}"
+DR_CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
+assert_not_contains "h3: no reminder without a defer file" "$DR_CTX" "deferred unreviewed batch"
 
 # ===========================================================================
 # H4 - protect-paths.sh (v4.0 no-touch-zone enforcement)
