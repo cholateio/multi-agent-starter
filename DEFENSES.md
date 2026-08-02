@@ -24,14 +24,17 @@
 
 ## 一、Prompt engineering 防護(措辭層:寫進 model context 的規則與模板)
 
-四份 `.claude/rules/` 每個 session 自動載入,是固定的 context 稅,總量由
-smoke test 把關(≤20KB)。
+五份 `.claude/rules/` 每個 session 自動載入,是固定的 context 稅,總量由
+smoke test 把關(cap 20480B,v4.9 起附棘輪公式:瘦身後下修至實際值 +5%、
+不高於舊 cap)。
 
-- **判斷八條 + 藉口對照表 + Red Flags**(`kit-judgment.md`,採自 fable-soul
-  MIT 蒸餾)——補**認知性失敗**:目標≠指定修法、一句話機制先於動手、
-  verified/changed-but-unverified 二分、stale-green reset(改動後先前的綠燈
-  作廢)、證據勝過記憶、量測代替 hedge、給判斷不給菜單、先確認再舉報。
-  每條在 Haiku 級模型上做過 RED-GREEN 行為測試(收據 `tests/evals.md`)。
+- **判斷八條**(`kit-judgment.md`,採自 fable-soul MIT 蒸餾)——補**認知性
+  失敗**:目標≠指定修法、一句話機制先於動手、verified/changed-but-unverified
+  二分、stale-green reset(改動後先前的綠燈作廢)、證據勝過記憶、量測代替
+  hedge、給判斷不給菜單、先確認再舉報。每條在 Haiku 級模型上做過 RED-GREEN
+  行為測試(收據 `tests/evals.md`)。**藉口對照表 + Red Flags 於 v4.9 降級**
+  至 judgment-matrix R5(隔離成對 A/B 證明八條 + 每輪 digest 足以承載,
+  B≥A;回升觸發 = 真實 session 再犯入 LESSONS)。
 - **每輪 KIT_JUDGMENT digest**(`classify-task.sh`,UserPromptSubmit)——
   每個非空 prompt 注入一行判斷提醒(done-claim 要證據、可驗證主張不 hedge、
   未確認的問題不是 finding、綠燈後的改動作廢驗證)。**確定性 re-fire,
@@ -102,8 +105,10 @@ API 呼叫都重複攜帶,越肥 → compact 越早 → 迷航越早。這層專
   用一句話自報所在 phase。**hook 注入,不靠模型記得**。
 - **檔案路由表**(CLAUDE.md「需要時才讀」段)——把「何時讀哪份文件」做成
   查表,而不是把所有背景常駐在 context。減少每 session 的固定稅。
-- **rules/ 20KB 總量預算**——四份規則是每 session 的固定 context 稅,
-  超標先精簡再新增(kit repo smoke test 把關)。防的是規則本身膨脹。
+- **rules/ 總量預算 + 棘輪**——五份規則是每 session 的固定 context 稅,
+  超標先精簡再新增(kit repo smoke test 把關);v4.9 起減法紀律
+  (kit-evolution):降級是預設、真刪僅限 hook 接管、瘦身後 cap 下修。
+  防的是規則本身膨脹與「刪了又靜默漲回」。
 
 ## 三、Harness engineering 防護(物理層:hooks / gate / 所有權,deterministic)
 
@@ -124,35 +129,34 @@ claude 啟動時的環境)。
   輪詢類工具豁免。**失敗密度警示**:最近 12 條遙測事件中 ≥3 次失敗 → stderr
   注入警示(工具已執行完,物理上不能 block,只能警示)。所有調用寫一行
   埋點日誌到 `/tmp/claude-kit-toollog-<session_id>.jsonl` 供事後審計。
-- **verify-final-review.sh**(Stop gate)——結束前若有未審的業務邏輯就 block。
-  修好三個洞:看得到 commit(baseline = session 起點 HEAD sha + working-tree
-  hash,gate 聯集「未 commit + baseline 以來的 commits」)、審過用 content
-  hash 記住不重複煩你、baseline 損毀則 **fail-closed**(退化方向是「多審」
-  不是「漏審」)。v4.3 加**小改自動放行**:距上次認證的**累積** diff
-  (git numstat 實測,模型話術無效)≤150 行、≤8 個業務檔(v4.7.4 從 50/4
-  放寬——50/4 是照「一次做一件事」校準的,對「連續微調一整天」每天必攔;
-  v4.5:測試檔兩個計數皆不計,敏感命名的測試檔除外)、未碰敏感 stem
-  (auth/payment/migrat/…)或 protected-paths → 放行但**不推進 baseline**
-  ——小改持續累積,破檻那次 review 批次涵蓋全部(防切香腸);無 baseline
-  或 binary 一律 fail-closed 回到 size-blind block。v4.8 加**turn-scoped**:
-  gate 原本是「工作樹範圍」,只要樹裡躺著未審業務碼就**每輪都攔**,
-  brainstorming / 純對話輪也一起被卡;改成 classify-task 於每輪開頭快照
-  **工作樹 hash + HEAD sha**,**只有這一輪真的動過(改檔或 commit)**才攔
-  (內容定址,subagent 的改動也算;HEAD 一起比對,堵掉「只 commit 不改內容」
-  的 commit 盲點)——義務不消失(不推進 baseline),下一輪碰碼或 review 才
-  結清。另加 user-only 逃生口 `KIT_REVIEW_GATE=off`。**已知缺口(user 接受的
-  取捨,2026-07-24)**:no-edit 輪即使是「宣告完成」也放行——hook 靠樹狀態分
-  不出「完成輪」與「brainstorming 輪」。非無防護:下一輪碰碼即補攔,且 prose
-  層(kit-workflow Final review／kit-judgment)仍要求宣告完成前先 review;敏感
-  路徑不受影響(仍 size-blind + phase-level review)。**成本**:快照 `git add -A`
-  在病態 repo(10 萬檔／慢 clean filter)可能逼近 5s timeout——已把快照移到
-  KIT_JUDGMENT digest 發出之後(digest 不賠),timeout 則退化成 fail-closed;
-  這種 repo 用 `KIT_REVIEW_GATE=off`。
+- **verify-final-review.sh**(Stop gate,v4.9 決策點化)——「先算後判」:
+  批次事實(changed set/業務/敏感/累積行數)先於一切裁決分支計算,地板依
+  批次內容執法、永不信 flag 自述。基線機制不變:baseline = 上次認證的
+  HEAD sha + working-tree content hash,gate 聯集「未 commit + baseline 以來
+  的 commits」,審過用 content hash 記住,損毀 fail-closed(退化方向是
+  「多審」不是「漏審」)。**小改自動放行**:累積 diff ≤150 行/≤8 業務檔
+  (numstat 實測;測試檔不計,敏感命名測試檔除外)→ 放行但不推進 baseline
+  (防切香腸)。**破檻 = 一次三選一決策**(收據 2026-08-02:舊行為破檻後
+  每個動碼輪連攔,且會撞 Claude Code「Stop hook 8 連 block 強制放行」的
+  天花板變成靜默失效):review(/kit-review)/ defer(mid-flight,寫一行
+  理由,gate 靜默至批次再長 150 行)/ skip(v4.9 決策權移交模型,
+  /kit-skip-review 雙模式)。**敏感地板**:敏感 stem、protected-paths、
+  不可量測批次——不可 defer、不可 model-skip、small-allow 無效;僅
+  review 或 user-approved 能結清。敏感掃描先於副檔名過濾(修 pre-existing
+  migration-SQL 盲區)、業務過濾先於截斷(修 pre-existing head-50 藏檔洞)。
+  **skiplog 審計 fail-closed**:model-skip 生效與 defer 蓋章以
+  `/tmp/claude-kit-skiplog-<sid>.jsonl` 寫入成功為前提。v4.8 的 turn-scoped
+  (只有本輪動過樹才攔)與 user-only 逃生口 `KIT_REVIEW_GATE=off` 照舊;
+  已知缺口(no-edit 完成輪放行,user 接受 2026-07-24)照舊,但敏感批次
+  因禁 defer 不受此缺口影響(codex 2026-08-02 P1 的修法)。
 - **Marker 證據化 = 逃生門加價**——v3.5 的 block 訊息**親手把 `touch <marker>`
   遞給模型**,假性完成的最短路徑是 harness 自己鋪的。v4.0 起 marker 第一行
-  必須是 `reviewed-by=` 證據行(由 `/kit-review` 真跑完 review 後寫入)、
-  bypass flag 第一行必須是 `user-approved`(由 `/kit-skip-review` 在 user
-  明確要求後寫入),block 訊息不再印任何捷徑指令。**誠實路徑從此比造假省力**。
+  必須是 `reviewed-by=` 證據行(由 `/kit-review` 真跑完 review 後寫入);
+  bypass flag 兩種:`user-approved`(user 明確要求)或 v4.9 的
+  `skipped-by=model reason= scope=`(模型自判,非敏感批次限定,審計
+  fail-closed)。block 訊息仍不印 marker 捷徑;defer 的 echo 教學行例外
+  ——它是有界的門(150 行後必再問),不是認證。**架構轉向:與其把 skip
+  做難,不如讓誠實免費、讓謊言留痕**——正門開著,走正門留名留理由。
 - **檔案級所有權二分 + 回流**——`.claude/` 全套 kit-owned(每 session 自動
   載入)、CLAUDE.md 純專案內容。客製改 kit repo 再 `init.sh --update` 覆蓋
   回流,不靠人肉同步(drift 陷阱)。所有權從「檔案內的段落約定」升格成
@@ -188,9 +192,16 @@ claude 啟動時的環境)。
    拆解與隔離驗證救不了。標準應對(judgment-matrix R4,具強制力):弱模型不得
    自行拍板,產出選項 + trade-offs 停下問 user;無人值守時選最保守選項並以
    `TASTE-DECISION` 標記待覆核,禁止讓品味選擇隱形。
-6. **/tmp 揮發性**——重開機(尤其 WSL)清空 /tmp → baseline/marker/埋點日誌
-   消失,gate 退化為 porcelain-only 視野。已知且接受——fail-closed 設計保證
-   退化方向是「多審」。
+6. **/tmp 揮發性**——重開機(尤其 WSL)清空 /tmp → baseline/marker/埋點/
+   skiplog 消失,gate 退化為 porcelain-only 視野。已知且接受——fail-closed
+   設計保證退化方向是「多審」。
+7. **威脅模型邊界(v4.9 明文)**——持 Bash 的模型可改寫任何 /tmp 狀態檔:
+   偽造 `user-approved`、改寫 defer stamp,乃至直接改寫 baseline line2 認證
+   任意樹(既有**超集**攻擊,前兩者都不比它強)。敏感地板與 skip 審計的
+   強度定位=「誠實路徑最省力 + 造假留下可交叉比對的不一致」,**非密碼學
+   保證**。月度抽查升級為三方交叉:flag/stamp 內容 ↔ skiplog ↔ toollog
+   ——skiplog 裡沒有對應條目的 stamp、toollog 裡沒有 review 調用的 marker,
+   都是實錘。model-skip 的 reason 屬自我報告,抽查時對照實際 diff。
 
 > 評估任何未來防線,先問那句工程判準:**被違反時能被物理偵測嗎?** 這決定
 > 它該做成 hook 還是進 rules,也決定它的強度上限。
