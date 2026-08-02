@@ -1,4 +1,4 @@
-# Multi-Agent Starter Kit (v4.8.0)
+# Multi-Agent Starter Kit (v4.9.0)
 
 讓 **Claude Code + Superpowers + Codex Plugin** 乾淨分工地一起工作的起手包。
 你只描述任務、approve plan;AI 之間自己協作——你不再當人肉訊息路由器。
@@ -148,7 +148,7 @@ AI session 在狀態/指令/付費服務變動時順手更新 manifest。
 |------|------|------|
 | `README.md` | 你 | 你正在看的——裝機、開專案、日常操作、卡點 |
 | [`DEFENSES.md`](DEFENSES.md) | 想看工程 | prompt / context / harness 三層防護清單 + 誠實條款 |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 想深入 | 為什麼這樣設計、v1→v4.8.0 完整取捨、四維 isolation |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 想深入 | 為什麼這樣設計、v1→v4.9.0 完整取捨、四維 isolation |
 | `docs/harness-diagnosis.md` | 想深入 / 未來的模型 | v4.0 防線設計依據:三大失敗場景 → 物理痛點 → 阻斷方案;含制度腐化偵測表(§五)與長期維護提醒(§六) |
 | `docs/instruction-audit.md` | 維護 kit 的你 | 規則審計程序——**每次 minor 版本發佈前跑一次**(prose 分四層,「兩條規則打架」沒有物理偵測手段,只能例行審計) |
 | `docs/design-history/` | 考古 | 歷史 plan/spec(v3.2–v4.5)與外部研究文件,非活文件 |
@@ -156,4 +156,4 @@ AI session 在狀態/指令/付費服務變動時順手更新 manifest。
 
 ---
 
-*版本:**v4.8.0**(Stop gate 改 turn-scoped——只有這輪真的動過檔案/commit 才攔,brainstorming 不再被卡;新增 user-only 逃生口 `KIT_REVIEW_GATE=off`;review/派工成本三槓桿;代碼註解一律英文)。完整版本演進見 [`ARCHITECTURE.md §二`](ARCHITECTURE.md)。*
+*版本:**v4.9.0**(Stop gate 決策點化——破檻只攔一次,review/defer/skip 三選一,skip 決策權移交模型並留審計,敏感地板保留;prose 減法——audit 首跑+藉口表降級 on-demand,rules/ −4.9%;kit-evolution 新增減法紀律)。完整版本演進見 [`ARCHITECTURE.md §二`](ARCHITECTURE.md)。*

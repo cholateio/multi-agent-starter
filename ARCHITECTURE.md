@@ -119,7 +119,7 @@ findings、hedge 話術）。素材採自 fable-soul（MIT），只收 kit 未�
    但 dashboard 是拿來掃一眼的，不是筆記本。修法：`proj` 對超標發警告（不擋、
    只吵），規則文字補上那個數字——**沒有數字的規範不可檢查**。
 
-### v4.8（當前）：gate 從「工作樹範圍」改成「turn 範圍」+ 成本三槓桿
+### v4.8：gate 從「工作樹範圍」改成「turn 範圍」+ 成本三槓桿
 
 收據有兩份：一個 4 檔基本功能（api router + DB + 來源分流）跑掉 1.5 小時／
 ~2M token；以及 user 回報「brainstorming 階段常被 Stop gate 卡」。
@@ -144,6 +144,31 @@ findings、hedge 話術）。素材採自 fable-soul（MIT），只收 kit 未�
    `0xA7` 被 `cut` 連進 Bearer token、gateway 爆 500；文件／prose／commit 維持中文。
 5. **rules/ 精簡**（20864B→20410B）：加法用等量精簡騰出，順帶修好先前**既有
    超標**的紅燈（v4.6 那輪之後又漲回線外）。
+
+### v4.9（當前）：審計驅動的 prose 減法 + Stop gate 決策點化
+
+觸發是兩個外部觀念的落地檢驗：「越強的模型需要越少的 prompt 層限制」
+（Anthropic 2026-07-24 官方以同思路砍掉自家 Claude Code 系統提示 80%+）與
+user 收據「批次破檻後每個動碼輪連攔」。設計文件與三輪 codex 審查軌跡見
+`docs/design-history/2026-08-02-kit-v4.9-*`。
+
+1. **Stop gate 決策點化**：破檻只攔一次，三選一——review（/kit-review）、
+   defer（mid-flight，每 +150 行再問）、skip（**決策權移交模型**，附
+   `skipped-by=model reason= scope=` 審計）。**敏感地板**：敏感/protected/
+   不可量測批次不可 defer、不可 model-skip（hook 依批次內容執法，不信 flag
+   自述）；user-approved 仍可覆蓋並記審計。skiplog JSONL 審計 fail-closed：
+   模型發起的裁決以審計寫入成功為生效前提。威脅模型邊界明文降格：/tmp
+   狀態檔皆可被持 Bash 模型改寫（baseline 改寫是既有超集攻擊），地板強度
+   =審計摩擦非密碼學。順手修復兩個 pre-existing 洞：head-50 截斷先於業務
+   過濾可藏敏感檔、migration SQL 因副檔名過濾進不了 gate。
+2. **prose 減法（audit 驅動）**：instruction audit 首跑（欠了四個版本）→
+   無爭議刀（矛盾統一、hook 指標化、收據壓日期、跨層去重）→ 判斷刀
+   （藉口對照表 + Red Flags 經隔離成對 A/B——`claude -p` Haiku、無
+   `.claude`、B≥A——降級 judgment-matrix 新 R5，常駐層留路由 + 回升
+   觸發）。rules/ 20466→19468B（−4.9%）；棘輪公式 min(舊 cap,
+   ceil100(實際×1.05)) 本版算得 20480 不變（未跨 5% headroom，誠實記錄）。
+3. **kit-evolution 減法紀律**：降級是預設、真刪僅限 hook 接管、GREEN-without
+   隔離 A/B、回升觸發、總量棘輪——減法從此跟加法一樣有收據要求。
 
 ## 三、角色設計
 
