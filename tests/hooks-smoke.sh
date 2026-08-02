@@ -581,6 +581,222 @@ assert_eq "h2t6: tree change in an unborn repo still blocks" "$DEC" "block"
 rm -f "$BASELINE2U" "$TURNSTART2U"
 
 # ===========================================================================
+# G - verify-final-review.sh v4.9 decision-point gate: defer / model-skip /
+#     sensitive floor / audit fail-closed. Written RED-first (before the v4.9
+#     hook change). g12/g13 double as receipts for two PRE-existing holes:
+#     extension-filtered sensitive scan (SQL blind spot) and pre-filter
+#     head-50 truncation.
+# ===========================================================================
+RG="$WORK/g-repo"; make_repo "$RG"
+SIDG="${SID_PREFIX}-g"
+BASELINEG="/tmp/claude-kit-baseline-${SIDG}"
+CODEX_MG="/tmp/claude-codex-reviewed-${SIDG}"
+SELF_MG="/tmp/claude-reviewed-${SIDG}"
+BYPASSG="/tmp/claude-skip-review-${SIDG}"
+DEFERG="/tmp/claude-kit-defer-${SIDG}"
+SKIPLOGG="/tmp/claude-kit-skiplog-${SIDG}.jsonl"
+TURNSTARTG="/tmp/claude-kit-turnstart-${SIDG}"
+STOPG="{\"session_id\":\"${SIDG}\",\"cwd\":\"${RG}\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
+run_hook "$SS" "{\"session_id\":\"${SIDG}\",\"cwd\":\"${RG}\"}"
+
+# g1: >150-line unreviewed batch blocks and offers all three settlements
+py_lines 200 > "$RG/feature.py"
+run_hook "$VF" "$STOPG"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g1: batch over threshold blocks" "$DEC" "block"
+assert_contains "g1: offers the review path" "$REASON" "/kit-review"
+assert_contains "g1: offers the skip path" "$REASON" "/kit-skip-review"
+assert_contains "g1: offers the defer path (teach line)" "$REASON" "deferred-by=model"
+
+# g2: a valid defer settles the block; hook stamps measured lines + audits
+printf 'deferred-by=model reason=feature-mid-flight\n' > "$DEFERG"
+run_hook "$VF" "$STOPG"
+assert_eq "g2: valid defer allows the stop" "$OUT" ""
+assert_contains "g2: hook stamped measured lines into the defer" "$(cat "$DEFERG" 2>/dev/null)" "lines="
+assert_contains "g2: defer stamp audited in skiplog" "$(cat "$SKIPLOGG" 2>/dev/null)" "defer-stamp"
+py_lines 10 >> "$RG/feature.py"
+run_hook "$VF" "$STOPG"
+assert_eq "g2: +10 lines under the leash stays quiet" "$OUT" ""
+
+# g3: growth >=150 past the stamp re-blocks and consumes the defer
+py_lines 200 >> "$RG/feature.py"
+run_hook "$VF" "$STOPG"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g3: growth past the leash re-blocks" "$DEC" "block"
+assert_file_absent "g3: expired defer consumed" "$DEFERG"
+assert_contains "g3: reason notes the defer expiry" "$REASON" "defer expired"
+assert_contains "g3: expiry audited in skiplog" "$(cat "$SKIPLOGG" 2>/dev/null)" "defer-expired"
+
+# g7: a review marker clears an active defer along with the obligation
+printf 'deferred-by=model reason=still-mid-flight\n' > "$DEFERG"
+run_hook "$VF" "$STOPG"
+assert_eq "g7 setup: re-defer allowed" "$OUT" ""
+valid_marker "$CODEX_MG" codex
+run_hook "$VF" "$STOPG"
+assert_eq "g7: marker satisfies gate over an active defer" "$OUT" ""
+assert_file_absent "g7: certification cleared the defer file" "$DEFERG"
+
+# g8: malformed defer must surface its block even on an unchanged-tree turn
+# (turn-scoped pass must not swallow the "your defer did not count" feedback)
+py_lines 200 > "$RG/feature2.py"
+run_hook "$HOOKS/classify-task.sh" "{\"session_id\":\"${SIDG}\",\"cwd\":\"${RG}\",\"prompt\":\"hello\"}"
+assert_file_exists "g8 setup: turn-start snapshot taken" "$TURNSTARTG"
+printf 'deferred-by=model reason=\n' > "$DEFERG"
+run_hook "$VF" "$STOPG"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g8: malformed defer blocks despite unchanged tree" "$DEC" "block"
+assert_contains "g8: reason names the invalid defer" "$REASON" "invalid defer"
+assert_file_absent "g8: malformed defer consumed" "$DEFERG"
+rm -f "$TURNSTARTG"
+
+# g9: pre-stamped defer (stamp above measured total) is tampering -> invalid
+printf 'deferred-by=model reason=x\nlines=999999\n' > "$DEFERG"
+run_hook "$VF" "$STOPG"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g9: pre-stamped defer blocks" "$DEC" "block"
+assert_contains "g9: reason names the invalid defer" "$REASON" "invalid defer"
+assert_file_absent "g9: tampered defer consumed" "$DEFERG"
+valid_marker "$SELF_MG" solo
+run_hook "$VF" "$STOPG"
+assert_eq "g9 cleanup: state certified" "$OUT" ""
+
+# g10: sensitive batch cannot defer (floor covers defer, not just skip)
+py_lines 160 > "$RG/auth_handler.py"
+printf 'deferred-by=model reason=mid-flight\n' > "$DEFERG"
+run_hook "$VF" "$STOPG"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g10: sensitive defer blocks" "$DEC" "block"
+assert_contains "g10: reason states the sensitive-defer floor" "$REASON" "cannot defer"
+assert_file_absent "g10: sensitive defer consumed" "$DEFERG"
+
+# g5: model-skip on a sensitive batch is rejected + audited
+printf 'skipped-by=model reason=throwaway scope=160lines/1file\n' > "$BYPASSG"
+run_hook "$VF" "$STOPG"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g5: model-skip on sensitive batch blocks" "$DEC" "block"
+assert_contains "g5: floor language present" "$REASON" "only the USER can skip"
+assert_file_absent "g5: rejected flag consumed" "$BYPASSG"
+assert_contains "g5: rejection audited" "$(cat "$SKIPLOGG" 2>/dev/null)" "model-skip-rejected"
+
+# g6: user-approved still overrides the floor, and the override is audited
+printf 'user-approved date=2026-01-01 quote="smoke fixture"\n' > "$BYPASSG"
+run_hook "$VF" "$STOPG"
+assert_eq "g6: user-approved on sensitive batch allows" "$OUT" ""
+assert_file_absent "g6: bypass flag consumed" "$BYPASSG"
+assert_contains "g6: sensitive user-skip audited" "$(cat "$SKIPLOGG" 2>/dev/null)" "user-skip-sensitive"
+
+# g4: model-skip on a non-sensitive batch is honored + audited
+py_lines 200 > "$RG/scratch_tool.py"
+printf 'skipped-by=model reason=one-off-analysis-script scope=200lines/1file\n' > "$BYPASSG"
+run_hook "$VF" "$STOPG"
+assert_eq "g4: model-skip on non-sensitive batch allows" "$OUT" ""
+assert_file_absent "g4: flag consumed" "$BYPASSG"
+assert_eq "g4: model-skip advances baseline" "$(baseline_head "$BASELINEG")" "$(git_f "$RG" rev-parse HEAD)"
+assert_contains "g4: skip audited with its reason" "$(cat "$SKIPLOGG" 2>/dev/null)" "one-off-analysis-script"
+
+# g11: model-skip missing the scope field is malformed -> rejected + audited
+py_lines 200 > "$RG/scratch2.py"
+printf 'skipped-by=model reason=no-scope-given\n' > "$BYPASSG"
+run_hook "$VF" "$STOPG"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "g11: scope-less model-skip blocks" "$DEC" "block"
+assert_file_absent "g11: malformed flag consumed" "$BYPASSG"
+assert_contains "g11: malformed skip audited as rejected" "$(cat "$SKIPLOGG" 2>/dev/null)" "model-skip-rejected"
+valid_marker "$SELF_MG" solo
+run_hook "$VF" "$STOPG"
+assert_eq "g11 cleanup: state certified" "$OUT" ""
+
+# g15: protected-paths hit counts as floor (not only the sensitive regex)
+mkdir -p "$RG/.claude" "$RG/vault"
+printf 'vault/\n' > "$RG/.claude/protected-paths"
+py_lines 200 > "$RG/vault/core.py"
+printf 'skipped-by=model reason=throwaway scope=200lines/1file\n' > "$BYPASSG"
+run_hook "$VF" "$STOPG"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g15: model-skip on protected-path batch blocks" "$DEC" "block"
+assert_contains "g15: floor language present" "$REASON" "only the USER can skip"
+assert_contains "g15: protected rejection audited" "$(cat "$SKIPLOGG" 2>/dev/null)" "model-skip-rejected"
+valid_marker "$SELF_MG" solo
+run_hook "$VF" "$STOPG"
+assert_eq "g15 cleanup: state certified" "$OUT" ""
+
+# g12: sensitive scan must run BEFORE the extension filter — an SQL-only
+# migration batch must block (pre-existing hole: .sql is not a "business"
+# extension, so today the gate advances the baseline right past it)
+RG3="$WORK/g-repo-sql"; make_repo "$RG3"
+SIDG3="${SID_PREFIX}-gsql"
+STOPG3="{\"session_id\":\"${SIDG3}\",\"cwd\":\"${RG3}\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
+run_hook "$SS" "{\"session_id\":\"${SIDG3}\",\"cwd\":\"${RG3}\"}"
+mkdir -p "$RG3/migrations"
+for i in $(seq 1 200); do echo "ALTER TABLE t ADD COLUMN c$i integer;"; done > "$RG3/migrations/001.sql"
+run_hook "$VF" "$STOPG3"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g12: migration-SQL-only batch blocks" "$DEC" "block"
+assert_contains "g12: reason names the sql file" "$REASON" "migrations/001.sql"
+
+# g13: business filter must run before any truncation — 60 早序 junk files
+# must not push a sensitive business file out of the gate's view
+RG4="$WORK/g-repo-trunc"; make_repo "$RG4"
+SIDG4="${SID_PREFIX}-gtrunc"
+STOPG4="{\"session_id\":\"${SIDG4}\",\"cwd\":\"${RG4}\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
+run_hook "$SS" "{\"session_id\":\"${SIDG4}\",\"cwd\":\"${RG4}\"}"
+for i in $(seq -w 1 60); do echo "note $i" > "$RG4/aaa_note_$i.txt"; done
+py_lines 160 > "$RG4/auth_zz.py"
+run_hook "$VF" "$STOPG4"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g13: sensitive file behind 60 junk paths still blocks" "$DEC" "block"
+assert_contains "g13: reason names the hidden business file" "$REASON" "auth_zz.py"
+
+# g14/g16: unmeasurable state (no baseline) fail-closed for BOTH new doors
+RG2="$WORK/g-repo-nobase"; make_repo "$RG2"
+SIDG2="${SID_PREFIX}-gnobase"
+BYPASSG2="/tmp/claude-skip-review-${SIDG2}"
+DEFERG2="/tmp/claude-kit-defer-${SIDG2}"
+SKIPLOGG2="/tmp/claude-kit-skiplog-${SIDG2}.jsonl"
+STOPG2="{\"session_id\":\"${SIDG2}\",\"cwd\":\"${RG2}\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
+py_lines 200 > "$RG2/f.py"
+printf 'skipped-by=model reason=x scope=200/1\n' > "$BYPASSG2"
+run_hook "$VF" "$STOPG2"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "g14: model-skip with no baseline fails closed" "$DEC" "block"
+assert_file_absent "g14: flag consumed" "$BYPASSG2"
+assert_contains "g14: rejection audited" "$(cat "$SKIPLOGG2" 2>/dev/null)" "model-skip-rejected"
+printf 'deferred-by=model reason=x\n' > "$DEFERG2"
+run_hook "$VF" "$STOPG2"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g16: defer with no baseline fails closed" "$DEC" "block"
+assert_file_absent "g16: unmeasurable defer consumed" "$DEFERG2"
+assert_contains "g16: reason says the batch is not measurable" "$REASON" "not measurable"
+
+# g17: audit fail-closed — unwritable skiplog voids a model-skip
+RG5="$WORK/g-repo-audit"; make_repo "$RG5"
+SIDG5="${SID_PREFIX}-gaudit"
+BYPASSG5="/tmp/claude-skip-review-${SIDG5}"
+SKIPLOGG5="/tmp/claude-kit-skiplog-${SIDG5}.jsonl"
+STOPG5="{\"session_id\":\"${SIDG5}\",\"cwd\":\"${RG5}\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
+run_hook "$SS" "{\"session_id\":\"${SIDG5}\",\"cwd\":\"${RG5}\"}"
+py_lines 200 > "$RG5/tool.py"
+mkdir -p "$SKIPLOGG5"   # a directory at the log path makes appends fail
+printf 'skipped-by=model reason=throwaway scope=200/1\n' > "$BYPASSG5"
+run_hook "$VF" "$STOPG5"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g17: unwritable audit log voids the model-skip" "$DEC" "block"
+assert_contains "g17: reason names the unwritable audit log" "$REASON" "audit log unwritable"
+assert_file_absent "g17: flag consumed" "$BYPASSG5"
+rmdir "$SKIPLOGG5" 2>/dev/null
+
+# ===========================================================================
 # H3 - classify-task.sh (explicit overrides + per-turn judgment digest)
 # ===========================================================================
 CT="$HOOKS/classify-task.sh"
