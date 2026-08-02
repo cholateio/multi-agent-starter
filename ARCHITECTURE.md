@@ -145,7 +145,7 @@ findings、hedge 話術）。素材採自 fable-soul（MIT），只收 kit 未�
 5. **rules/ 精簡**（20864B→20410B）：加法用等量精簡騰出，順帶修好先前**既有
    超標**的紅燈（v4.6 那輪之後又漲回線外）。
 
-### v4.9（當前）：審計驅動的 prose 減法 + Stop gate 決策點化
+### v4.9：審計驅動的 prose 減法 + Stop gate 決策點化
 
 觸發是兩個外部觀念的落地檢驗：「越強的模型需要越少的 prompt 層限制」
 （Anthropic 2026-07-24 官方以同思路砍掉自家 Claude Code 系統提示 80%+）與
@@ -169,6 +169,26 @@ user 收據「批次破檻後每個動碼輪連攔」。設計文件與三輪 co
    ceil100(實際×1.05)) 本版算得 20480 不變（未跨 5% headroom，誠實記錄）。
 3. **kit-evolution 減法紀律**：降級是預設、真刪僅限 hook 接管、GREEN-without
    隔離 A/B、回升觸發、總量棘輪——減法從此跟加法一樣有收據要求。
+
+### v4.10（當前）：驗證閉環——驗證器可信度、驗證終點、不可逆前置閘
+
+第一個以**全機隊 LESSONS 掃描**為收據來源的版本（13 專案 85 條聚 11 類；
+LESSONS→kit 的回饋迴路首次完整跑通）。設計與七輪 codex 計畫審軌跡見
+`docs/design-history/2026-08-02-kit-v4.10-*`。
+
+1. **verifier-pipe guard**（tool-breaker 內，唯一 hook 變更）：「測試執行器
+   接管道過濾再鏈 git commit/push 且無 pipefail」→ 物理 deny——管道回報
+   過濾器的 exit code，測試紅著也看起來綠（收據：quant 同 session 三犯；
+   10/13 專案踩驗證管道說謊）。四步契約 + 四態引號中和器（codex 七輪
+   收斂：引號是資料不是結構、佔位符保字詞邊界、ANSI-C `$'…'` 獨立態）；
+   **防呆不防敵**——蓄意規避明文界外（v4.9 威脅邊界超集論證）。
+2. **verification-signals 擴至八節**：S6 驗證器可信度（紅樣本自檢、零與
+   死可分、降級必 fail-loud、否定斷言收斂）、S7 驗證終點與觀察層（終點
+   =user 可見面 + 授權邊界、觀察層閉環、測試階梯以 runtime 依賴為升級
+   判準）、S8 不可逆前置閘（快照四要件——parse ≠ restore、fail-closed
+   哨兵、正向證明才刪、回復決策先於變異）。
+3. **維護件**：LESSONS 門檻中文修正（300 行為準，byte 限僅 ASCII 檔）、
+   R5 加代理變數列。rules/ no-growth 不變量守住（19621→19615B）。
 
 ## 三、角色設計
 

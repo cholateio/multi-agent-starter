@@ -190,6 +190,20 @@ session 啟動時的指令快照，session 中途新增的 rules 檔到不了 su
 | 2026-08-02 | 2 stale green | Haiku 4.5（claude -p 隔離） | 同上 | A=2 B=2 — 主動點名綠燈作廢、拒宣告完成 |
 | 2026-08-02 | 5 options menu | Haiku 4.5（claude -p 隔離） | 同上 | A=2 B=2 — 押 SQLite + 明確翻盤條件 |
 
+### 2026-08-02 v4.10 採納註記
+
+- **verifier-pipe guard（hook 層）**：RED-GREEN = hooks-smoke v1-v25
+  （RED：9 個 deny 期望項在舊 hook 下失敗、quant 原始形狀重放；GREEN：
+  293/0 全綠，19 個 allow 反例守住「寧漏勿誤擋」）。契約經 codex 七輪
+  計畫審收斂（三段 grep → 四步 + 四態引號中和器）；蓄意規避明文界外
+  （防呆不防敵，v4.9 威脅邊界超集論證，codex R5 接受）。
+- **S6/S7/S8 + R5 代理變數列 + LESSONS 門檻句（prose 層）**：規格級
+  （沿場景 13-15 先例）。RED = 機隊 13 專案 85 條 LESSONS 聚類
+  （2026-08-02 掃描：S6=10 專案、S7=~8、S8=6、代理變數=6；報告存
+  session，聚類可回溯各專案 LESSONS）；GREEN = 規格判準。
+- rules/ no-growth 不變量：基線 19621B → 19615B（門檻句淨增以指標句
+  縮短抵銷），常駐稅未升。
+
 ## Rejected（透明紀錄：測了但沒加的規則）
 
 （無——RED 重現不了的候選規則記在這裡，附測試日期與場景。）

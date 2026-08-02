@@ -76,11 +76,14 @@ smoke test 把關(cap 20480B,v4.9 起附棘輪公式:瘦身後下修至實際值
 - **判斷檢核表**(`.claude/docs/judgment-matrix.md`,需要時才讀)——換路徑
   信號(R1)、完成判準(R2)、熔斷提問時機(R3)、品味不拍板(R4),
   每條附正例反例。R3/R4 觸發條件明文**優先於** kit-judgment 的「直接做」傾向。
-- **驗證信號注入**(`.claude/docs/verification-signals.md`,需要時才讀,v4.2)——
-  五個「迴圈裡缺便宜驗證信號」的高風險領域:UI 沒截圖=視覺上未驗證(S1)、
-  schema 每欄要有現存讀取路徑(S2)、bug 連環卡後交接去假設化(S3)、
-  SaaS 引入必附實查成本卡且 user 拍板(S4)、業務邏輯不得只能透過 UI 觸達
-  (S5,痛點驅動不預建)。kit-judgment 通用證據紀律在領域層的實例化。
+- **驗證信號注入**(`.claude/docs/verification-signals.md`,需要時才讀,v4.2
+  起,v4.10 擴至八節)——「迴圈裡缺便宜驗證信號」的高風險領域:UI 沒截圖
+  =視覺上未驗證(S1)、schema 每欄要有現存讀取路徑(S2)、bug 連環卡後
+  交接去假設化(S3)、SaaS 引入必附實查成本卡且 user 拍板(S4)、業務邏輯
+  不得只能透過 UI 觸達(S5)、**驗證器先紅過才可信/零與死可分/降級必
+  fail-loud**(S6)、**驗證終點=user 可見面+觀察層閉環+測試階梯**(S7)、
+  **不可逆操作四要件前置閘**(S8)。S6-S8 收據=機隊 13 專案 85 條 LESSONS
+  聚類(2026-08-02)。kit-judgment 通用證據紀律在領域層的實例化。
 
 ## 二、Context engineering 防護(不可再生資源:誰讀什麼、怎麼不膨脹、怎麼重錨)
 
@@ -129,6 +132,12 @@ claude 啟動時的環境)。
   輪詢類工具豁免。**失敗密度警示**:最近 12 條遙測事件中 ≥3 次失敗 → stderr
   注入警示(工具已執行完,物理上不能 block,只能警示)。所有調用寫一行
   埋點日誌到 `/tmp/claude-kit-toollog-<session_id>.jsonl` 供事後審計。
+  **verifier-pipe guard**(v4.10):「測試執行器接管道過濾再鏈 git commit/push
+  且無 pipefail」→ deny——管道回報的是過濾器的 exit code,測試可以紅著
+  看起來綠(收據:quant 同 session 三犯;機隊 10/13 專案踩驗證管道說謊)。
+  四步契約(豁免→摺疊→四態引號中和器→單一有序 regex),寧漏勿誤擋;
+  **防呆不防敵**——蓄意規避(拆字/跨調用/bash -c 巢狀)明文界外,同
+  威脅模型邊界(#7)的超集論證。
 - **verify-final-review.sh**(Stop gate,v4.9 決策點化)——「先算後判」:
   批次事實(changed set/業務/敏感/累積行數)先於一切裁決分支計算,地板依
   批次內容執法、永不信 flag 自述。基線機制不變:baseline = 上次認證的
