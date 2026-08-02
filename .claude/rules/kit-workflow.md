@@ -14,7 +14,9 @@ reviewer availability, and this session's marker paths — trust it over guessin
 | `solo`  | fresh-context `solo-reviewer` subagent — state/time isolation ONLY. Always tell the user: "cross-model isolation is OFF". |
 
 Prefer `/kit-review`: it resolves the profile AND writes the marker the Stop
-gate checks. `/kit-skip-review` only on explicit user request.
+gate checks. `/kit-skip-review`: user mode on explicit request; model-judged
+mode (v4.9) for non-sensitive batches only — sensitive/protected/unmeasurable
+stay USER-only (the skill and the hook enforce the floor).
 
 **Isolation landmines (never do these):**
 

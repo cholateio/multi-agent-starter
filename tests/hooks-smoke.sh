@@ -617,6 +617,7 @@ printf 'deferred-by=model reason=feature-mid-flight\n' > "$DEFERG"
 run_hook "$VF" "$STOPG"
 assert_eq "g2: valid defer allows the stop" "$OUT" ""
 assert_contains "g2: hook stamped measured lines into the defer" "$(cat "$DEFERG" 2>/dev/null)" "lines="
+assert_contains "g2: hook stamped the business-file count too" "$(cat "$DEFERG" 2>/dev/null)" "files="
 assert_contains "g2: defer stamp audited in skiplog" "$(cat "$SKIPLOGG" 2>/dev/null)" "defer-stamp"
 py_lines 10 >> "$RG/feature.py"
 run_hook "$VF" "$STOPG"
@@ -798,6 +799,64 @@ assert_eq "g17: unwritable audit log voids the model-skip" "$DEC" "block"
 assert_contains "g17: reason names the unwritable audit log" "$REASON" "audit log unwritable"
 assert_file_absent "g17: flag consumed" "$BYPASSG5"
 rmdir "$SKIPLOGG5" 2>/dev/null
+
+# g18: enumeration failure must not certify — corrupt real index makes
+# `git status` fail while the temp-index tree hash still works; an empty
+# changed list must fall through to a block, never advance the baseline
+RG6="$WORK/g-repo-scan"; make_repo "$RG6"
+SIDG6="${SID_PREFIX}-gscan"
+BASELINEG6="/tmp/claude-kit-baseline-${SIDG6}"
+STOPG6="{\"session_id\":\"${SIDG6}\",\"cwd\":\"${RG6}\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
+run_hook "$SS" "{\"session_id\":\"${SIDG6}\",\"cwd\":\"${RG6}\"}"
+py_lines 200 > "$RG6/f.py"
+BT6_BEFORE="$(baseline_tree "$BASELINEG6")"
+printf 'garbage-not-an-index' > "$RG6/.git/index"
+run_hook "$VF" "$STOPG6"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g18: scan failure blocks instead of certifying" "$DEC" "block"
+assert_contains "g18: reason names the enumeration failure" "$REASON" "enumeration failed"
+assert_eq "g18: baseline NOT advanced on scan failure" "$(baseline_tree "$BASELINEG6")" "$BT6_BEFORE"
+
+# g19/g20/g21: tampered/limit defer stamps must degrade to block, never crash
+RG7="$WORK/g-repo-stamp"; make_repo "$RG7"
+SIDG7="${SID_PREFIX}-gstamp"
+DEFERG7="/tmp/claude-kit-defer-${SIDG7}"
+SELF_MG7="/tmp/claude-reviewed-${SIDG7}"
+STOPG7="{\"session_id\":\"${SIDG7}\",\"cwd\":\"${RG7}\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
+run_hook "$SS" "{\"session_id\":\"${SIDG7}\",\"cwd\":\"${RG7}\"}"
+py_lines 410 > "$RG7/big.py"
+# g19: zero-padded stamp (octal trap) — numerically valid, leash long blown:
+# the hook must EMIT BLOCK JSON, not die on an arithmetic error (fail-open)
+printf 'deferred-by=model reason=x\nlines=008\nfiles=001\n' > "$DEFERG7"
+run_hook "$VF" "$STOPG7"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "g19: hook exits 0 on zero-padded stamp" "$CODE" "0"
+assert_eq "g19: zero-padded stamp still yields a block decision" "$DEC" "block"
+assert_file_absent "g19: defer consumed" "$DEFERG7"
+# g20: absurd-length digit string is not a stamp the hook could have written
+printf 'deferred-by=model reason=x\nlines=999999999999\nfiles=1\n' > "$DEFERG7"
+run_hook "$VF" "$STOPG7"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g20: overlong stamp blocks" "$DEC" "block"
+assert_contains "g20: reason names the invalid defer" "$REASON" "invalid defer"
+assert_file_absent "g20: tampered defer consumed" "$DEFERG7"
+# g21: the file-count leash — 9 one-line business files after a valid defer
+# must expire it even though line growth stays far under 150
+printf 'deferred-by=model reason=mid-flight\n' > "$DEFERG7"
+run_hook "$VF" "$STOPG7"
+assert_eq "g21 setup: defer stamped and allowed" "$OUT" ""
+for i in $(seq 1 9); do echo "print('pad $i')" > "$RG7/pad_$i.py"; done
+run_hook "$VF" "$STOPG7"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "g21: file-count growth past the leash re-blocks" "$DEC" "block"
+assert_contains "g21: expiry note mentions the file leash" "$REASON" "business files"
+assert_file_absent "g21: expired defer consumed" "$DEFERG7"
+valid_marker "$SELF_MG7" solo
+run_hook "$VF" "$STOPG7"
+assert_eq "g21 cleanup: state certified" "$OUT" ""
 
 # ===========================================================================
 # H3 - classify-task.sh (explicit overrides + per-turn judgment digest)

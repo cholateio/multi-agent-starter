@@ -117,7 +117,14 @@ fi
 # strip the 3-char prefix. Renames are "XY old -> new"; keep the new path.
 # git C-quotes unusual paths: strip the outer quotes last so the extension
 # filter still matches.
-UNCOMMITTED=$(git status --porcelain -uall 2>/dev/null | sed -e 's/^...//' -e 's/^.* -> //' -e 's/^"\(.*\)"$/\1/')
+# SCAN_FAILED: an enumeration failure (corrupt real index, git error) must
+# never look like "nothing changed" — an empty list would take the advance-
+# baseline exits below and certify an unreviewed tree (adversarial review
+# finding 2026-08-02, test g18). pipefail is set, so a git failure reaches
+# the assignment's exit status.
+SCAN_FAILED=0
+UNCOMMITTED=$(git status --porcelain -uall 2>/dev/null | sed -e 's/^...//' -e 's/^.* -> //' -e 's/^"\(.*\)"$/\1/') \
+    || SCAN_FAILED=1
 
 COMMITTED=""
 if [[ -f "$BASELINE_FILE" ]] && git rev-parse --verify HEAD >/dev/null 2>&1; then
@@ -128,7 +135,8 @@ if [[ -f "$BASELINE_FILE" ]] && git rev-parse --verify HEAD >/dev/null 2>&1; the
        && ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null 2>&1; then
         BASE="$EMPTY_TREE"
     fi
-    COMMITTED=$(git diff --name-only "$BASE" HEAD 2>/dev/null | sed -e 's/^"\(.*\)"$/\1/' || echo "")
+    COMMITTED=$(git diff --name-only "$BASE" HEAD 2>/dev/null | sed -e 's/^"\(.*\)"$/\1/') \
+        || SCAN_FAILED=1
 fi
 
 # Enforcement scans the FULL set — truncating before the business filter let
@@ -210,7 +218,7 @@ BATCH_FILES=0
 BATCH_MEASURABLE=1
 batch_measure() {
     local numstat add del path
-    if [[ -z "$CERT_TREE" || -z "$CURRENT_TREE" ]] \
+    if [[ "$SCAN_FAILED" -eq 1 || -z "$CERT_TREE" || -z "$CURRENT_TREE" ]] \
        || ! git rev-parse --verify --quiet "${CERT_TREE}^{tree}" >/dev/null 2>&1; then
         BATCH_MEASURABLE=0
         return 0
@@ -291,14 +299,15 @@ if [[ -n "$CURRENT_TREE" && "$CURRENT_TREE" == "$CERT_TREE" ]]; then
     exit 0
 fi
 
-if [[ -z "$CHANGED_FILES" ]]; then
+# Empty lists certify ONLY when enumeration actually succeeded (g18).
+if [[ -z "$CHANGED_FILES" && "$SCAN_FAILED" -eq 0 ]]; then
     advance_baseline
     exit 0
 fi
 
 # Nothing business-bearing (and nothing sensitive — those were folded into
 # BUSINESS_FILES above) -> nothing to enforce
-if [[ -z "$BUSINESS_FILES" ]]; then
+if [[ -z "$BUSINESS_FILES" && "$SCAN_FAILED" -eq 0 ]]; then
     advance_baseline
     exit 0
 fi
@@ -350,22 +359,36 @@ if [[ -f "$DEFER_FILE" ]]; then
         rm -f "$DEFER_FILE"; INVALID_DEFER=1
         DEFER_NOTE="the batch is not measurable (no certified baseline or binary rows) — cannot defer; fail-closed."
     else
-        STAMP=$(sed -n 's/^lines=//p' "$DEFER_FILE" | head -n1)
-        if [[ -z "$STAMP" ]]; then
-            if skiplog defer-stamp "$DEFER_LINE" "lines=$BATCH_TOTAL" \
-               && printf 'lines=%s\n' "$BATCH_TOTAL" >> "$DEFER_FILE" 2>/dev/null; then
+        STAMP_L=$(sed -n 's/^lines=//p' "$DEFER_FILE" | head -n1)
+        STAMP_F=$(sed -n 's/^files=//p' "$DEFER_FILE" | head -n1)
+        # Stamps are validated as bounded canonical digits BEFORE any
+        # arithmetic: bash reads a leading-zero operand as octal, and an
+        # arithmetic error exits a non-interactive shell — a tampered stamp
+        # like "008" would crash the hook into fail-open instead of blocking
+        # (adversarial review finding 2026-08-02, tests g19/g20). 10# forces
+        # base-10; the 9-digit bound keeps the arithmetic in range.
+        stamp_ok() { printf '%s' "$1" | grep -qE '^[0-9]{1,9}$'; }
+        if [[ -z "$STAMP_L" && -z "$STAMP_F" ]]; then
+            if skiplog defer-stamp "$DEFER_LINE" "lines=$BATCH_TOTAL files=$BATCH_FILES" \
+               && printf 'lines=%s\nfiles=%s\n' "$BATCH_TOTAL" "$BATCH_FILES" >> "$DEFER_FILE" 2>/dev/null; then
                 exit 0
             fi
             rm -f "$DEFER_FILE"; INVALID_DEFER=1
             DEFER_NOTE="audit log unwritable — the defer was not stamped and did not take effect."
-        elif ! printf '%s' "$STAMP" | grep -qE '^[0-9]+$' || [[ "$STAMP" -gt "$BATCH_TOTAL" ]]; then
+        elif ! stamp_ok "$STAMP_L" || ! stamp_ok "$STAMP_F" \
+             || [[ $((10#$STAMP_L)) -gt "$BATCH_TOTAL" || $((10#$STAMP_F)) -gt "$BATCH_FILES" ]]; then
             rm -f "$DEFER_FILE"; INVALID_DEFER=1
-            DEFER_NOTE="invalid defer (stamp is not an integer the hook could have written) — it did not take effect."
-        elif [[ $((BATCH_TOTAL - STAMP)) -lt "$SMALL_MAX_LINES" ]]; then
+            DEFER_NOTE="invalid defer (stamp is not one the hook could have written) — it did not take effect."
+        elif [[ $((BATCH_TOTAL - 10#$STAMP_L)) -lt "$SMALL_MAX_LINES" \
+                && $((BATCH_FILES - 10#$STAMP_F)) -le "$SMALL_MAX_FILES" ]]; then
+            # Both leashes hold: <150 lines AND <=8 business files of growth
+            # since the stamp. EITHER crossing re-asks — a lines-only leash
+            # let unlimited near-empty business files ride a defer
+            # (adversarial review finding 2026-08-02, test g21).
             exit 0
         else
             rm -f "$DEFER_FILE"; DEFER_EXPIRED=1
-            skiplog defer-expired "$DEFER_LINE" "grew ${STAMP}->${BATCH_TOTAL}" || true
+            skiplog defer-expired "$DEFER_LINE" "grew ${STAMP_L}L/${STAMP_F}F->${BATCH_TOTAL}L/${BATCH_FILES}F" || true
         fi
     fi
 fi
@@ -430,7 +453,12 @@ NOTE: a defer file WAS present but ${DEFER_NOTE}
 fi
 if [[ "$DEFER_EXPIRED" -eq 1 ]]; then
     STALE_NOTE="${STALE_NOTE}
-NOTE: defer expired — the batch grew ≥${SMALL_MAX_LINES} lines since it was deferred. Decide again: review now, re-defer with a fresh reason, or skip.
+NOTE: defer expired — the batch grew ≥${SMALL_MAX_LINES} lines or >${SMALL_MAX_FILES} business files since it was deferred. Decide again: review now, re-defer with a fresh reason, or skip.
+"
+fi
+if [[ "$SCAN_FAILED" -eq 1 ]]; then
+    STALE_NOTE="${STALE_NOTE}
+NOTE: changed-file enumeration failed (git status/diff error — corrupt index?). Fail-closed: nothing can be certified or settled until a review/bypass runs or the repo is repaired.
 "
 fi
 
