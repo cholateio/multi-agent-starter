@@ -61,9 +61,10 @@ LOG="/tmp/claude-kit-toollog-${SESSION_ID}.jsonl"
 STATE="/tmp/claude-kit-lastcall-${SESSION_ID}"
 TS=$(date +%H:%M:%S 2>/dev/null || echo "-")
 
-log_event() {  # $1=e  $2=h  $3=n
-    jq -cn --arg ts "$TS" --arg e "$1" --arg t "$TOOL" --arg h "$2" --arg n "$3" \
-        '{ts:$ts, e:$e, t:$t, h:$h, n:($n|tonumber? // 0)}' >>"$LOG" 2>/dev/null || true
+log_event() {  # $1=e  $2=h  $3=n  [$4=k (kind, v4.10; omitted on legacy events)]
+    jq -cn --arg ts "$TS" --arg e "$1" --arg t "$TOOL" --arg h "$2" --arg n "$3" --arg k "${4:-}" \
+        '{ts:$ts, e:$e, t:$t, h:$h, n:($n|tonumber? // 0)} + (if $k == "" then {} else {k:$k} end)' \
+        >>"$LOG" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------- failures
@@ -103,6 +104,52 @@ if [[ -f "$STATE" ]]; then
 fi
 printf '%s %s\n' "$HASH" "$N" >"$STATE" 2>/dev/null || true
 log_event "call" "$HASH" "$N"
+
+# ---------------------------------------------------- verifier-pipe guard
+# v4.10: a piped test runner reports the FILTER's exit code, not the test's;
+# chaining git commit/push onto that green-looking pipe shipped unverified
+# work 3x in one real session (quant 2026-07; fleet receipt 2026-08-02,
+# 10/13 projects hit lying-verification-pipelines). Runs AFTER state update
+# and call logging (a guarded attempt still participates in the spiral
+# chain) and BEFORE the generic N>=3 deny (the specific message must win).
+# Four stages; stages 1-3 implement prefer-false-negatives. Anti-footgun,
+# NOT anti-evasion: deliberate quote-splitting / cross-call splitting /
+# bash -c nesting are out of scope — a Bash-holding model can already
+# rewrite the gate baseline directly (v4.9 threat boundary; same criterion
+# as the standing "no Bash command-parsing protection" decision).
+PIPE_GUARD_RUNNER='(pytest|vitest|jest|go test|cargo test|npm (test|run test)|bash [^ ]*tests?/[^ ]*\.sh)'
+CMD=$(echo "$INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null || echo "")
+if [[ "$TOOL" == "Bash" && -n "$CMD" ]] \
+   && ! printf '%s' "$CMD" | grep -q '<<' \
+   && ! printf '%s' "$CMD" | grep -qE '^[[:space:]]*(echo|printf)\b' \
+   && ! printf '%s' "$CMD" | grep -q 'pipefail'; then
+    # quote_neutralize: bounded state machine (plain/single/double/ansi-c,
+    # backslash-aware) replaces each quoted span with placeholder Q —
+    # replacement, not deletion, keeps word positions so stripped spans
+    # cannot synthesize a phantom "&& git commit". Unterminated quotes
+    # swallow the tail (false-negative direction, accepted).
+    CMD_FLAT=$(printf '%s' "$CMD" | tr '\n' ';' | awk '
+        BEGIN{FS=""}
+        { out=""; st=0
+          for(i=1;i<=NF;i++){ c=$i
+            if(st==0){
+              if(c=="\\"){i++; out=out "C"; continue}
+              if(c=="$" && $(i+1)=="\x27"){st=3; i++; out=out "Q"; continue}
+              if(c=="\x27"){st=1; out=out "Q"; continue}
+              if(c=="\""){st=2; out=out "Q"; continue}
+              out=out c; continue }
+            if(st==1){ if(c=="\x27") st=0; continue }
+            if(st==2){ if(c=="\\"){i++; continue} if(c=="\"") st=0; continue }
+            if(st==3){ if(c=="\\"){i++; continue} if(c=="\x27") st=0; continue }
+          }
+          print out }' 2>/dev/null)
+    if [[ -n "$CMD_FLAT" ]] && printf '%s' "$CMD_FLAT" | grep -qE "(^|[;&([:space:]])${PIPE_GUARD_RUNNER}[^|;&]*[^|]\|[^|].*(&&|;)[[:space:]]*git (commit|push)"; then
+        log_event "deny" "$HASH" "$N" "pipe-guard"
+        jq -n --arg r "verifier-pipe guard (kit tool-breaker): a piped test runner hides its exit code — the pipeline reports the FILTER's status, so the test can fail while the command looks green, and the chained git commit/push would ship unverified work. Fix either way: (1) run the test bare and commit only after it exits 0, or (2) prefix with 'set -o pipefail;' so the pipe propagates the test's exit code." \
+          '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
+        exit 0
+    fi
+fi
 
 if [[ "$N" -ge 3 ]]; then
     log_event "deny" "$HASH" "$N"
