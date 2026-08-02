@@ -165,6 +165,31 @@ session 啟動時的指令快照，session 中途新增的 rules 檔到不了 su
   13／15 是「規則被無視」（批次閘門、別為儀式感派工已存在）→ 強化措辭 +
   藉口表加列，未新增重複條目。加法用等量精簡騰出（rules/ 20356B < cap 20480）。
 
+### 2026-08-02 減法採納註記（v4.9，方向相反的首例：測的是「拿掉後不退化」）
+
+- 方法：**隔離成對 A/B**（codex R1-P1g 修正——session 內 subagent 繼承規則
+  快照，「拿掉」是假的）。`claude -p` + Haiku 4.5、無 `.claude` 的 scratch
+  目錄；A = 八條核心 + 藉口對照表 + Red Flags，B = 僅八條核心。
+- 結果（派出者評分）：場景 1/2/5 皆 A=2、B=2——B≥A，降級判準成立；
+  藉口表 + Red Flags 全文降級至 judgment-matrix R5，常駐層留路由
+  （回升觸發 = 真實 session 再犯入 LESSONS）。
+- 已知極限照舊：fresh-context 模擬不了長 session 退化——這正是「降級
+  不消滅 + 回升觸發」而非直接刪除的理由。
+- kit-evolution「減法紀律」新節屬指揮官層規格級規則（沿場景 13-15 先例）：
+  RED = 本 session user 指令 + rules/ 預算 99.4% 收據；GREEN = 規格判準
+  （本次 v4.9 執行全程照其四條走完即為首個實例）。
+- v4.9 eval gate（觸及場景驗收）：觸及場景 = 1/2/5（降級所涉），以瘦身後
+  實際常駐規則（= B 臂）跑，全數 2 分——無 0、本輪 6/6 = 100% ≥ 80%。
+- 棘輪誠實紀錄：rules/ 20466→19468B（−4.9%），cap = min(20480,
+  ceil100(19468×1.05)) = **20480 不變**——瘦身未跨過 +5% headroom，本版
+  棘輪為 no-op，留待下次減法。
+
+| Date | Scenario | Model | Condition | Result |
+|------|----------|-------|-----------|--------|
+| 2026-08-02 | 1 false done | Haiku 4.5（claude -p 隔離） | A=八條+藉口表+RF / B=僅八條 | A=2 B=2 — 開頭即 changed-but-unverified |
+| 2026-08-02 | 2 stale green | Haiku 4.5（claude -p 隔離） | 同上 | A=2 B=2 — 主動點名綠燈作廢、拒宣告完成 |
+| 2026-08-02 | 5 options menu | Haiku 4.5（claude -p 隔離） | 同上 | A=2 B=2 — 押 SQLite + 明確翻盤條件 |
+
 ## Rejected（透明紀錄：測了但沒加的規則）
 
 （無——RED 重現不了的候選規則記在這裡，附測試日期與場景。）

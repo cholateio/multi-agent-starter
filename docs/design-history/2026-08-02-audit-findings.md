@@ -68,18 +68,18 @@
 
 | 條款位置 | 判定 | 防的失敗模式 | strip condition | 執行後 verdict |
 |---|---|---|---|---|
-| kit-workflow「bare touch does not pass」句 | cut（hook 接管） | 偽造 marker | 已滿足 | |
-| kit-workflow >30 行 STOP | 改採 R3.2 豁免句 | plan 外大刪改 | — | |
-| kit-workflow profiles 表 `/codex:review` 字樣 | 改指 /kit-review | Skill-tool 繞路（2026-07-20） | plugin 除旗 | |
-| kit-judgment 藉口對照表 | demote → judgment-matrix | 藉口式假完成 | A/B 證明 8 條+digest 足夠 | |
-| kit-judgment Red Flags 段 | demote → judgment-matrix | turn 末假宣告 | 同上 | |
-| kit-judgment 第 1-8 條 | keep（常駐 canonical） | 假完成/假舉報 | 無 | |
-| kit-delegation「只做五件事」 | 改「預設只做」 | 措辭矛盾 | — | |
-| kit-dispatch 模板判斷句 + snapshot caveat | keep（弱執行員唯一載體） | 規則到不了 subagent | 重測證明快照已修 | |
-| kit-dispatch「派工後指揮官責任」段 | cut-mechanical（引用 kit-delegation） | 幻覺「已寫入」 | 無 | |
-| kit-review node/timeout 細節 | keep | Windows 部署 | 機隊無 Windows | |
-| classify-task digest | keep（~40 token 抗衰減） | 長 session 紀律衰減 | harness 原生重注入 | |
-| kit-evolution PreToolUse 描述 + CLAUDE.md 同步執法段 hook 敘述 | cut-mechanical（行動指令保留） | harness 腐化 | 已滿足 | |
-| judgment-matrix / verification-signals 正反例 | keep（on-demand，降級目的地） | 卡關無檢核表 | 無 | |
-| solo 揭露 ×5 → 保 3 | cut-mechanical | 假隔離承諾 | 無 | |
-| gate block message toollog 句 | 改措辭（指 skiplog） | 威懾句失真 | 無 | |
+| kit-workflow「bare touch does not pass」句 | cut（hook 接管） | 偽造 marker | 已滿足 | done v4.9（Final review 段改寫時移除；KIT_CONTEXT 廣播仍在） |
+| kit-workflow >30 行 STOP | 改採 R3.2 豁免句 | plan 外大刪改 | — | done v4.9 |
+| kit-workflow profiles 表 `/codex:review` 字樣 | 改指 /kit-review | Skill-tool 繞路（2026-07-20） | plugin 除旗 | done v4.9 |
+| kit-judgment 藉口對照表 | demote → judgment-matrix | 藉口式假完成 | A/B 證明 8 條+digest 足夠 | done v4.9：A/B（場景 1/2/5）B≥A，降級 R5；回升觸發=LESSONS 再犯 |
+| kit-judgment Red Flags 段 | demote → judgment-matrix | turn 末假宣告 | 同上 | done v4.9：同上批降級 R5 |
+| kit-judgment 第 1-8 條 | keep（常駐 canonical） | 假完成/假舉報 | 無 | keep（A/B 顯示八條獨立承載行為） |
+| kit-delegation「只做五件事」 | 改「預設只做」 | 措辭矛盾 | — | done v4.9 |
+| kit-dispatch 模板判斷句 + snapshot caveat | keep（弱執行員唯一載體） | 規則到不了 subagent | 重測證明快照已修 | keep |
+| kit-dispatch「派工後指揮官責任」段 | cut-mechanical（引用 kit-delegation） | 幻覺「已寫入」 | 無 | done v4.9（最低驗證句保留） |
+| kit-review node/timeout 細節 | keep | Windows 部署 | 機隊無 Windows | keep |
+| classify-task digest | keep（~40 token 抗衰減） | 長 session 紀律衰減 | harness 原生重注入 | keep（v4.9 增 defer 提醒行） |
+| kit-evolution PreToolUse 描述 + CLAUDE.md 同步執法段 hook 敘述 | cut-mechanical（行動指令保留） | harness 腐化 | 已滿足 | done v4.9（kit-evolution 側；CLAUDE.md 範本側細節在 init.sh，未動——影響僅新部署，留下版） |
+| judgment-matrix / verification-signals 正反例 | keep（on-demand，降級目的地） | 卡關無檢核表 | 無 | keep（R5 接收本版降級） |
+| solo 揭露 ×5 → 保 3 | cut-mechanical | 假隔離承諾 | 無 | partial v4.9：kit-review SKILL 縮引用；session-start 行**保留**——它是 profile 廣播功能行非重複 prose（偏離 audit 建議，理由記此） |
+| gate block message toollog 句 | 改措辭（指 skiplog） | 威懾句失真 | 無 | done v4.9（skiplog + telemetry-when-enabled 事實句） |
