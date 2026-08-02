@@ -1143,6 +1143,116 @@ run_hook "$TB" "{}"
 assert_eq "h5: empty input silent" "$OUT" ""
 assert_eq "h5: empty input exit 0" "$CODE" "0"
 
+# ===========================================================================
+# V - verifier-pipe guard (v4.10, in tool-breaker.sh). RED-first. Receipt:
+#     a piped test runner reports the FILTER's exit code; quant chained
+#     `pytest | tail && git commit` 3x in one real session. Contract: four
+#     stages (waivers -> newline fold -> quote neutralizer -> one ordered
+#     regex); prefer false negatives; anti-footgun NOT anti-evasion
+#     (deliberate quote-splitting is out of scope per the v4.9 threat
+#     boundary — a Bash-holder can rewrite the baseline file directly).
+# ===========================================================================
+tbv() {  # $1 = session-id suffix  $2 = raw command (jq-escaped into JSON)
+  jq -cn --arg sid "${SID_PREFIX}-$1" --arg cwd "$WORK" --arg cmd "$2" \
+    '{session_id:$sid, cwd:$cwd, hook_event_name:"PreToolUse", tool_name:"Bash", tool_input:{command:$cmd}}'
+}
+VLOG_SID() { printf '/tmp/claude-kit-toollog-%s-%s.jsonl' "$SID_PREFIX" "$1"; }
+
+run_hook "$TB" "$(tbv v1 'pytest -q tests/ | tail -5 && git commit -m wip')"
+assert_eq "v1: piped runner + commit chain denied" "$(tb_decision)" "deny"
+REASON="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null)"
+assert_contains "v1: reason teaches pipefail" "$REASON" "pipefail"
+assert_contains "v1: reason names the exit-code mechanism" "$REASON" "exit code"
+
+run_hook "$TB" "$(tbv v2 'set -o pipefail; pytest -q | tee out.log && git commit -m ok')"
+assert_eq "v2: pipefail waives the guard" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v3 'pytest -q | tail -5')"
+assert_eq "v3: no commit chain allowed" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v4 'npm test | grep -v warn ; git push origin main')"
+assert_eq "v4: npm test pipe + push denied" "$(tb_decision)" "deny"
+
+run_hook "$TB" "$(tbv v5 'pytest -q || git commit -m fallback')"
+assert_eq "v5: || is not a pipe" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v6 'cat data.txt | grep foo && git commit -m x')"
+assert_eq "v6: non-runner pipe allowed" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v7 'pytest -q tests/ | tail -5 && git commit -m wip')" full KIT_BREAKER=off
+assert_eq "v7: KIT_BREAKER=off waives the guard" "$OUT" ""
+
+assert_contains "v8: deny audited as e:deny" "$(cat "$(VLOG_SID v1)" 2>/dev/null)" '"e":"deny"'
+assert_contains "v8: deny audited as k:pipe-guard" "$(cat "$(VLOG_SID v1)" 2>/dev/null)" '"k":"pipe-guard"'
+assert_not_contains "v8: telemetry carries no raw command" "$(cat "$(VLOG_SID v1)" 2>/dev/null)" "tail -5"
+assert_not_contains "v8: pre-guard events carry no k field" "$(cat "$(VLOG_SID v3)" 2>/dev/null)" '"k":'
+
+run_hook "$TB" "$(tbv v9 "printf '%s' 'pytest | tail && git commit' > repro.txt && git commit -m docs")"
+assert_eq "v9: printf-quoted shape allowed (waiver + anchor)" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v10 'cat <<EOF > doc.md
+pytest | tail && git commit
+EOF
+git commit -m docs')"
+assert_eq "v10: heredoc containing the shape allowed" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v11 'git commit -m x && pytest -q | tail -3')"
+assert_eq "v11: commit BEFORE the pipe allowed (ordering)" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v12 'pytest -q | tail -5
+git commit -m y')"
+assert_eq "v12: newline-separated commit denied (fold)" "$(tb_decision)" "deny"
+
+run_hook "$TB" "$(tbv v13 'set +o pipefail; pytest -q | tail && git commit -m z')"
+assert_eq "v13: set +o pipefail allowed — DOCUMENTED false negative" "$(tb_decision)" ""
+
+# v14: a pipe-guard deny between two identical calls keeps the spiral
+# invariant — the denied attempt was still logged as a call in between
+run_hook "$TB" "$(tbv v14 'echo alpha')"
+run_hook "$TB" "$(tbv v14 'pytest -q | tail && git commit -m spiral')"
+run_hook "$TB" "$(tbv v14 'echo alpha')"
+assert_eq "v14: guarded call between identical calls resets nothing wrongly" "$(tb_decision)" ""
+
+# v15: repeated unsafe command keeps getting the SPECIFIC pipe-guard reason
+run_hook "$TB" "$(tbv v15 'pytest -q | tail && git commit -m again')"
+run_hook "$TB" "$(tbv v15 'pytest -q | tail && git commit -m again')"
+run_hook "$TB" "$(tbv v15 'pytest -q | tail && git commit -m again')"
+REASON="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null)"
+assert_eq "v15: third unsafe call still denied" "$(tb_decision)" "deny"
+assert_contains "v15: pipe-guard message wins over generic breaker" "$REASON" "pipefail"
+
+# v16: polling exemption untouched (regression) — covered by h5 polling
+# cases above; assert the guard did not add k to poll events
+run_hook "$TB" "$(tb_call h5c TaskOutput 'poll')"
+assert_eq "v16: polling still exempt" "$OUT" ""
+
+run_hook "$TB" "$(tbv v17 "pytest -q | grep '&& git commit'")"
+assert_eq "v17: quoted filter argument allowed" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v18 "pytest -q | sed -n '/; git commit/p'")"
+assert_eq "v18: quoted sed program allowed" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v19 "FOO=' pytest -q | tail && git commit'; echo done")"
+assert_eq "v19: quoted assignment allowed" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v20 "pytest -q | tail && 'printf' git commit")"
+assert_eq "v20: placeholder keeps word position (no phantom git)" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v21 "pytest -q | tail && g'it' commit -m x")"
+assert_eq "v21: quote-split evasion allowed — OUT OF SCOPE (anti-footgun, not anti-evasion)" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v22 "pytest -q | tail && 'mytool' git commit")"
+assert_eq "v22: quoted executable + git-looking args allowed" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v23 'pytest -q | grep "foo\" && git commit"')"
+assert_eq "v23: escaped double quote stays data" "$(tb_decision)" ""
+
+run_hook "$TB" "$(tbv v24 'pytest -q | tail && git commit -m "fix \"quoted\" msg"')"
+assert_eq "v24: real commit with escaped-quote message denied" "$(tb_decision)" "deny"
+
+run_hook "$TB" "$(tbv v25 "pytest -q | grep -F \$'foo\\' && git commit'")"
+assert_eq "v25: ANSI-C quoted apostrophe stays data" "$(tb_decision)" ""
+
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1
