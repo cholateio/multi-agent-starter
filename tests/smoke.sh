@@ -544,8 +544,11 @@ scenario_end "scenario 11: settings.json deploy-if-absent"
 # bonus (cheap) - rules/ growth budget (v4.1, from fable-soul)
 # .claude/rules/ is auto-loaded into EVERY session — a fixed context tax.
 # Cap chosen 2026-07-05 at 20480 bytes (then-current total: 16532). Before
-# raising it, slim the rules first (kit-evolution 規則變更紀律 #4); a
+# raising it, slim the rules first (kit-evolution 減法紀律 #4); a
 # judgment layer that models skim is worse than a shorter one they read.
+# v4.9 ratchet formula: cap = min(old cap, ceil100(actual x 1.05)). Computed
+# 2026-08-02: actual 19468 -> ceil100(20441) = 20500 -> min = 20480 UNCHANGED
+# (the -4.9% diet did not clear the +5% headroom; recompute on the next diet).
 # ===========================================================================
 scenario_start
 RULES_BYTES=$(cat "$KIT_ROOT/.claude/rules/"*.md 2>/dev/null | wc -c | tr -d ' ')
