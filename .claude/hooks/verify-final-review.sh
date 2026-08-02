@@ -200,17 +200,53 @@ if [[ -z "$CHANGED_FILES" ]]; then
     exit 0
 fi
 
-# Filter to business-logic-bearing files
+# Sensitive stems stay size-blind. No right boundary on purpose: "auth"
+# catches authentication/authorize (and false-positives like authors.py —
+# acceptable, it errs toward review). "oauth"/"sso" listed explicitly:
+# the left-delimiter requirement means "auth" does NOT match inside
+# "oauth.py" (codex review finding, 2026-07-10).
+SENSITIVE_PATH_REGEX='(^|[/_.-])(auth|oauth|sso|login|password|payment|billing|migrat|security|secret|crypto)'
+
+# matches_protected <path>: 0 if the path hits a .claude/protected-paths
+# glob (same semantics as protect-paths.sh: `*` crosses `/`, trailing
+# slash means the subtree). An absent list means "no protected paths"
+# (normal), not a scan failure.
+matches_protected() {
+    local pat list=".claude/protected-paths"
+    [[ -f "$list" ]] || return 1
+    while IFS= read -r pat; do
+        pat="${pat%%#*}"
+        pat="${pat#"${pat%%[![:space:]]*}"}"
+        pat="${pat%"${pat##*[![:space:]]}"}"
+        [[ -z "$pat" ]] && continue
+        [[ "$pat" == */ ]] && pat="${pat}*"
+        # shellcheck disable=SC2053  # unquoted RHS is the point: glob match
+        [[ "$1" == $pat ]] && return 0
+    done < "$list"
+    return 1
+}
+
+# Filter to business-logic-bearing files. The sensitive scan runs BEFORE the
+# extension filter and over the full changed set: a migrations/001.sql batch
+# has no "business" extension yet is exactly what the migration floor exists
+# for — extension-filtering first made SQL invisible to the gate (codex
+# finding 2026-08-02, test g12). SENSITIVE_HIT gates skip/defer/small-allow.
 BUSINESS_LOGIC_REGEX='\.(py|ts|tsx|js|jsx|go|rs|rb|java|kt|swift|cs|php|ex|exs|clj|scala|cpp|c|h|hpp|sh)$'
 SKIP_REGEX='(^|/)(\.claude/|node_modules/|dist/|build/|\.next/|target/|\.git/|vendor/|__pycache__/)'
 
 BUSINESS_FILES=""
+SENSITIVE_HIT=0
 while IFS= read -r f; do
     [[ -z "$f" ]] && continue
-    if ! echo "$f" | grep -qE "$BUSINESS_LOGIC_REGEX"; then
+    if echo "$f" | grep -qE "$SKIP_REGEX"; then
         continue
     fi
-    if echo "$f" | grep -qE "$SKIP_REGEX"; then
+    if echo "$f" | grep -qiE "$SENSITIVE_PATH_REGEX" || matches_protected "$f"; then
+        SENSITIVE_HIT=1
+        BUSINESS_FILES="${BUSINESS_FILES}${f}\n"
+        continue
+    fi
+    if ! echo "$f" | grep -qE "$BUSINESS_LOGIC_REGEX"; then
         continue
     fi
     BUSINESS_FILES="${BUSINESS_FILES}${f}\n"
@@ -254,32 +290,11 @@ SMALL_MAX_FILES=8
 # review finding, 2026-07-12) are recognized only for the languages where
 # that convention holds, so business names like ABTest.ts stay counted.
 TEST_PATH_REGEX='(^|/)(tests?|__tests__|__mocks__|spec)/|(^|/)(test|spec)_[^/]*$|_(test|spec)\.[^/.]+$|\.(test|spec)\.[^/.]+$|(^|/)conftest\.py$|(Test|Tests|Spec)\.(java|kt|kts|scala|cs|swift)$'
-# Sensitive stems stay size-blind. No right boundary on purpose: "auth"
-# catches authentication/authorize (and false-positives like authors.py —
-# acceptable, it errs toward review). "oauth"/"sso" listed explicitly:
-# the left-delimiter requirement means "auth" does NOT match inside
-# "oauth.py" (codex review finding, 2026-07-10).
-SENSITIVE_PATH_REGEX='(^|[/_.-])(auth|oauth|sso|login|password|payment|billing|migrat|security|secret|crypto)'
-
-# matches_protected <path>: 0 if the path hits a .claude/protected-paths
-# glob (same semantics as protect-paths.sh: `*` crosses `/`, trailing
-# slash means the subtree).
-matches_protected() {
-    local pat list=".claude/protected-paths"
-    [[ -f "$list" ]] || return 1
-    while IFS= read -r pat; do
-        pat="${pat%%#*}"
-        pat="${pat#"${pat%%[![:space:]]*}"}"
-        pat="${pat%"${pat##*[![:space:]]}"}"
-        [[ -z "$pat" ]] && continue
-        [[ "$pat" == */ ]] && pat="${pat}*"
-        # shellcheck disable=SC2053  # unquoted RHS is the point: glob match
-        [[ "$1" == $pat ]] && return 0
-    done < "$list"
-    return 1
-}
 
 # small_change_allow: 0 if the cumulative certified-tree diff qualifies.
+# The sensitive/protected check runs BEFORE the business-extension filter:
+# a migrations/001.sql row has no business extension but must veto the
+# small-allow all the same (codex finding 2026-08-02, test g12).
 small_change_allow() {
     local numstat add del path total=0 files=0
     [[ -n "$CERT_TREE" && -n "$CURRENT_TREE" ]] || return 1
@@ -290,11 +305,11 @@ small_change_allow() {
     while IFS=$'\t' read -r add del path; do
         [[ -z "$path" ]] && continue
         path="${path#\"}"; path="${path%\"}"
-        echo "$path" | grep -qE "$BUSINESS_LOGIC_REGEX" || continue
         echo "$path" | grep -qE "$SKIP_REGEX" && continue
-        [[ "$add" == "-" || "$del" == "-" ]] && return 1   # binary: fail closed
         echo "$path" | grep -qiE "$SENSITIVE_PATH_REGEX" && return 1
         matches_protected "$path" && return 1
+        echo "$path" | grep -qE "$BUSINESS_LOGIC_REGEX" || continue
+        [[ "$add" == "-" || "$del" == "-" ]] && return 1   # binary: fail closed
         echo "$path" | grep -qE "$TEST_PATH_REGEX" && continue
         total=$((total + add + del))
         files=$((files + 1))
