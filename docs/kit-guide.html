@@ -1,0 +1,919 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Multi-Agent Starter Kit v4.10.0 逐檔機制導讀">
+<title>Kit 機制導讀</title>
+<style>
+  :root {
+    --ground: #faf8f4;
+    --surface: #f2eee5;
+    --ink: #1a1a1a;
+    --ink-soft: #4e4941;
+    --muted: #7c756a;
+    --rule: #d8d2c4;
+    --rule-soft: #e7e2d6;
+    --accent: #2f4a7a;
+    --accent-soft: #e3e8f1;
+    --danger: #a8342a;
+
+    --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", "Hiragino Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #161511;
+      --surface: #201e18;
+      --ink: #e9e4d7;
+      --ink-soft: #c4bdaf;
+      --muted: #948d80;
+      --rule: #35312a;
+      --rule-soft: #28251e;
+      --accent: #97b5e2;
+      --accent-soft: #1d2431;
+      --danger: #e08b7b;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #161511;
+    --surface: #201e18;
+    --ink: #e9e4d7;
+    --ink-soft: #c4bdaf;
+    --muted: #948d80;
+    --rule: #35312a;
+    --rule-soft: #28251e;
+    --accent: #97b5e2;
+    --accent-soft: #1d2431;
+    --danger: #e08b7b;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.85;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 15rem minmax(0, 46rem);
+    gap: 3rem;
+    max-width: 66rem;
+    margin: 0 auto;
+    padding: 0 1.25rem 6rem;
+  }
+
+  /* ---------- sidebar nav ---------- */
+  nav.toc {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    max-height: 100vh;
+    overflow-y: auto;
+    padding: 3.5rem 0 2rem;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+  nav.toc .toc-title {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.9rem;
+  }
+  nav.toc ol { list-style: none; margin: 0 0 1.1rem; padding: 0; }
+  nav.toc .group {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin: 1rem 0 0.3rem;
+  }
+  nav.toc a {
+    display: block;
+    color: var(--ink-soft);
+    text-decoration: none;
+    padding: 0.12rem 0 0.12rem 0.7rem;
+    border-left: 2px solid var(--rule-soft);
+  }
+  nav.toc a:hover { color: var(--ink); }
+  nav.toc a.active {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    font-weight: 700;
+  }
+  nav.toc a code { background: none; border: none; padding: 0; font-size: 0.95em; }
+
+  /* ---------- main ---------- */
+  main { min-width: 0; }
+
+  header.masthead {
+    border-bottom: 1.5px solid var(--ink);
+    padding: 3.5rem 0 1.5rem;
+    margin-bottom: 2rem;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 1.1rem;
+  }
+  h1 {
+    font-family: var(--mono);
+    font-size: clamp(1.8rem, 5vw, 2.5rem);
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    line-height: 1.15;
+    text-wrap: balance;
+    margin: 0 0 0.9rem;
+  }
+  .standfirst { font-size: 1rem; color: var(--ink-soft); margin: 0; }
+
+  section.part {
+    border-top: 1.5px solid var(--ink);
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+  }
+  .sec-label {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.35rem;
+  }
+  h2 {
+    font-family: var(--mono);
+    font-size: 1.3rem;
+    font-weight: 500;
+    line-height: 1.35;
+    text-wrap: balance;
+    margin: 0 0 1rem;
+  }
+  h3 {
+    font-family: var(--mono);
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 2.4rem 0 0.7rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--rule);
+    word-break: break-word;
+  }
+  section.part > h3:first-of-type { border-top: none; padding-top: 0; }
+  h3 .tag {
+    font-weight: 400;
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+    margin-left: 0.5rem;
+  }
+
+  p { margin: 0 0 0.95rem; }
+  strong { font-weight: 700; }
+  ul, ol { margin: 0 0 0.95rem; padding-left: 1.25rem; }
+  li { margin-bottom: 0.4rem; }
+  li::marker { color: var(--muted); }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    padding: 0.05em 0.32em;
+    border-radius: 2px;
+    word-break: break-word;
+  }
+
+  .ex {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 0.75rem 1rem;
+    margin: 0.8rem 0 1.2rem;
+    font-size: 0.93rem;
+  }
+  .ex::before {
+    content: "例";
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 2px;
+    padding: 0 0.35rem;
+    margin-right: 0.55rem;
+    vertical-align: 0.1em;
+  }
+  .ex p { display: inline; margin: 0; }
+  .ex code { background: var(--ground); }
+
+  figure {
+    margin: 1.4rem 0 1.6rem;
+    padding: 1.1rem 1.1rem 0.8rem;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    overflow-x: auto;
+  }
+  figure svg { display: block; max-width: 100%; height: auto; color: var(--ink); }
+  figcaption {
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-top: 0.6rem;
+    line-height: 1.6;
+  }
+
+  .scroll { overflow-x: auto; max-width: 100%; margin: 0 0 1.2rem; }
+  table { border-collapse: collapse; width: 100%; min-width: 28rem; font-size: 0.88rem; }
+  th, td { text-align: left; vertical-align: top; padding: 0.45rem 0.9rem 0.45rem 0; border-bottom: 1px solid var(--rule); }
+  th {
+    font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500;
+    border-bottom: 1px solid var(--ink); white-space: nowrap;
+  }
+  td.ev { font-family: var(--mono); font-size: 0.82rem; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  footer {
+    border-top: 1.5px solid var(--ink);
+    margin-top: 3rem; padding-top: 1.1rem;
+    font-family: var(--mono); font-size: 0.7rem;
+    letter-spacing: 0.06em; color: var(--muted);
+  }
+
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (max-width: 62rem) {
+    .layout { grid-template-columns: 1fr; gap: 0; }
+    nav.toc {
+      position: static;
+      max-height: none;
+      padding: 2rem 0 0;
+      border-bottom: 1px solid var(--rule);
+      margin-bottom: 0.5rem;
+      columns: 2;
+      column-gap: 2rem;
+    }
+    nav.toc ol { break-inside: avoid; }
+    header.masthead { padding-top: 1.5rem; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc" aria-label="目錄">
+  <p class="toc-title">導覽</p>
+  <ol>
+    <li><a href="#overview">〇 這是什麼</a></li>
+  </ol>
+  <p class="group">hooks（物理層）</p>
+  <ol>
+    <li><a href="#hooks-intro">一 五支 hook 總覽</a></li>
+    <li><a href="#h-session"><code>session-start</code></a></li>
+    <li><a href="#h-classify"><code>classify-task</code></a></li>
+    <li><a href="#h-protect"><code>protect-paths</code></a></li>
+    <li><a href="#h-breaker"><code>tool-breaker</code></a></li>
+    <li><a href="#h-gate"><code>verify-final-review</code></a></li>
+  </ol>
+  <p class="group">rules（判斷層）</p>
+  <ol>
+    <li><a href="#rules-intro">二 五份 rule 總覽</a></li>
+    <li><a href="#r-workflow"><code>kit-workflow</code></a></li>
+    <li><a href="#r-delegation"><code>kit-delegation</code></a></li>
+    <li><a href="#r-judgment"><code>kit-judgment</code></a></li>
+    <li><a href="#r-evolution"><code>kit-evolution</code></a></li>
+    <li><a href="#r-manifest"><code>project-manifest</code></a></li>
+  </ol>
+  <p class="group">其餘</p>
+  <ol>
+    <li><a href="#docs">三 檢核表（docs）</a></li>
+    <li><a href="#skills">四 skills 與 agents</a></li>
+    <li><a href="#deploy">五 安裝與回饋迴路</a></li>
+    <li><a href="#limits">六 能力邊界</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<header class="masthead">
+  <p class="eyebrow">multi-agent starter kit · v4.10.0</p>
+  <h1>Kit 機制導讀</h1>
+  <p class="standfirst">
+    逐檔說明這套 kit 的每個機制：它在防什麼失敗、怎麼防、防不到的部分交給誰。
+    每一段都從一個具體場景開始——先看到問題，再認識機制的名字。
+  </p>
+</header>
+
+<!-- ================================================================ -->
+<section class="part" id="overview">
+  <p class="sec-label">Overview</p>
+  <h2>〇、這是什麼</h2>
+
+  <p>
+    同時用 Claude 跟 Codex 寫程式的人，很快會發現自己在做一份新工作：把 Claude 寫的 plan
+    複製給 Codex 審、把 Codex 的意見整理好貼回 Claude、再把改完的 code 複製過去審一次。
+    AI 沒有協作，是<strong>你</strong>在當訊息路由器。
+  </p>
+  <p>
+    這套 kit 解決的就是這件事：Claude 當指揮官（決策、派工、驗收）、Superpowers 負責規劃與實作、
+    Codex 負責審查——你只描述任務、approve plan。但讓多個 AI 自動協作之後，馬上撞到第二個問題，
+    而它才是這套 kit 大部分機制的來源：
+  </p>
+  <p>
+    <strong>長時間工作的模型會退化。</strong>它會忘記幾小時前讀過的規則、會把「我改了檔案」
+    說成「我完成了任務」、會拿三小時前的測試結果替剛剛才改的 code 背書。規則寫得再好，
+    它迷航之後照樣讀過就忘。所以防線不能只是「寫規則給它讀」——要分三層，強度由弱到強：
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 720 220" role="img" aria-label="三層防線：prompt 層靠模型讀得進，context 層延緩迷航，harness 層是不靠模型記憶的物理防線">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M1 1L9 5L1 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </marker>
+      </defs>
+      <g font-size="13" font-family="inherit">
+        <!-- layer 1 -->
+        <rect x="20" y="20" width="200" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="120" y="42" text-anchor="middle" font-weight="700">Prompt 層</text>
+        <text x="120" y="60" text-anchor="middle" font-size="11" opacity="0.75">rules · 檢核表 · 派工模板</text>
+        <!-- layer 2 -->
+        <rect x="260" y="20" width="200" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="360" y="42" text-anchor="middle" font-weight="700">Context 層</text>
+        <text x="360" y="60" text-anchor="middle" font-size="11" opacity="0.75">誰讀什麼 · compact 重錨定</text>
+        <!-- layer 3 -->
+        <rect x="500" y="20" width="200" height="52" rx="3" fill="none" stroke="var(--accent)" stroke-width="2"/>
+        <text x="600" y="42" text-anchor="middle" font-weight="700" fill="var(--accent)">Harness 層</text>
+        <text x="600" y="60" text-anchor="middle" font-size="11" opacity="0.75">hooks · Stop gate · 所有權</text>
+        <!-- strength axis -->
+        <line x1="30" y1="110" x2="690" y2="110" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+        <text x="360" y="132" text-anchor="middle" font-size="11" opacity="0.75">防線強度：由弱到強</text>
+        <!-- failure conditions -->
+        <text x="120" y="168" text-anchor="middle" font-size="11">失效條件：</text>
+        <text x="120" y="186" text-anchor="middle" font-size="11">模型迷航後讀過就忘</text>
+        <text x="360" y="168" text-anchor="middle" font-size="11">失效條件：</text>
+        <text x="360" y="186" text-anchor="middle" font-size="11">仍靠模型配合派工</text>
+        <text x="600" y="168" text-anchor="middle" font-size="11" fill="var(--accent)">deterministic：</text>
+        <text x="600" y="186" text-anchor="middle" font-size="11" fill="var(--accent)">模型記不記得都會執行</text>
+      </g>
+    </svg>
+    <figcaption>三層防線。左邊兩層依賴模型的清醒程度，最右層是 hook——不管模型狀態如何都照跑。</figcaption>
+  </figure>
+
+  <p>
+    哪條規則該放哪層，有一句可操作的判準：<strong>「這條規則被違反時，能被物理偵測嗎？」</strong>
+    能——做成 hook，用程式擋；不能——寫進 rules，並誠實接受它只有 prompt 級的強度。
+    接下來整份文件就照這個分層走：先講五支 hook（物理層），再講五份 rule（判斷層），
+    最後是檢核表、skills、安裝機制與能力邊界。
+  </p>
+  <p>
+    還有一條貫穿全部的信念，值得先說：<strong>審查的人必須跟寫的人是不同模型。</strong>
+    這是踩過坑才立的——早期版本用兩個 subagent（一個寫、一個審）看起來很 multi-agent，
+    實際上是同一個模型分兩次呼叫，同樣的盲點審不出來。現在 reviewer 由環境變數
+    <code>KIT_PROFILE</code> 決定：<code>full</code> 用 codex 跨模型審；沒有 codex 的環境用
+    <code>solo</code>，降級成乾淨狀態的 Claude 自審，但模型必須主動告訴你「跨模型隔離已關閉」——
+    誠實的降級，不是假裝沒事。
+  </p>
+</section>
+
+<!-- ================================================================ -->
+<section class="part" id="hooks-intro">
+  <p class="sec-label">.claude/hooks/ · 物理層</p>
+  <h2>一、五支 hook</h2>
+  <p>
+    Hook 是掛在 Claude Code 事件上的 bash 腳本。Claude Code 的一個 session 只有五個時點
+    允許外部程式介入，kit 每個時點都放了東西：
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 760 260" role="img" aria-label="session 時間軸與五支 hook 的掛載點：session 開始、每輪 prompt、工具調用前、工具失敗後、turn 結束">
+      <defs>
+        <marker id="ah2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M1 1L9 5L1 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </marker>
+      </defs>
+      <g font-size="12" font-family="inherit">
+        <!-- timeline -->
+        <line x1="30" y1="120" x2="730" y2="120" stroke="currentColor" stroke-width="1.5" marker-end="url(#ah2)"/>
+        <!-- loop arc: Stop back to prompt -->
+        <path d="M 640 132 Q 430 210 236 132" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4" marker-end="url(#ah2)"/>
+        <text x="438" y="196" text-anchor="middle" font-size="11" opacity="0.7">每輪循環</text>
+
+        <!-- point 1 -->
+        <circle cx="80" cy="120" r="4" fill="currentColor"/>
+        <text x="80" y="100" text-anchor="middle" font-weight="700">session 開始</text>
+        <text x="80" y="52" text-anchor="middle" font-family="var(--mono)" font-size="11">session-start</text>
+        <text x="80" y="68" text-anchor="middle" font-size="10.5" opacity="0.75">廣播環境 · 記基準</text>
+        <text x="80" y="82" text-anchor="middle" font-size="10.5" opacity="0.75">compact 後重錨定</text>
+
+        <!-- point 2 -->
+        <circle cx="232" cy="120" r="4" fill="currentColor"/>
+        <text x="232" y="100" text-anchor="middle" font-weight="700">每輪 prompt</text>
+        <text x="232" y="52" text-anchor="middle" font-family="var(--mono)" font-size="11">classify-task</text>
+        <text x="232" y="68" text-anchor="middle" font-size="10.5" opacity="0.75">注入判斷提醒</text>
+        <text x="232" y="82" text-anchor="middle" font-size="10.5" opacity="0.75">拍本輪快照</text>
+
+        <!-- point 3 -->
+        <circle cx="400" cy="120" r="5" fill="var(--accent)"/>
+        <text x="400" y="100" text-anchor="middle" font-weight="700" fill="var(--accent)">工具調用前</text>
+        <text x="400" y="38" text-anchor="middle" font-family="var(--mono)" font-size="11">protect-paths</text>
+        <text x="400" y="54" text-anchor="middle" font-family="var(--mono)" font-size="11">tool-breaker</text>
+        <text x="400" y="70" text-anchor="middle" font-size="10.5" fill="var(--accent)">唯一能擋下動作的時點</text>
+        <text x="400" y="84" text-anchor="middle" font-size="10.5" opacity="0.75">禁區 · 熔斷 · 管道守衛</text>
+
+        <!-- point 4 -->
+        <circle cx="540" cy="120" r="4" fill="currentColor"/>
+        <text x="540" y="100" text-anchor="middle" font-weight="700">工具失敗後</text>
+        <text x="540" y="52" text-anchor="middle" font-family="var(--mono)" font-size="11">tool-breaker</text>
+        <text x="540" y="68" text-anchor="middle" font-size="10.5" opacity="0.75">失敗太密 → 警示</text>
+        <text x="540" y="82" text-anchor="middle" font-size="10.5" opacity="0.75">（已跑完，擋不了）</text>
+
+        <!-- point 5 -->
+        <circle cx="656" cy="120" r="5" fill="var(--accent)"/>
+        <text x="656" y="100" text-anchor="middle" font-weight="700" fill="var(--accent)">turn 結束</text>
+        <text x="656" y="52" text-anchor="middle" font-family="var(--mono)" font-size="11">verify-final-review</text>
+        <text x="656" y="68" text-anchor="middle" font-size="10.5" fill="var(--accent)">可 block：review gate</text>
+        <text x="656" y="82" text-anchor="middle" font-size="10.5" opacity="0.75">未審的帳在這裡結</text>
+
+        <!-- bottom labels -->
+        <text x="80" y="242" text-anchor="middle" font-size="10.5" opacity="0.6">只能注入 / 記錄</text>
+        <text x="232" y="242" text-anchor="middle" font-size="10.5" opacity="0.6">只能注入 / 記錄</text>
+        <text x="400" y="242" text-anchor="middle" font-size="10.5" fill="var(--accent)">deny / ask</text>
+        <text x="540" y="242" text-anchor="middle" font-size="10.5" opacity="0.6">只能警示</text>
+        <text x="656" y="242" text-anchor="middle" font-size="10.5" fill="var(--accent)">block</text>
+      </g>
+    </svg>
+    <figcaption>一個 session 的時間軸與五個掛載點。藍色兩點是有牙齒的：工具調用前可以拒絕（deny），turn 結束時可以擋下（block）；其餘時點只能注入資訊或留紀錄。</figcaption>
+  </figure>
+
+  <p>
+    五支共同的個性：機器上沒有 <code>jq</code> 就整組靜默停用（防線不該變成新的環境問題）；
+    每支都有 user-only 的開關（如 <code>KIT_PROTECT=off</code>），而且 hook 讀的是 Claude Code
+    <strong>啟動時</strong>的環境變數——模型自己在 Bash 裡 export 沒有作用，開關只有人按得動。
+  </p>
+
+  <!-- ---------------------------------------------------------- -->
+  <h3 id="h-session">session-start.sh <span class="tag">session 開始 · resume · compact 後</span></h3>
+  <p>
+    一個常見的災難時刻：session 太長，context 被壓縮（compact）了。模型的記憶變成一份摘要——
+    它還記得「我在做匯出功能」，但 plan 裡「phase 3 不要動 schema」這種細節已經被壓掉了。
+    最危險的是，<strong>它不知道自己忘了</strong>，會憑摘要繼續動手。
+  </p>
+  <p>
+    這支 hook 在 session 開始時做三件事。前兩件是鋪路：<strong>廣播環境資訊</strong>
+    （現在是什麼 profile、codex 裝了沒——用指令實測，不是猜——以及本 session 專屬的狀態檔路徑，
+    模型沒有其他辦法知道自己的 session id）；<strong>記下 git 基準點</strong>（現在的 commit 與
+    工作樹指紋，之後 review gate 全靠這個基準算「這個 session 到底改了什麼」）。
+  </p>
+  <p>
+    第三件事對付開頭那個災難：偵測到這次啟動是 compact 或 resume，就多注入一段強制指令——
+    動任何檔案之前，先重讀 CLAUDE.md 的禁區、重讀進行中的 plan、用一句話說出自己在哪個 phase。
+    結尾一句寫死：<strong>「以上不准依賴你被摘要過的記憶，去重讀檔案。」</strong>
+    在模型最不可能自己想到要重讀的時刻，由 hook 替它想到。
+  </p>
+
+  <!-- ---------------------------------------------------------- -->
+  <h3 id="h-classify">classify-task.sh <span class="tag">每輪 prompt</span></h3>
+  <p>
+    把規則寫在 session 開頭，就像把規定貼在公佈欄：貼的時候大家都看了，兩小時後沒人記得。
+    對長 session 的模型也一樣——開頭載入的規則，幾萬 token 之後注意力早就不在上面了。
+  </p>
+  <p>
+    這支 hook 的解法樸素但有效：<strong>每一輪都重新提醒一次</strong>。你每送出一個 prompt，
+    它就在後面附上一行約 40 token 的提醒——宣告完成要有執行證據、能驗證的主張直接去驗證、
+    未確認的問題不算 finding、改動會作廢先前的測試綠燈。內容是固定的，發送是確定性的，
+    跟模型記不記得無關。
+  </p>
+  <p>
+    它還負責聽懂你的覆寫指令：說「直接做」就跳過完整流程，說「走完整流程」就啟動全套。
+    只認這種祈使句——你<strong>沒說</strong>的時候它什麼都不注入，任務該多大交給模型自己判斷。
+    早期版本用關鍵字猜任務大小（提到 button 就當小任務），猜得比模型自己判斷還差，整組刪掉了。
+  </p>
+  <div class="ex"><p>有一次使用者抱怨「模型一直在走完整流程」——這句話裡有「完整流程」四個字，被當成指令誤觸發了。修法：比對前先把「一直在」這類描述語境遮罩掉。<strong>描述工作流的句子不是指令。</strong></p></div>
+
+  <!-- ---------------------------------------------------------- -->
+  <h3 id="h-protect">protect-paths.sh <span class="tag">工具調用前 · 改檔案時</span></h3>
+  <p>
+    你在 CLAUDE.md 寫了「<code>src/legacy/payment/</code> 很脆弱，不要動」。清醒的模型會遵守；
+    迷航的模型會在某個瞬間覺得「我小心一點改應該沒事」。文字規則擋不住一個已經說服自己的模型。
+  </p>
+  <p>
+    所以禁區同時存在兩份：CLAUDE.md 的文字給人讀，<code>.claude/protected-paths</code> 的路徑清單
+    給這支 hook 執行。模型要編輯的檔案命中清單，<strong>直接拒絕</strong>，不進入討論。
+    路徑先做過正規化——想用 <code>src/../.claude/settings.json</code> 這種寫法繞路徑比對，繞不過去。
+  </p>
+  <p>
+    它還保護第二種東西：kit 自己的規則檔。模型要改 <code>.claude/</code> 底下的 rules、hooks、
+    settings 時，跳出視窗<strong>問你</strong>。為什麼是問而不是直接擋？因為你在場時，一鍵就能放行
+    自己真的要求過的修改；而你不在場時——沒有人能按核准，「問」就自動變成「擋」。
+    一個決定，兩種情境都對。
+  </p>
+  <div class="ex"><p>背後的威脅模型值得知道：長期運作的模型會在「優化」的名義下，把擋住自己的規則越改越軟。所以規則檔的修改權不在執行規則的模型手上——想改，要在 kit repo 改好再鋪回來（見<a href="#deploy">第五節</a>）。</p></div>
+
+  <!-- ---------------------------------------------------------- -->
+  <h3 id="h-breaker">tool-breaker.sh <span class="tag">工具調用前 + 工具失敗後</span></h3>
+  <p>
+    模型卡住的時候，畫面通常長這樣：同一個指令、同樣的參數，跑第一次失敗，再跑一次，又失敗，
+    再跑一次……每次都期待不同的結果。這不是 debug，是抽獎——而且每抽一次都在燒 context，
+    讓它離清醒更遠。
+  </p>
+  <p>
+    這支 hook 是熔斷器：連續第三次「工具名 + 參數完全相同」的調用，直接拒絕，並在拒絕訊息裡
+    要求它先用一句話診斷「前兩次為什麼失敗」，再換個真正不同的做法。輪詢類工具（本來就該重複查）
+    豁免。另一個方向：如果最近的調用裡失敗太密集（12 次裡壞 3 次），它會在失敗後警告
+    「停止盲目重試，先診斷」——這個時點工具已經跑完，只能勸，不能擋。
+  </p>
+  <p>
+    v4.10 在這支 hook 裡加了一條專門的守衛，攔一種特別陰險的指令形狀：
+  </p>
+  <div class="ex"><p><code>pytest | grep -v warning && git commit</code>——看起來是「跑測試、過濾雜訊、通過就 commit」。但這條管道的成敗看的是 <strong>grep</strong> 的結束碼，不是 pytest 的：<strong>測試全紅，整行照樣是綠的，然後就 commit 出去了</strong>。全機隊 13 個專案有 10 個踩過這種「驗證管道說謊」，其中一個專案同一天踩三次，才立了這條物理攔截。修法寫在拒絕訊息裡：測試裸跑、綠了再 commit，或加 <code>set -o pipefail</code>。</p></div>
+  <p>
+    最後，它替每一次工具調用留一行日誌（只記參數的雜湊值，不記內容，免得洩漏 secret）。
+    這份日誌是事後審計的底稿——「session 是從什麼時候開始崩的」「這個 review 真的跑過嗎」
+    都從這裡查。
+  </p>
+
+  <!-- ---------------------------------------------------------- -->
+  <h3 id="h-gate">verify-final-review.sh <span class="tag">turn 結束 · 500 行，最複雜的一支</span></h3>
+  <p>
+    一個 session 下來，模型寫了三百行業務邏輯，說「完成了」。誰審過這些 code？——如果答案是
+    「沒有人」，這正是 kit 最想擋的結局。但也不能矯枉過正：改兩行 typo 也要跑一次五分鐘的
+    跨模型 review，工具會煩到沒人想用。
+  </p>
+  <p>
+    這支 Stop hook 是整套 kit 的守門員，在每個 turn 結束時算一次帳。它的規則設計成
+    「小事放過、大事必審、想賴帳留痕」：
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 740 300" role="img" aria-label="review gate 的決策流程：變更累積，小改放行但帳繼續記，破檻時三選一，敏感路徑只能 review 或使用者同意">
+      <defs>
+        <marker id="ah3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M1 1L9 5L1 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </marker>
+      </defs>
+      <g font-size="12" font-family="inherit">
+        <!-- start -->
+        <rect x="20" y="30" width="170" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="105" y="49" text-anchor="middle" font-weight="700">turn 結束</text>
+        <text x="105" y="66" text-anchor="middle" font-size="10.5" opacity="0.75">用 git 算累積未審變更</text>
+
+        <!-- small -->
+        <line x1="190" y1="53" x2="248" y2="53" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah3)"/>
+        <rect x="252" y="30" width="190" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="347" y="49" text-anchor="middle">≤150 行、≤8 檔？</text>
+        <text x="347" y="66" text-anchor="middle" font-size="10.5" opacity="0.75">（測試檔不計）</text>
+
+        <!-- pass but keep tab -->
+        <line x1="442" y1="53" x2="500" y2="53" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah3)"/>
+        <text x="470" y="44" text-anchor="middle" font-size="10.5">是</text>
+        <rect x="504" y="30" width="216" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="612" y="49" text-anchor="middle">放行，但帳<tspan font-weight="700">繼續累積</tspan></text>
+        <text x="612" y="66" text-anchor="middle" font-size="10.5" opacity="0.75">基準點不動 → 切香腸沒用</text>
+
+        <!-- crossing -->
+        <line x1="347" y1="76" x2="347" y2="128" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah3)"/>
+        <text x="362" y="106" font-size="10.5">否（破檻）</text>
+        <rect x="242" y="132" width="210" height="46" rx="3" fill="none" stroke="var(--accent)" stroke-width="2"/>
+        <text x="347" y="151" text-anchor="middle" font-weight="700" fill="var(--accent)">block：一次三選一</text>
+        <text x="347" y="168" text-anchor="middle" font-size="10.5" opacity="0.75">只攔一次，不每輪碎念</text>
+
+        <!-- three options -->
+        <line x1="280" y1="178" x2="150" y2="222" stroke="currentColor" stroke-width="1" marker-end="url(#ah3)"/>
+        <line x1="347" y1="178" x2="347" y2="222" stroke="currentColor" stroke-width="1" marker-end="url(#ah3)"/>
+        <line x1="414" y1="178" x2="544" y2="222" stroke="currentColor" stroke-width="1" marker-end="url(#ah3)"/>
+
+        <rect x="52" y="226" width="190" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="147" y="245" text-anchor="middle" font-weight="700">review</text>
+        <text x="147" y="262" text-anchor="middle" font-size="10.5" opacity="0.75">/kit-review 寫入證據行</text>
+
+        <rect x="262" y="226" width="170" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="347" y="245" text-anchor="middle" font-weight="700">defer（先欠著）</text>
+        <text x="347" y="262" text-anchor="middle" font-size="10.5" opacity="0.75">再長 150 行就重問</text>
+
+        <rect x="452" y="226" width="200" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="552" y="245" text-anchor="middle" font-weight="700">skip（說明理由）</text>
+        <text x="552" y="262" text-anchor="middle" font-size="10.5" opacity="0.75">理由留審計，會被抽查</text>
+
+        <!-- sensitive floor -->
+        <text x="360" y="296" text-anchor="middle" font-size="11" fill="var(--danger)">敏感路徑（auth / payment / migration / 禁區）：不能 defer、不能 skip——只有 review 或使用者親口同意</text>
+      </g>
+    </svg>
+    <figcaption>review gate 的一輪。關鍵在「放行但帳繼續累積」：基準點不推進，所以連續十次 20 行的小改，破檻那一次的 review 涵蓋整批。</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>小改放行，但帳繼續記</strong>：累積 ≤150 行、≤8 個業務檔就放行——但基準點不動。想靠「每次只改一點點」永遠躲在門檻下？累積到破檻那次，review 的範圍是<strong>整批</strong>。測試檔不算在額度內：測試是驗證產物不是業務邏輯，曾經有一次 19 行的樣式調整因為連動三個測試檔而被罰跑跨模型 review——越認真補測試越容易被罰，誘因反了，所以修掉。</li>
+    <li><strong>破檻時只攔一次，給三個出口</strong>：現在就 review、先欠著（功能寫到一半，審了也是審半成品）、或說明理由跳過（丟棄式腳本真的不用審）。早期版本破檻後<strong>每一輪都攔</strong>，結果撞上 Claude Code 的天花板——連續 8 次 Stop block 會被強制放行，gate 自己失效還沒人知道。一個會被撞穿的門，比沒有門更危險。</li>
+    <li><strong>敏感路徑沒有出口</strong>：批次裡碰到 auth、payment、migration 或禁區，不能欠、不能跳、小改額度也無效——只有真的 review 或你親口同意能結清。</li>
+    <li><strong>證據制</strong>：gate 只認 <code>/kit-review</code> 真的跑完 review 之後寫入的證據行。模型想 touch 一個空的 marker 檔騙過關？不算數。它自己判斷跳過的每一次，都要寫下理由存檔，事後可以對照實際 diff 抽查。</li>
+    <li><strong>壞掉時往嚴的方向壞</strong>：git 掃描失敗、基準檔損毀——一律當「有帳未結」處理。防線故障的後果是多審一次，不是漏審一批。</li>
+  </ul>
+</section>
+
+<!-- ================================================================ -->
+<section class="part" id="rules-intro">
+  <p class="sec-label">.claude/rules/ · 判斷層</p>
+  <h2>二、五份 rule</h2>
+  <p>
+    Hook 擋得住的都是機械可判定的事：路徑命中清單、調用完全相同、行數超過門檻。
+    但「這個任務該派給誰」「這句話算不算完成」需要判斷——判斷沒辦法寫成 if-else，
+    只能寫成規則讓模型讀。這就是 rules：五份 markdown，每個 session 自動載入。
+  </p>
+  <p>
+    因為每個 session 都要載，它們是一筆固定的 context 稅，所以有硬預算：目前 19,615 bytes，
+    上限 20,480，由測試把關——<strong>想加新規則，先精簡舊的騰出空間</strong>。
+  </p>
+
+  <!-- ---------------------------------------------------------- -->
+  <h3 id="r-workflow">kit-workflow.md <span class="tag">誰來審、多大的事走多大的流程</span></h3>
+  <p>
+    先回到那面承重牆。v2 時代的架構是兩個 subagent：codex-coder 寫、codex-reviewer 審——
+    有寫的、有審的、有完整的 review 報告，看起來無懈可擊。直到發現審查從來沒抓到過該抓的問題：
+    <strong>那是同一個模型分兩次呼叫</strong>，它寫 code 時的盲點，換個名字再看一次還是盲點。
+  </p>
+  <p>
+    這份 rule 的上半部就是在保護「審的人 ≠ 寫的人」：full profile 用 codex 審 Claude 寫的 code；
+    codex 掛掉時<strong>不准靜默改成自己審</strong>，要嘛回報等使用者決定，要嘛明講「跨模型隔離
+    已關閉」再降級。連反向也有規定：codex 代寫的 code 不能再叫 codex 審——繞一圈回到同模型自審。
+  </p>
+  <p>
+    下半部管流程大小。原則是別讓儀式吃掉生產力：小任務（幾個檔、幾十行、不碰 schema/auth/payment）
+    直接做、自己驗證、簡單回報；feature 級以上才走「先寫 plan → 審 plan → 你 approve → 動工」；
+    大型或高風險（新依賴、migration、沒做過的架構）再加前置研究與更兇的對抗式審查。
+  </p>
+  <div class="ex"><p>「幫我把按鈕文字改成『匯出』」——直接改，不會觸發十分鐘的 brainstorming 儀式。「幫我加一個訂閱付費功能」——先出 plan，plan 先被 codex 審一輪，你點頭才開始寫。</p></div>
+
+  <!-- ---------------------------------------------------------- -->
+  <h3 id="r-delegation">kit-delegation.md <span class="tag">派工與升降級——要產生 subagent 時靠它</span></h3>
+  <p>
+    指揮官（主對話）的 context 是整個系統<strong>唯一不可再生的資源</strong>：它每胖一分，
+    後面每一輪都要重複攜帶，越胖越早被壓縮、越早迷航。這份 rule 整個是在保護這條資源。
+  </p>
+  <p>
+    第一原則：指揮官不下場。它只做決策、架構、派工、驗收、跟你對話——粗重的搜索和大量閱讀
+    派 subagent 去做，髒亂的探索過程留在子對話裡，指揮官只收結論。但也不是什麼都派：
+    派一個 subagent 的成本約等於直接讀幾百行 code 的好幾倍，中等閱讀自己讀更便宜——
+    <strong>別為了儀式感派工</strong>。
+  </p>
+  <div class="ex"><p>唯一的硬規則很具體：<strong>subagent 回報禁止貼超過 20 行 code</strong>，要用「路徑:行號 + 一句結論」。回報裡噴一大段 code 是 context 污染的頭號來源——收到就退回重報，不照單收下。</p></div>
+  <p>
+    第二部分是模型檔位：便宜的模型（haiku/sonnet）做機械性批次和輕量實作，貴的模型做架構和
+    除錯根因。升降級自動走：haiku 出一次錯就換 sonnet 重做；sonnet 同一件事連卡兩次，
+    帶著完整錯誤軌跡升級給主模型——限制的是「沒有新資訊的重複」，不是嘗試次數。
+    一條紅線不許碰：<strong>便宜模型永遠不做 review、驗收、和 auth/payment 的判斷</strong>。
+  </p>
+  <div class="ex"><p>第三部分防一種已知的謊：subagent 回報「已寫入 config.py」，實際上檔案根本不存在——幻覺回報是實測過的失敗模式。所以規定收到「已寫入 X」必須先 <code>ls</code> 或讀檔確認，而且寫 code 的 agent 不得自我宣告完成，驗收由另一個乾淨狀態的 agent 重讀檔案、實跑測試、逐條對驗收條件。</p></div>
+
+  <!-- ---------------------------------------------------------- -->
+  <h3 id="r-judgment">kit-judgment.md <span class="tag">怎麼想、怎麼驗、怎麼報</span></h3>
+  <p>
+    你請 AI 修一個 bug。它改了兩個檔案，回你一句「修好了」。但它從頭到尾<strong>沒有跑過程式</strong>
+    ——「修好了」這句話的全部根據，是它自己剛剛打的字。
+  </p>
+  <p>
+    這就是 kit-judgment 要管的事。模型天生會把「我做了改動」說成「我完成了任務」，
+    這份規則逼它把兩件事分開：跑過、親眼看到輸出正確，才准說 fixed；沒跑過，只能說
+    「改了，還沒驗證」（changed but not verified）。
+  </p>
+  <p>
+    八條規則全是這個精神的變體，挑三條最常救場的：
+  </p>
+  <div class="ex"><p>測試跑過、全綠，模型接著又改了幾行 code——舊的綠燈還算數嗎？不算，那次測試驗的是<strong>改動前</strong>的 code。可是模型很愛引用它：「測試都通過了，一切正常。」這條叫 stale-green reset：改動一發生，之前的綠燈作廢，重跑才算數。</p></div>
+  <div class="ex"><p>你叫模型「檢查這段 code 有沒有問題」，它找不到問題，但又覺得空手回報不好意思，就湊了三條「這裡<em>可能</em>有效能疑慮」的未驗證猜測。這份規則明文說：<strong>沒驗證的警告本身就是一個錯誤</strong>——它替收報告的人製造假工作。找不到問題的正確回報是「已檢查 X/Y/Z，未發現」。</p></div>
+  <div class="ex"><p>模型寫「這個改動應該會快很多」。「應該」？這是一分鐘內能實測的事——這份規則的要求是直接去測，回報「3.4s → 0.06s，實測」。<strong>可驗證的主張上掛著『應該』，代表你跳過了一個便宜的測試。</strong></p></div>
+  <p>
+    還記得 classify-task 每輪注入的那行提醒嗎？內容就是這八條的濃縮——規則本體在這裡，
+    每輪的提醒是它的鬧鐘。
+  </p>
+
+  <!-- ---------------------------------------------------------- -->
+  <h3 id="r-evolution">kit-evolution.md <span class="tag">誰可以改規則本身</span></h3>
+  <p>
+    設想一個長期運作的模型，某天發現 review gate 老是擋它。從它的視角看，這是個「可以優化的摩擦」
+    ——把門檻放寬一點、把措辭改軟一點，工作就順了。這不是科幻：<strong>被規則管的智能體去改規則，
+    是制度腐化最自然的路徑</strong>，人類組織如此，模型也一樣。
+  </p>
+  <p>
+    所以這份 rule 的第一句話就是權限表：規則檔、hooks、skills——模型一律不可自行修改
+    （protect-paths hook 在物理層執法）；想改，向使用者說明理由，在 kit repo 改好、測過，
+    再鋪回所有專案。禁區清單只有一個方向可以走：<strong>模型可以自己加嚴（新增禁區），
+    放寬任何一條都要使用者親口同意。</strong>
+  </p>
+  <p>
+    第二部分管 kit 自己的演化品質：改規則要有收據。新增一條措辭前，先重現它要防的失敗
+    （重現不了，就代表你不知道自己在修什麼——不加）；再證明加上之後行為真的翻轉。
+    連<strong>刪</strong>規則都要證據：先做 A/B 確認拿掉不會退化，而且被刪的條目若在真實 session
+    再犯，就升回來。
+  </p>
+  <div class="ex"><p>捕捉到模型的失敗藉口時，要求<strong>逐字記錄</strong>原話（例如「我小心一點改應該沒事」），不准改寫轉述——因為改寫會丟掉觸發詞，下次就認不出同一個藉口了。</p></div>
+
+  <!-- ---------------------------------------------------------- -->
+  <h3 id="r-manifest">project-manifest.md <span class="tag">專案狀態的機器可讀化</span></h3>
+  <p>
+    你有十六個專案。半年後回來，想知道三件事：這個專案現在到哪了？怎麼啟動它？
+    它每個月在燒我多少錢？——去哪查？翻 git log 拼湊？憑記憶？
+  </p>
+  <p>
+    Kit 的答案是每個專案放一份 <code>PROJECT.toml</code>：狀態、起始指令、付費服務，機器可讀。
+    維護不靠你記得——這份 rule 讓每個專案的 AI session 在狀態改變時<strong>順手更新</strong>它。
+    跨專案的 <code>proj</code> 指令據此彙總成總覽（<code>proj money</code> 只看誰在燒錢）。
+  </p>
+  <div class="ex"><p>欄位有嚴格的字數上限（狀態欄兩段、各 60 字），這個數字有來歷：上限還只是「保持簡潔」的文字建議時，<strong>12 個專案有 11 個違反</strong>，最誇張的把整份成本調查塞進狀態欄。每次違反的藉口都是「這個細節很重要」——它重要，但 dashboard 是掃一眼用的，不是筆記本。加上可機械檢查的數字、讓 <code>proj</code> 對超標發警告，才管住。<strong>沒有數字的規範，等於沒有規範。</strong></p></div>
+</section>
+
+<!-- ================================================================ -->
+<section class="part" id="docs">
+  <p class="sec-label">.claude/docs/ · 需要時才讀</p>
+  <h2>三、兩份檢核表</h2>
+  <p>
+    有些判斷力沒必要每個 session 都載入，但在特定時刻價值連城——卡關的時候、要宣告完成的時候、
+    要刪資料的時候。這兩份檔案平常不佔 context，靠 CLAUDE.md 的路由表在對的情境被翻開，
+    內容是把高階模型的直覺寫成可以照表比對的檢核表。
+  </p>
+
+  <h3>judgment-matrix.md <span class="tag">卡關、被打回、要宣告完成時讀</span></h3>
+  <p>
+    五張表。R1 教它認出「該停止原地重試」的信號（同一個錯修兩次還在、修 A 壞 B 修 B 又壞 A）；
+    R2 定義「真正完成」的五個勾（檔案真的存在、測試真的跑過且輸出原文附上、驗收條件逐條對照…）；
+    R3 列出六種「停下來問人」的時刻；R5 是一張藉口對照表——左欄是模型的原話，右欄是現實。
+  </p>
+  <div class="ex"><p>R5 的條目長這樣：「測試大概會過」→ 現實：「大概」是猜測，跑，或標 unverified。「Edit 成功了，所以完成了」→ 現實：Edit 證明你打了字，跑過再說完成。這些左欄全是真實 session 逐字抓下來的。</p></div>
+  <div class="ex"><p>R4 管一個特別的類別：品味。無人值守時模型必須替錯誤訊息選語氣（俏皮還是正式？）——沒有測試能裁決這種事。規則：選最保守的，並在報告裡標 <code>TASTE-DECISION</code>、附上被放棄的選項等你覆核。<strong>禁止讓品味選擇隱形地混進交付。</strong></p></div>
+
+  <h3>verification-signals.md <span class="tag">S1–S8，命中哪節讀哪節</span></h3>
+  <p>
+    八個「迴圈裡天生缺驗證信號」的領域。共同的病：模型優化的是「看起來合理的輸出」，
+    而這幾個場景恰好沒有便宜的信號告訴它「其實不對」——美感沒被看過、成本沒被查過、
+    驗證器本身壞了沒人知道。每節做一件事：把缺的信號補進迴圈。
+  </p>
+  <div class="ex"><p>S1（UI）：改完頁面沒截圖 = 「視覺上未驗證」——「樣式已按 spec 調整完成」跟「測試大概會過」是同一句藉口的視覺版。S2（schema）：每個欄位要列得出<strong>今天</strong>就會讀它的 query，「以後會用到」不是讀取路徑。S7（部署）：localhost 回 200 與對外網址回 502 可以同時為真——驗證要發生在使用者看得到的終點。S8（不可逆操作）：刪資料前的備份要先在隔離環境還原演練過——<strong>能 parse ≠ 能 restore</strong>，空的備份檔也能 parse 成功。</p></div>
+</section>
+
+<!-- ================================================================ -->
+<section class="part" id="skills">
+  <p class="sec-label">.claude/skills/ + agents/</p>
+  <h2>四、Skills 與 Agents</h2>
+  <p>
+    Skills 是模型可以調用的標準操作，agents 是預先定義好的 subagent 角色。這裡的設計重點只有一個：
+    <strong>能寫進結構的約束，不要用叮嚀的。</strong>
+  </p>
+  <p>
+    <strong>kit-dispatch</strong>（派工前用）：五種任務的填空模板，強制帶齊目標背景、驗收條件、
+    回報格式。為什麼判斷規則要寫死在模板裡？因為實測發現 subagent 只繼承 session
+    <strong>啟動時</strong>的規則快照——中途更新的規則到不了它。模板是規則唯一保證送達的載體。
+  </p>
+  <p>
+    <strong>kit-review</strong>（要審查時用）：跑符合 profile 的 review，跑完寫入證據行——
+    就是 review gate 唯一承認的那張通行證。<strong>kit-skip-review</strong>（決定不審時用）：
+    使用者說跳過，要記下<strong>逐字原話</strong>當審計（不准是模型希望你說過的改寫）；
+    模型自判跳過，要附理由與範圍，敏感批次無效。
+  </p>
+  <p>
+    <strong>research-scout</strong>（研究員 agent）：工具清單只有搜尋和讀取——<strong>沒有寫檔工具，
+    「研究員跑去寫 code」在權限層就不可能發生</strong>，不是靠 prompt 叮嚀它別寫。
+    <strong>solo-reviewer</strong>（solo profile 的審查員 agent）：跟寫的人同模型，提供的不是
+    跨模型隔離，而是乾淨狀態——沒看過產出這段 code 的 session、不帶它的任何假設，從 diff
+    重新推導意圖。它的協定裡也有那條「不准湊 findings」：驗證不了的疑慮只能放進 unverified
+    註記，不准報成問題。
+  </p>
+</section>
+
+<!-- ================================================================ -->
+<section class="part" id="deploy">
+  <p class="sec-label">init.sh · tests/ · LESSONS</p>
+  <h2>五、安裝與回饋迴路</h2>
+  <p>
+    十六個專案各有一份 <code>.claude/</code>，規則改了一條，要怎麼讓十六份同步？人肉複製貼上
+    十六次？三個月後每個專案的規則都長得不一樣——這叫 drift，是多專案部署的慢性死因。
+  </p>
+  <p>
+    Kit 的解法是<strong>檔案所有權二分</strong>：<code>.claude/</code> 整套屬於 kit（kit-owned），
+    要客製就改 kit repo，跑 <code>init.sh --update</code> 一鍵鋪回所有專案；CLAUDE.md、
+    PROJECT.toml、禁區清單屬於專案（user-owned），更新<strong>永不覆蓋</strong>。
+    誰擁有哪個檔案不是君子協定——protect-paths hook 在物理層執法。
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 720 240" role="img" aria-label="回饋迴路：kit repo 經 init.sh 鋪進 16 個專案，專案的 LESSONS 踩坑紀錄聚類後回流成 kit 的新防線">
+      <defs>
+        <marker id="ah4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M1 1L9 5L1 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </marker>
+      </defs>
+      <g font-size="12" font-family="inherit">
+        <rect x="30" y="80" width="180" height="70" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="120" y="108" text-anchor="middle" font-weight="700">kit repo</text>
+        <text x="120" y="126" text-anchor="middle" font-size="10.5" opacity="0.75">規則 · hooks · 測試</text>
+
+        <line x1="210" y1="100" x2="490" y2="100" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah4)"/>
+        <text x="350" y="90" text-anchor="middle" font-size="11" font-family="var(--mono)">init.sh --update</text>
+        <text x="350" y="118" text-anchor="middle" font-size="10.5" opacity="0.7">kit-owned 檔案覆蓋鋪回</text>
+
+        <rect x="494" y="66" width="196" height="98" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="592" y="94" text-anchor="middle" font-weight="700">16 個專案</text>
+        <text x="592" y="112" text-anchor="middle" font-size="10.5" opacity="0.75">.claude/ = kit-owned</text>
+        <text x="592" y="128" text-anchor="middle" font-size="10.5" opacity="0.75">CLAUDE.md / TOML = user-owned</text>
+        <text x="592" y="150" text-anchor="middle" font-size="10.5" opacity="0.75">各自累積 LESSONS.md</text>
+
+        <path d="M 592 164 Q 592 216 380 216 Q 150 216 128 154" fill="none" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#ah4)"/>
+        <text x="368" y="206" text-anchor="middle" font-size="11" fill="var(--accent)">踩坑紀錄聚類 → 有收據才立新防線</text>
+
+        <text x="350" y="36" text-anchor="middle" font-size="11" opacity="0.7">改規則只有一個方向：kit repo 改好、測過，才鋪出去</text>
+      </g>
+    </svg>
+    <figcaption>部署與回饋是一個迴路：規則從 kit repo 單向鋪出去；教訓從各專案的 LESSONS 回流，聚類成收據，才變成 kit 的新防線。</figcaption>
+  </figure>
+
+  <p>
+    右半邊那條回流的線值得展開。每個專案都在累積 <code>LESSONS.md</code>——四行一條的踩坑紀錄
+    （什麼情境、錯誤原文、怎麼解的、一句預防規則），寫入時機是「同一個坑踩第二次之前」。
+    這些紀錄不只是筆記，它們是 kit 演化的<strong>原料</strong>：
+  </p>
+  <div class="ex"><p>v4.10 那條「測試接管道」的物理攔截怎麼來的？掃了全機隊 85 條 LESSONS、聚成 11 類，發現「驗證管道說謊」這一類有 10 個專案踩過——統計證據出現，才立這條 hook。<strong>先有失敗、再有收據、才有機制</strong>，順序從不顛倒。</p></div>
+  <p>
+    最後是 kit repo 自己的品質防線：2,199 行的測試，是 hooks 本體（1,043 行）的兩倍。
+    Review gate 的每個場景都用合成的 git repo 重放過，包括歷次事故的原始形狀——修過的坑，
+    有測試釘著不讓它回來。
+  </p>
+</section>
+
+<!-- ================================================================ -->
+<section class="part" id="limits">
+  <p class="sec-label">Limits</p>
+  <h2>六、能力邊界</h2>
+  <p>
+    最後這段是 kit 自己文件裡明文寫著的「做不到的事」——放在報告裡不是示弱，
+    是這套設計最誠實的部分。
+  </p>
+  <p>
+    <strong>Bash 是邊門。</strong>protect-paths 攔的是編輯工具；模型用 <code>sed -i</code> 改檔案，
+    攔不住。為什麼不解析 Bash 指令來攔？誤報率太高（多少正常指令長得像在寫檔），
+    寧可不攔、留日誌，事後審計。
+  </p>
+  <p>
+    <strong>防偽是摩擦，不是密碼學。</strong>持有 Bash 的模型理論上可以偽造證據行、改寫基準檔——
+    所有防線的真正定位是：<strong>讓誠實的路比造假的路省力，讓造假留下可交叉比對的不一致</strong>
+    （宣稱審過了，日誌裡卻沒有 review 的調用紀錄——實錘）。最後一層防線是人對日誌的定期抽查。
+  </p>
+  <p>
+    <strong>品味救不了。</strong>好不好看、取什麼名字、文案的語氣——沒有 gate 能裁決，
+    沒有檢核表能代替。所以規則是：模型不拍板，給選項、標記、等人。
+  </p>
+  <p>
+    這三條邊界正好收回開頭那句判準：「被違反時能被物理偵測嗎？」——能偵測的，上面五支 hook
+    都做了；不能偵測的，五份 rule 誠實地承擔 prompt 級的強度；連 rule 都管不住的，
+    明文寫下來，交回給人。<strong>知道自己防不住什麼的防線，才是可信的防線。</strong>
+  </p>
+</section>
+
+<footer>
+  multi-agent-starter v4.10.0 · 依 hooks / rules / docs / skills / agents 逐檔實讀撰寫
+</footer>
+
+</main>
+</div>
+
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+  var map = {};
+  links.forEach(function (a) {
+    var id = a.getAttribute('href').slice(1);
+    map[id] = a;
+  });
+  var targets = Object.keys(map).map(function (id) { return document.getElementById(id); }).filter(Boolean);
+  var activeId = null;
+  function setActive(id) {
+    if (id === activeId) return;
+    activeId = id;
+    links.forEach(function (a) { a.classList.remove('active'); });
+    if (map[id]) map[id].classList.add('active');
+  }
+  function onScroll() {
+    var line = window.innerHeight * 0.25;
+    var current = targets[0] ? targets[0].id : null;
+    for (var i = 0; i < targets.length; i++) {
+      if (targets[i].getBoundingClientRect().top <= line) current = targets[i].id;
+    }
+    if (current) setActive(current);
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
+</script>
+</body>
+</html>
