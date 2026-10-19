@@ -18,6 +18,8 @@
 # repository. When ls-remote fails, the whole history of the pushed refs is
 # scanned (slower, never weaker). Deleting a remote ref is never blocked.
 # kit.toml (visibility, allow_*) is read from the pushed tree — what the remote gets.
+# A tip WITHOUT kit.toml whose remote old tip / range boundary / range history had one
+# is still a kit push, and the removal is a BLOCK (user bypass only).
 # Every git call pins its output format explicitly (--no-color, prefixes, --root,
 # --text, --format …): the caller's config cannot blind the scan (final review C2).
 set -uo pipefail
@@ -59,6 +61,11 @@ while read -r lref lsha rref rsha; do
 
     HAS_KIT=0; KT=""
     if KT="$(git show "$c:kit.toml" 2>/dev/null)"; then HAS_KIT=1
+    elif KT="$(guard_kit_toml_before "$D/revs" "${rsha:-}")"; then
+        # the remote's old tip or the pushed history had kit.toml and the tip drops it:
+        # still a kit repo, and the removal itself needs the user's bypass (review O5)
+        HAS_KIT=1
+        guard_add BLOCK "R2 kit.toml-removed" "kit.toml" "the pushed tip drops kit.toml that the remote / the pushed history had — that would switch the local-only path rule (R2) off; if intended, the user runs kit guard bypass"
     elif [[ -n "$TOP" && -f "$TOP/kit.toml" ]]; then HAS_KIT=1; KT=""; fi
     VIS="$(printf '%s\n' "$KT" | privacy_kt_visibility)"
     ALLOW_LITS="$(printf '%s\n' "$KT" | privacy_kt_privacy_array allow_literals)"

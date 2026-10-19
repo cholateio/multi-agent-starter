@@ -736,6 +736,39 @@ printf 'p '"$HP"'/otheruser/x\nq zz-spaced-literal\n' > "$F8/m3.txt"; git -C "$F
 has  "F-M3: multi-line usernames array is enforced" "$CO" "[R3 local-path] m3.txt:1"
 has  "F-M3: '[[ literal ]]' header is enforced" "$CO" "[R4 personal-literal] m3.txt:2"
 mv "$PRIV.bak" "$PRIV"; git -C "$F8" reset -q m3.txt
+# ============================================================ G. review round (Codex x Fable adjudication)
+echo "--- G. review-round fixes"
+# O5: removing kit.toml must not switch R2 off
+G1="$W/g1"; pushrepo "$G1" public noproj
+git -C "$G1" rm -q kit.toml; mkdir -p "$G1/docs/plans"; echo p > "$G1/docs/plans/p.md"; git -C "$G1" add -f docs/plans/p.md; cmt "$G1"
+eq   "G-O5: commit that drops kit.toml + adds docs/plans → blocked (kit.toml read from HEAD)" "$CC" "1"
+has  "G-O5: …R2 on the plan" "$CO" "[R2 forbidden-path] docs/plans/p.md"
+has  "G-O5: …and a kit.toml-removed warning" "$CO" "[R2 kit.toml-removed]"
+git -C "$G1" rm -q --cached docs/plans/p.md; cmt "$G1"
+eq   "G-O5: dropping kit.toml alone commits (warned)" "$CC" "0"
+has  "G-O5: …with the warning" "$CO" "WARN [R2 kit.toml-removed]"
+git -C "$G1" add -f docs/plans/p.md; nc "$G1"
+psh "$G1" "" origin main
+eq   "G-O5: push of a tip without kit.toml (remote had it) → blocked" "$PC" "1"
+has  "G-O5: …kit.toml removal is a BLOCK at push" "$PO" "BLOCKED [R2 kit.toml-removed] kit.toml"
+has  "G-O5: …and R2 still runs tree-wide" "$PO" "[R2 forbidden-path] docs/plans/p.md"
+eq   "G-O5: …remote unchanged" "$(git -C "$G1.git" rev-parse main)" "$(git -C "$G1" rev-parse HEAD~2)"
+psh "$G1" "" origin main:newbr
+eq   "G-O5: new branch (no remote old tip) whose range drops kit.toml → blocked" "$PC" "1"
+has  "G-O5: …found via the range" "$PO" "[R2 kit.toml-removed]"
+G2="$W/g2"; newrepo "$G2" public noproj; git -C "$G2" rm -q kit.toml; nc "$G2"; echo x >> "$G2/README.md"; git -C "$G2" add README.md; nc "$G2"
+rm -rf "$G2.git"; git init -q --bare "$G2.git"; git -C "$G2" remote add origin "$G2.git"
+psh "$G2" "" origin main
+eq   "G-O5: first push of a history whose root had kit.toml → blocked" "$PC" "1"
+G3="$W/g3"; pushrepo "$G3" none noproj; echo y >> "$G3/README.md"; git -C "$G3" add README.md; nc "$G3"
+psh "$G3" "" origin main
+eq   "G-O5: a repo that never had kit.toml pushes normally" "$PC" "0"
+RID="$(printf '%s' "$G1" | sha1sum | cut -c1-12)"
+BO="$(cd "$G1" && script -qec "$KIT guard bypass 'retire kit here'" /dev/null 2>&1)"
+git -C "$G1" rm -q --cached docs/plans/p.md; nc "$G1"
+psh "$G1" "" origin main
+eq   "G-O5: a user bypass lets an intended kit.toml removal through" "$PC" "0"
+
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1

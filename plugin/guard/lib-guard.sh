@@ -59,6 +59,23 @@ guard_r2_match() {  # $1 has_kit (0/1)  $2 repo-relative path
     esac
 }
 
+# guard_kit_toml_before <revs-file> <rsha>: print the kit.toml the remote's old tip,
+# a boundary commit of the pushed range, or any commit inside the range carried;
+# return 1 when none did (the repo never was a kit repo on this path).
+guard_kit_toml_before() {
+    local revs="$1" rsha="${2:-}" b cand
+    if [[ -n "$rsha" && ! "$rsha" =~ ^0+$ ]] && git cat-file -e "${rsha}^{commit}" 2>/dev/null \
+       && git show "$rsha:kit.toml" 2>/dev/null; then return 0; fi
+    while IFS= read -r b; do
+        git show "$b:kit.toml" 2>/dev/null && return 0
+    done < <(git rev-list --boundary --stdin < "$revs" 2>/dev/null | sed -n 's/^-//p' | head -n 50)
+    while IFS= read -r cand; do
+        git show "$cand:kit.toml" 2>/dev/null && return 0
+        git show "$cand^:kit.toml" 2>/dev/null && return 0
+    done < <(git log --format=%H --no-renames --stdin -- kit.toml < "$revs" 2>/dev/null | head -n 50)
+    return 1
+}
+
 guard_gitleaks_bin() {  # the pinned install (kit doctor --install) wins over PATH (final review I4)
     local g
     [[ -x "${HOME:-/nonexistent}/.local/bin/gitleaks" ]] && { echo "$HOME/.local/bin/gitleaks"; return 0; }

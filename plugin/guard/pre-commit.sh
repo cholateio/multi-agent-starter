@@ -7,7 +7,8 @@
 #   R3–R7 privacy rules on the ADDED lines of the staged diff (lib-privacy.sh)
 #
 # Deletions always pass (`git rm --cached PROJECT.toml` is the fix, not a leak).
-# kit.toml is read from the index (what is being committed), else the work tree.
+# kit.toml is read from the index (what is being committed), else HEAD (a commit that
+# drops it is still a kit commit, with a warning), else the work tree.
 # Binary files (NUL bytes) skip the content rules; no .gitattributes (in-tree,
 # .git/info, core.attributesFile) can mark text as binary to hide it (--text).
 # R1 runs gitleaks over the same hardened stream (lib-guard guard_scan).
@@ -17,6 +18,10 @@ guard_init pre-commit
 
 HAS_KIT=0; KT=""
 if KT="$(git show :kit.toml 2>/dev/null)"; then HAS_KIT=1
+elif KT="$(git show HEAD:kit.toml 2>/dev/null)"; then
+    # this commit drops kit.toml: it is still a kit repo for THIS commit (review O5)
+    HAS_KIT=1
+    guard_add WARN "R2 kit.toml-removed" "kit.toml" "this commit removes kit.toml — R2 still applies here, and the push will be BLOCKED unless the user runs kit guard bypass"
 elif [[ -n "$TOP" && -f "$TOP/kit.toml" ]]; then KT="$(cat "$TOP/kit.toml")"; HAS_KIT=1; fi
 VIS=""; ALLOW_LITS=""; ALLOW_PATHS=""
 if [[ $HAS_KIT -eq 1 ]]; then
