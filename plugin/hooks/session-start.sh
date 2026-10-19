@@ -6,8 +6,8 @@
 #   1. Inject dynamic kit context into the session: active KIT_PROFILE,
 #      reviewer availability, kit version, and this session's
 #      review-marker paths. Claude cannot know its own session_id any other
-#      way — the /kit-review and /kit-skip-review skills rely on this
-#      broadcast to write their evidence lines to the right marker files.
+#      way — the /kit:review and /kit:skip-review skills rely on this
+#      broadcast (v5: also exported as $KIT_SESSION_ID) to write their evidence lines to the right marker files.
 #   2. Record the review-gate baseline that verify-final-review.sh checks:
 #      line1 = HEAD at session start (closes the "committed changes are
 #      invisible to git status" blind spot), line2 = a content hash of the
@@ -36,7 +36,7 @@ CWD=$(cd "$CWD" 2>/dev/null && pwd || echo "")
 # v5 activation gate: silent unless the project root carries kit.toml
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 PROJ=$(kit_project_root) || exit 0
-PROFILE="${KIT_PROFILE:-full}"
+PROFILE=$(kit_profile)   # KIT_PROFILE env > ~/.config/kit/config.toml > full
 
 # Content-addressed snapshot of the working tree (tracked + untracked,
 # .gitignore honored): stage everything into a throwaway index and hash it.
@@ -70,7 +70,25 @@ if [[ -n "$CWD" && ! -f "$BASELINE_FILE" ]] && cd "$CWD" 2>/dev/null \
 fi
 
 # --- dynamic context ---
-KIT_VERSION=$(cut -d' ' -f1 "$CWD/.claude/kit-version" 2>/dev/null || echo "unknown")
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)}"
+KIT_VERSION=$(jq -r '.version // empty' "$PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null)
+KIT_VERSION="${KIT_VERSION:-unknown}"
+VISIBILITY=$(kit_toml_scalar "$PROJ" visibility)
+if PROTECTED_LIST=$(kit_toml_protected "$PROJ" 2>/dev/null); then
+    PROTECTED_N=$(printf '%s' "$PROTECTED_LIST" | grep -c . 2>/dev/null)
+else
+    PROTECTED_N="MALFORMED (protect-paths enforces nothing; run: kit doctor)"
+fi
+[[ -n "$(git config --global core.hooksPath 2>/dev/null)" ]] && GUARD_HP="set" || GUARD_HP="UNSET"
+command -v gitleaks >/dev/null 2>&1 && GUARD_GL="ok" || GUARD_GL="MISSING"
+
+# Export the session id for /kit:review and /kit:skip-review (the text
+# broadcast below stays as the fallback). CLAUDE_ENV_FILE is sourced by
+# Claude Code, so only a plain token is ever written to it.
+if [[ -n "${CLAUDE_ENV_FILE:-}" && "$SESSION_ID" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    grep -qxF "export KIT_SESSION_ID=$SESSION_ID" "$CLAUDE_ENV_FILE" 2>/dev/null \
+        || echo "export KIT_SESSION_ID=$SESSION_ID" >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
+fi
 if [[ "$PROFILE" == "full" ]]; then
     command -v codex >/dev/null 2>&1 && CODEX="available" || CODEX="MISSING"
     TOOLS="reviewer=codex(${CODEX})"
@@ -81,12 +99,15 @@ fi
 CONTEXT="KIT_CONTEXT (multi-agent kit ${KIT_VERSION})
 - Active profile: ${PROFILE} — ${TOOLS}
 - Stop-gate files for THIS session (a bare touch NEVER passes the gate — each needs its evidence line, and only the named skill writes it):
-  - cross-model review done:  /tmp/claude-codex-reviewed-${SESSION_ID}   (written by /kit-review)
-  - solo self-review done:    /tmp/claude-reviewed-${SESSION_ID}   (written by /kit-review)
-  - gate skip flag:           /tmp/claude-skip-review-${SESSION_ID}   (written by /kit-skip-review — model-judged skips allowed for non-sensitive batches, audited; sensitive/protected batches remain USER-only)
+  - cross-model review done:  /tmp/claude-codex-reviewed-${SESSION_ID}   (written by /kit:review)
+  - solo self-review done:    /tmp/claude-reviewed-${SESSION_ID}   (written by /kit:review)
+  - gate skip flag:           /tmp/claude-skip-review-${SESSION_ID}   (written by /kit:skip-review — model-judged skips allowed for non-sensitive batches, audited; sensitive/protected batches remain USER-only)
   - defer file (v4.9):        /tmp/claude-kit-defer-${SESSION_ID}   (mid-flight batch: gate re-asks every 150 lines; sensitive batches cannot defer)
-- Use /kit-review to run the profile-correct review (it records the evidence marker).
-- Workflow rules: .claude/rules/ (auto-loaded: kit-workflow, kit-delegation, kit-evolution, kit-judgment, project-manifest)."
+- Use /kit:review to run the profile-correct review (it records the evidence marker).
+- Workflow rules: injected above as KIT_RULES[core] and KIT_RULES[judgment] (plugin hook; not in .claude/rules anymore)
+- Plugin root: ${PLUGIN_ROOT}
+- Project: kit.toml visibility=${VISIBILITY:-unset} protected=${PROTECTED_N}
+- Guard: hooksPath=${GUARD_HP} gitleaks=${GUARD_GL}"
 
 # RE-ANCHOR: compact/resume are when a drifting model is most dangerous —
 # the plan details and no-touch zones were just squeezed out of context.
@@ -95,7 +116,7 @@ if [[ "$SOURCE" == "compact" || "$SOURCE" == "resume" ]]; then
     CONTEXT="${CONTEXT}
 
 RE-ANCHOR (context was just ${SOURCE}ed — memory of this session is lossy now). BEFORE the next file modification:
-1. Re-read CLAUDE.md 'Project-specific constraints' (the no-touch zones).
+1. Re-read AGENTS.md (project constraints) and kit.toml [protected] (the no-touch zones).
 2. Re-read the active plan / progress doc if one exists (docs/plans/, docs/specs/, .superpowers/).
 3. State in ONE sentence which phase you are in and which files are already DONE — completed work is off-limits unless the plan says otherwise.
 Do not rely on your summarized memory for any of the above — re-read the files."
