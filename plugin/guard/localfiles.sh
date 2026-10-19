@@ -69,6 +69,7 @@ LF_BLOB_RE='^(PROJECT\.toml|CLAUDE\.local\.md|docs/LESSONS\.md|docs/plans/.+|doc
 LF_MAX_BYTES=$((8 * 1024 * 1024))
 LF_MAX_FILES=2000
 LF_TRASH_KEEP=5
+LF_ASIDE_KEEP=3
 
 TOP="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 [[ -n "$TOP" ]] || exit 0
@@ -391,6 +392,15 @@ prune() {  # store entries gone from the work tree while HEAD does not track the
     return 0
 }
 
+# lf_prune_aside: keep the newest LF_ASIDE_KEEP set-aside stores of this path (names sort by their
+# timestamp) — each is a full copy of an earlier clone's local-only files; prints how many it deleted
+lf_prune_aside() {
+    local a n=0
+    local -a all=()
+    mapfile -t all < <(for a in "$STORE".aside.*; do [[ -d "$a" && ! -L "$a" ]] && printf '%s\n' "$a"; done | sort)
+    while [[ $((${#all[@]} - n)) -gt $LF_ASIDE_KEEP ]]; do rm -rf -- "${all[$n]}"; n=$((n + 1)); done
+    echo "$n"
+}
 # fresh_clone: the initial checkout of a new clone / worktree at a path that already has a store
 # (an earlier clone's — the store is keyed by path). Nothing here was deleted by the owner: never trash.
 fresh_clone() {
@@ -411,10 +421,12 @@ fresh_clone() {
         return 0
     fi
     # another repository, or a store from an older kit that recorded no remote: set it aside whole
-    t="$(date +%Y%m%dT%H%M%S)"; aside="$STORE.aside.$t"
-    while [[ -e "$aside" ]]; do aside="$aside.$$"; done
+    t="$(date +%Y%m%dT%H%M%S%N 2>/dev/null)"; [[ "$t" =~ ^[0-9]{8}T[0-9]{15}$ ]] || t="$(date +%Y%m%dT%H%M%S)000000000"
+    aside="$STORE.aside.$t"
+    while [[ -e "$aside" || -L "$aside" ]]; do aside="$aside.$$"; done
     if mv "$STORE" "$aside" 2>/dev/null; then
-        echo "kit: this path had a local-only store from an earlier clone ($([[ -n "$rec" ]] && echo "of $(lf_id_shown "$rec")" || echo "remote unknown")) — not applied to this clone and nothing trashed: kept whole at $aside (copy back from its files/ what you want) — see: kit guard status" >&2
+        local gone; gone="$(lf_prune_aside)"
+        echo "kit: this path had a local-only store from an earlier clone ($([[ -n "$rec" ]] && echo "of $(lf_id_shown "$rec")" || echo "remote unknown")) — not applied to this clone and nothing trashed: kept whole at $aside (copy back from its files/ what you want$([[ "$gone" -gt 0 ]] && echo "; deleted $gone older set-aside store(s) of this path, the newest $LF_ASIDE_KEEP are kept")) — see: kit guard status" >&2
         snapshot
     else
         echo "kit: this path has a local-only store from an earlier clone that could not be set aside ($STORE) — not applied to this clone; see: kit guard status" >&2
@@ -471,10 +483,12 @@ restore() {  # $1 = previous HEAD (may be empty), $2… = more commits the opera
 }
 
 trash_note() {  # `kit guard status`: what the owner deleted is still recoverable — say where
-    local a
+    local a gone
+    gone="$(lf_prune_aside)"
+    [[ "$gone" -gt 0 ]] && echo "kit: deleted $gone older set-aside store(s) of an earlier clone at this path (only the newest $LF_ASIDE_KEEP are kept)" >&2
     for a in "$STORE".aside.*; do   # stores of an earlier clone at this path, set aside (v5.0.2)
-        [[ -d "$a" ]] || continue
-        echo "kit: a local-only store of an earlier clone at this path was set aside (another or unknown remote): $a — $(find "$a/files" \( -type f -o -type l \) 2>/dev/null | wc -l | tr -d ' ') file(s) in its files/; copy back what you want, then delete it" >&2
+        [[ -d "$a" && ! -L "$a" ]] || continue
+        echo "kit: a local-only store of an earlier clone at this path was set aside (another or unknown remote): $a — $(find "$a/files" \( -type f -o -type l \) 2>/dev/null | wc -l | tr -d ' ') file(s) in its files/; copy back what you want, then delete it (the newest $LF_ASIDE_KEEP are kept)" >&2
     done
     [[ -d "$STORE/trash" ]] || return 0
     local p g=0

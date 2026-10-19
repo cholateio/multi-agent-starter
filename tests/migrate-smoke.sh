@@ -650,6 +650,24 @@ mv "$R" "$R.d"; git clone -q --no-checkout "$O.git" "$R" 2>/dev/null; CO25="$(g 
 absent "M25d: another repo via --no-checkout: nothing restored" "$R/PROJECT.toml"
 lacks "M25d: …nothing moved to trash" "$CO25" "moved to"
 has "M25d: …the store is set aside (hint)" "$CO25" "kit guard status"
+# ---- M26 (v5.0.2 review, Fable P3-2): only the 3 newest set-aside stores of a path are kept
+R="$W/m26"; ST26="$(stkey "$R")"; OUT26=""
+for i in 1 2 3 4 5; do
+  if [ $((i % 2)) = 1 ]; then SRC="$W/m24.git"; else SRC="$O.git"; fi
+  OUT26="$OUT26$(git clone -q "$SRC" "$R" 2>&1)"
+  printf 'name = "m26-%s"\n' "$i" > "$R/PROJECT.toml"; (cd "$R" && bash "$LF" snapshot 2>/dev/null)
+  [ $i -lt 5 ] && mv "$R" "$R.$i"
+done
+eq "M26: 5 alternating clones at one path → 3 set-aside stores kept" "$(ls -d "$ST26".aside.* 2>/dev/null | wc -l | tr -d ' ')" "3"
+has "M26: …the clone that went over says it deleted the oldest" "$OUT26" "deleted 1 older set-aside store"
+has "M26: …the newest set-aside store is the 4th clone's" "$(cat "$(ls -d "$ST26".aside.* | sort | tail -n 1)/files/PROJECT.toml" 2>/dev/null)" "m26-4"
+mkdir -p "$ST26.aside.19990101T000000/files" "$ST26.aside.19990101T000001/files"
+echo old > "$ST26.aside.19990101T000000/files/PROJECT.toml"
+GS="$(cd "$R" && python3 "$KIT_ROOT/bin/kit" guard status 2>&1)"
+has "M26: kit guard status reports the pruning" "$GS" "deleted 2 older set-aside store"
+eq "M26: …3 kept" "$(ls -d "$ST26".aside.* 2>/dev/null | wc -l | tr -d ' ')" "3"
+absent "M26: …the oldest ones are the ones deleted" "$ST26.aside.19990101T000000"
+has "M26: …and it lists the kept ones" "$GS" "set aside"
 git config --file "$W/gitconfig" --unset core.hooksPath
 
 # ---- M15 (review O8): an owner edit to a file migrate wrote, between --apply and --commit

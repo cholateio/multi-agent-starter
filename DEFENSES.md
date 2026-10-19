@@ -309,6 +309,8 @@ claude 啟動時的環境)。
   父路徑一律不碰),一行說放回了哪些;身分不同或不明(v5.0.1 以前的 store 沒有記錄)→ 什麼都不放回,
   訊息只說「a different remote」或 hosted repo 的 `host/owner/repo`,從不印記錄的 URL,
   整個 store 改名成 `<store>.aside.<時間戳>` 保留,印一行提示 `kit guard status`(它會列出這個目錄)。
+  每個路徑只留**最新 3 個** `.aside.*`(每個都是一整份舊 clone 的本機檔;更舊的刪掉,set aside 那一行與
+  `kit guard status` 都說刪了幾個;v5.0.2 review)。
   之後把同樣的檔 rsync / cp 回來無害:內容相同,下一次快照只是重新 link,不進 `prev/`、不進 trash。
   **放回工作樹的寫法**(v5.0.2 review):暫存檔一律在 store 根目錄下 `mktemp -d` 的目錄裡做,不在工作樹
   留可預測的 `<path>.kit-tmp`(那可能是 owner 追蹤的檔);放進去前再確認目標不存在、父路徑都是真的目錄,
