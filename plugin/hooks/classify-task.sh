@@ -38,6 +38,9 @@ INPUT=$(cat 2>/dev/null || echo '{}')
 # Parsed once, used by the snapshot AND the v4.9 defer reminder below.
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "default"' 2>/dev/null || echo "default")
 CWD=$(echo "$INPUT" | jq -r '.cwd // "."' 2>/dev/null || echo ".")
+# v5 activation gate: silent unless the project root carries kit.toml
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+PROJ=$(kit_project_root) || exit 0
 
 # working_tree_hash: content-addressed snapshot of the working tree, kept in
 # sync with the copies in session-start.sh and verify-final-review.sh.

@@ -45,7 +45,9 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 INPUT=$(cat 2>/dev/null || echo '{}')
 CWD=$(echo "$INPUT" | jq -r '.cwd // "."' 2>/dev/null || echo ".")
-PROJ="${CLAUDE_PROJECT_DIR:-$CWD}"
+# v5 activation gate: silent unless the project root carries kit.toml
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+PROJ=$(kit_project_root) || exit 0
 TARGET=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // ""' 2>/dev/null || echo "")
 [[ -z "$TARGET" ]] && exit 0
 

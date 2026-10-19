@@ -53,6 +53,10 @@ hash_stdin() {
 }
 
 INPUT=$(cat 2>/dev/null || echo '{}')
+CWD=$(echo "$INPUT" | jq -r '.cwd // "."' 2>/dev/null || echo ".")
+# v5 activation gate: silent unless the project root carries kit.toml
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+PROJ=$(kit_project_root) || exit 0
 EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // ""' 2>/dev/null || echo "")
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "default"' 2>/dev/null || echo "default")
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // "unknown"' 2>/dev/null || echo "unknown")

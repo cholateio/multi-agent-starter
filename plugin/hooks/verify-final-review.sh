@@ -57,6 +57,10 @@ PROFILE="${KIT_PROFILE:-full}"
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "default"' 2>/dev/null || echo "default")
 
 PROJECT_DIR=$(echo "$INPUT" | jq -r '.cwd // "."' 2>/dev/null || echo ".")
+# v5 activation gate: silent unless the project root carries kit.toml
+CWD="$PROJECT_DIR"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+PROJ=$(kit_project_root) || exit 0
 cd "$PROJECT_DIR" 2>/dev/null || exit 0
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then

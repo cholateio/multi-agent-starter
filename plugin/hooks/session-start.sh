@@ -33,6 +33,9 @@ SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || echo "start
 CWD=$(echo "$INPUT" | jq -r '.cwd // "."' 2>/dev/null || echo ".")
 # Normalize once — a relative cwd must not get double-applied later.
 CWD=$(cd "$CWD" 2>/dev/null && pwd || echo "")
+# v5 activation gate: silent unless the project root carries kit.toml
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+PROJ=$(kit_project_root) || exit 0
 PROFILE="${KIT_PROFILE:-full}"
 
 # Content-addressed snapshot of the working tree (tracked + untracked,

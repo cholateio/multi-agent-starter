@@ -65,7 +65,7 @@ run_hook() {
   shift 3 2>/dev/null || shift $#
   OUT="$(printf '%s' "$json" | GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$GIT_ID_CFG" \
         HOME="$FAKE_HOME" env KIT_PROFILE="$profile" KIT_PROTECT=on KIT_BREAKER=on \
-        KIT_REVIEW_GATE=on CLAUDE_PROJECT_DIR= CLAUDE_PLUGIN_ROOT="$KIT_ROOT/plugin" "$@" bash "$hook" 2>"$WORK/last-stderr")"
+        KIT_REVIEW_GATE=on KIT=on KIT_CONFIG_HOME= CLAUDE_PROJECT_DIR= CLAUDE_PLUGIN_ROOT="$KIT_ROOT/plugin" "$@" bash "$hook" 2>"$WORK/last-stderr")"
   CODE=$?
   ERR="$(cat "$WORK/last-stderr" 2>/dev/null)"
 }
@@ -88,11 +88,39 @@ git_f() {
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$GIT_ID_CFG" HOME="$FAKE_HOME" git -C "$d" "$@"
 }
 
-# make_repo <dir>: fixture git repo with one initial commit (README.md only)
+# kit_toml_fixture <dir> [protected-entry ...]: v5 activation marker (same
+# shape as the kit's own kit.toml); entries are written one per line.
+kit_toml_fixture() {
+  local d="$1" e; shift
+  {
+    echo '# kit.toml — multi-agent-kit project marker. Kit hooks and git guards activate only when this file exists.'
+    echo 'kit = 5'
+    echo 'visibility = "public"'
+    echo 'license = "MIT"'
+    echo 'readme_lang = "en"'
+    echo 'protected = ['
+    for e in "$@"; do printf '  "%s",\n' "$e"; done
+    echo ']'
+  } > "$d/kit.toml"
+}
+
+# make_plain_repo <dir>: fixture git repo with one initial commit (README.md
+# only) and NO kit.toml — the kit hooks must stay silent there (v5 gate)
+make_plain_repo() {
+  mkdir -p "$1"
+  git_f "$1" init -q -b main
+  echo "fixture" > "$1/README.md"
+  git_f "$1" add -A
+  git_f "$1" commit -q -m "fixture: initial"
+}
+
+# make_repo <dir>: kit-activated fixture repo — README.md + kit.toml in the
+# initial commit (v5: kit.toml is the activation marker)
 make_repo() {
   mkdir -p "$1"
   git_f "$1" init -q -b main
   echo "fixture" > "$1/README.md"
+  kit_toml_fixture "$1"
   git_f "$1" add -A
   git_f "$1" commit -q -m "fixture: initial"
 }
@@ -118,6 +146,93 @@ if jq -e '.hooks | has("SessionStart") and has("UserPromptSubmit") and has("Stop
 else
   fail "h0: hooks.json ships kit hooks enabled with event keys directly" "hooks key missing or missing an event"
 fi
+
+# ===========================================================================
+# A - v5 activation gate (plugin/hooks/lib.sh). The plugin fires in EVERY
+# directory; each hook must stay silent unless the project root carries
+# kit.toml, yield to a half-migrated v4 layout (.claude/kit-version), and
+# honor the user-only KIT=off master switch. Each input below provably
+# produces output in an active project (act-0 controls) so silence means
+# the gate fired, not that the input was inert.
+# ===========================================================================
+RA="$WORK/a-active"; make_repo "$RA"
+RN="$WORK/a-nokit";  make_plain_repo "$RN"
+RV="$WORK/a-v4";     make_repo "$RV"; mkdir -p "$RV/.claude"
+echo "v4.10.0 abcdef0 2026-01-01" > "$RV/.claude/kit-version"
+for d in "$RA" "$RN" "$RV"; do py_lines 200 > "$d/app.py"; done
+
+# act_json <hook> <dir> <sid>: an input that makes <hook> speak in an active project
+act_json() {
+  case "$1" in
+    session-start.sh) printf '{"session_id":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"startup"}' "$3" "$2" ;;
+    classify-task.sh) printf '{"session_id":"%s","cwd":"%s","hook_event_name":"UserPromptSubmit","prompt":"hello there"}' "$3" "$2" ;;
+    protect-paths.sh) printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"%s/.claude/settings.json"}}' "$3" "$2" "$2" ;;
+    tool-breaker.sh)  printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"pytest -q | tail && git commit -m x"}}' "$3" "$2" ;;
+    verify-final-review.sh) printf '{"session_id":"%s","cwd":"%s","hook_event_name":"Stop","stop_hook_active":false}' "$3" "$2" ;;
+  esac
+}
+for h in session-start.sh classify-task.sh protect-paths.sh tool-breaker.sh verify-final-review.sh; do
+  run_hook "$HOOKS/$h" "$(act_json "$h" "$RA" "${SID_PREFIX}-act0-$h")"
+  if [ -n "$OUT" ]; then pass "act-0: $h speaks in an active kit project (control)"; else fail "act-0: $h speaks in an active kit project (control)" "empty stdout, code $CODE"; fi
+  run_hook "$HOOKS/$h" "$(act_json "$h" "$RN" "${SID_PREFIX}-act1-$h")"
+  assert_eq "act-1: $h exit 0 without kit.toml" "$CODE" "0"
+  assert_eq "act-1: $h silent without kit.toml" "$OUT" ""
+  run_hook "$HOOKS/$h" "$(act_json "$h" "$RV" "${SID_PREFIX}-act2-$h")"
+  assert_eq "act-2: $h exit 0 on v4 layout" "$CODE" "0"
+  assert_eq "act-2: $h yields (silent) on v4 layout" "$OUT" ""
+  assert_contains "act-2: $h stderr names the v4 layout" "$ERR" "v4 layout detected"
+  run_hook "$HOOKS/$h" "$(act_json "$h" "$RA" "${SID_PREFIX}-act3-$h")" full KIT=off
+  assert_eq "act-3: $h exit 0 with KIT=off" "$CODE" "0"
+  assert_eq "act-3: $h silent with KIT=off" "$OUT" ""
+done
+# CLAUDE_PROJECT_DIR (session root) wins over a cwd that lacks kit.toml
+run_hook "$HOOKS/session-start.sh" "$(act_json session-start.sh "$RN" "${SID_PREFIX}-act4")" full CLAUDE_PROJECT_DIR="$RA"
+if [ -n "$OUT" ]; then pass "act-4: CLAUDE_PROJECT_DIR with kit.toml activates"; else fail "act-4: CLAUDE_PROJECT_DIR with kit.toml activates" "empty"; fi
+run_hook "$HOOKS/session-start.sh" "$(act_json session-start.sh "$RA" "${SID_PREFIX}-act5")" full CLAUDE_PROJECT_DIR="$RN"
+assert_eq "act-5: CLAUDE_PROJECT_DIR without kit.toml silences" "$OUT" ""
+
+# lib.sh helpers, sourced directly
+LIBT="$WORK/a-lib"; mkdir -p "$LIBT"
+lib_run() { HOME="$FAKE_HOME" KIT_CONFIG_HOME= bash -c 'source "$1/lib.sh"; shift; "$@"' _ "$HOOKS" "$@" 2>"$WORK/lib-stderr"; }
+cat > "$LIBT/kit.toml" <<'EOF'
+kit = 5
+visibility = "public"   # trailing comment on a scalar is fine
+protected = [
+  "src/legacy/*", # inline comment on an entry line is NOT allowed
+]
+EOF
+OUTL="$(lib_run kit_toml_protected "$LIBT")"; RCL=$?
+assert_eq "act-6: kit_toml_protected rejects inline comment (rc 2)" "$RCL" "2"
+assert_eq "act-6: kit_toml_protected prints nothing on inline comment" "$OUTL" ""
+assert_contains "act-6: inline comment diagnosed on stderr" "$(cat "$WORK/lib-stderr")" "kit.toml protected: inline comment"
+assert_eq "act-7: kit_toml_scalar reads visibility" "$(lib_run kit_toml_scalar "$LIBT" visibility)" "public"
+assert_eq "act-7: kit_toml_scalar reads bare int" "$(lib_run kit_toml_scalar "$LIBT" kit)" "5"
+assert_eq "act-7: kit_toml_scalar missing key is empty" "$(lib_run kit_toml_scalar "$LIBT" nosuch)" ""
+assert_eq "act-7: kit_toml_scalar missing file is empty" "$(lib_run kit_toml_scalar "$WORK/nowhere" visibility)" ""
+cat > "$LIBT/kit.toml" <<'EOF'
+kit = 5
+protected = [              # comment on the header line is allowed (template style)
+  # one entry per line
+  "src/legacy/*",
+  'vault/',
+
+  "*.secret"
+]
+[privacy]
+protected = ["not/top/level"]
+EOF
+assert_eq "act-8: kit_toml_protected parses entries (comments, blanks, literal strings)" "$(lib_run kit_toml_protected "$LIBT" | tr '\n' '|')" "src/legacy/*|vault/|*.secret|"
+printf 'kit = 5\nprotected = []\n' > "$LIBT/kit.toml"
+OUTL="$(lib_run kit_toml_protected "$LIBT")"; RCL=$?
+assert_eq "act-8: empty inline array -> no entries, rc 0" "$OUTL|$RCL" "|0"
+printf 'kit = 5\nprotected = [\n  "a/*",\n' > "$LIBT/kit.toml"
+OUTL="$(lib_run kit_toml_protected "$LIBT")"; RCL=$?
+assert_eq "act-8: unterminated array -> rc 2, nothing printed" "$OUTL|$RCL" "|2"
+assert_eq "act-9: kit_profile defaults to full" "$(KIT_PROFILE= lib_run kit_profile)" "full"
+mkdir -p "$FAKE_HOME/.config/kit"; printf 'kit_root = "/x"\nprofile = "solo"\n' > "$FAKE_HOME/.config/kit/config.toml"
+assert_eq "act-9: kit_profile reads ~/.config/kit/config.toml" "$(KIT_PROFILE= lib_run kit_profile)" "solo"
+assert_eq "act-9: KIT_PROFILE env wins over config" "$(KIT_PROFILE=full lib_run kit_profile)" "full"
+rm -rf "$FAKE_HOME/.config/kit"
 
 # ===========================================================================
 # H1 - session-start.sh
@@ -182,6 +297,7 @@ assert_not_contains "h1: solo context has no researcher mention" "$CTX" "researc
 # non-git cwd: still valid JSON, no baseline written
 NONGIT="$WORK/h1-nongit"
 mkdir -p "$NONGIT"
+kit_toml_fixture "$NONGIT"
 SID1C="${SID_PREFIX}-h1c"
 run_hook "$SS" "{\"session_id\":\"${SID1C}\",\"cwd\":\"${NONGIT}\"}"
 assert_eq "h1: non-git exit 0" "$CODE" "0"
@@ -189,14 +305,8 @@ EVT="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.hookEventName // ""' 2>/d
 assert_eq "h1: non-git still emits valid JSON" "$EVT" "SessionStart"
 assert_file_absent "h1: non-git records no baseline" "/tmp/claude-kit-baseline-${SID1C}"
 
-# kit-version surfaces in context when present
-mkdir -p "$R1/.claude"
-echo "v9.9.9 abcdef0 2026-01-01" > "$R1/.claude/kit-version"
-SID1D="${SID_PREFIX}-h1d"
-run_hook "$SS" "{\"session_id\":\"${SID1D}\",\"cwd\":\"${R1}\"}"
-CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
-assert_contains "h1: kit version surfaced" "$CTX" "v9.9.9"
-rm -rf "$R1/.claude"   # keep later fixtures clean
+# (v5) .claude/kit-version no longer feeds the version — it now marks a
+# half-migrated v4 layout and the hooks yield (section A, act-2).
 
 # ===========================================================================
 # H2 - verify-final-review.sh
@@ -565,7 +675,7 @@ rm -f "$BASELINE2T" "$TURNSTART2T" "$CODEX_M2T"
 # project, the kit's own starting state). Plain `git rev-parse HEAD` prints the
 # literal "HEAD" in an unborn repo, so writer and reader must both use the
 # quiet --verify form to agree on the "unborn" sentinel (codex P2, round 3).
-R2U="$WORK/h2-unborn"; mkdir -p "$R2U"; git_f "$R2U" init -q -b main
+R2U="$WORK/h2-unborn"; mkdir -p "$R2U"; git_f "$R2U" init -q -b main; kit_toml_fixture "$R2U"
 SID2U="${SID_PREFIX}-h2u2"
 BASELINE2U="/tmp/claude-kit-baseline-${SID2U}"
 TURNSTART2U="/tmp/claude-kit-turnstart-${SID2U}"
@@ -943,7 +1053,7 @@ fi
 CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
 assert_contains "h3: snapshot side-channel leaves the digest intact" "$CTX" "KIT_JUDGMENT"
 # non-git cwd: no snapshot, no error
-NG="$WORK/h3-nongit-ts"; mkdir -p "$NG"; NG_SID="${SID_PREFIX}-h3ng"
+NG="$WORK/h3-nongit-ts"; mkdir -p "$NG"; kit_toml_fixture "$NG"; NG_SID="${SID_PREFIX}-h3ng"
 run_hook "$CT" "{\"session_id\":\"${NG_SID}\",\"cwd\":\"${NG}\",\"prompt\":\"hi\"}"
 assert_eq "h3: non-git classify still exit 0" "$CODE" "0"
 assert_file_absent "h3: non-git writes no snapshot" "/tmp/claude-kit-turnstart-${NG_SID}"
@@ -1057,10 +1167,8 @@ run_hook "$PP" "$(pp_json "$R4/.claude/rules/kit-workflow.md")"
 assert_eq "h4: kit repo may edit kit-owned files" "$OUT" ""
 run_hook "$PP" "$(pp_json "$R4/src/legacy/deep/pay.py")"
 assert_eq "h4: user zones still enforced inside kit repo" "$(pp_decision)" "deny"
-echo "v9.9.9 abcdef0 2026-01-01" > "$R4/.claude/kit-version"
-run_hook "$PP" "$(pp_json "$R4/.claude/rules/kit-workflow.md")"
-assert_eq "h4: kit-version sentinel overrides lookalike kit repo" "$(pp_decision)" "ask"
-rm -f "$R4/init.sh" "$R4/VERSION" "$R4/.claude/kit-version"; rmdir "$R4/templates"
+# (v5) a .claude/kit-version now makes every hook yield (section A, act-2)
+rm -f "$R4/init.sh" "$R4/VERSION"; rmdir "$R4/templates"
 
 # malformed / empty input -> silent allow
 run_hook "$PP" "{}"
@@ -1071,6 +1179,7 @@ assert_eq "h4: empty input exit 0" "$CODE" "0"
 # H5 - tool-breaker.sh (v4.0 retry-spiral breaker + telemetry)
 # ===========================================================================
 TB="$HOOKS/tool-breaker.sh"
+kit_toml_fixture "$WORK"   # tb_call uses $WORK as cwd: activate the kit there
 
 tb_call() {  # $1 = session-id suffix  $2 = tool_name  $3 = command string
   printf '{"session_id":"%s-%s","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"%s","tool_input":{"command":"%s"}}' \
