@@ -11,13 +11,22 @@
 # core.hooksPath, resolves back to this shim and recurses forever (Phase 0 spike).
 # A repo-local core.hooksPath (husky-style) overrides the global one and this shim
 # never runs there — `kit doctor` / `kit guard status` / `kit audit` (A16) flag it.
+#   post-checkout / post-merge / post-rewrite / post-commit: also keep the repo's
+#     local-only files (PROJECT.toml, docs/LESSONS.md, plans, .claude/) safe across
+#     checkouts of pre-migration commits ($kit_root/plugin/guard/localfiles.sh; best
+#     effort, never changes the hook's exit status).
 HOOK="__HOOK__"
 SELF="${BASH_SOURCE[0]}"
 CFG_DIR="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)"
+CFG="$CFG_DIR/config.toml"
 INPUT=""
 case "$HOOK" in
+    post-checkout|post-merge|post-rewrite|post-commit)
+        KIT_ROOT="$(sed -nE '/^[[:space:]]*\[/q; s/^[[:space:]]*kit_root[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CFG" 2>/dev/null | head -n 1)"
+        LF="$KIT_ROOT/plugin/guard/localfiles.sh"
+        [[ -n "$KIT_ROOT" && -f "$LF" ]] && bash "$LF" "$HOOK" "$@" </dev/null || true
+        ;;
     pre-commit|pre-push)
-        CFG="$CFG_DIR/config.toml"
         KIT_ROOT="$(sed -nE '/^[[:space:]]*\[/q; s/^[[:space:]]*kit_root[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CFG" 2>/dev/null | head -n 1)"
         GUARD="$KIT_ROOT/plugin/guard/$HOOK.sh"
         if [[ -z "$KIT_ROOT" || ! -f "$GUARD" ]]; then

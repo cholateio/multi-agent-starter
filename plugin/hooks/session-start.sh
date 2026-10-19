@@ -71,6 +71,8 @@ fi
 
 # --- dynamic context ---
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)}"
+# refresh the local-only file snapshot (PROJECT.toml, LESSONS, plans, .claude/ — review F3)
+( cd "$PROJ" 2>/dev/null && bash "$PLUGIN_ROOT/guard/localfiles.sh" snapshot ) >/dev/null 2>&1 || true
 KIT_VERSION=$(jq -r '.version // empty' "$PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null)
 KIT_VERSION="${KIT_VERSION:-unknown}"
 VISIBILITY=$(kit_toml_scalar "$PROJ" visibility)

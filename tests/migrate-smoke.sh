@@ -214,6 +214,68 @@ has "M13: owner allow kept in settings.json" "$(cat "$R/.claude/settings.json" 2
 has "M13: invalid local file untouched" "$(cat "$R/.claude/settings.local.json")" '"Bash(x)",]'
 OUT="$(km "$R" --apply)"; has "M13: rerun converges" "$OUT" "nothing to do"
 
+# ---- M14 (review F3): a checkout of a pre-migration ref must not lose local-only files
+# exact reviewer repro, with the kit shims installed under the global hooksPath
+SHD="$KIT_CONFIG_HOME/git-hooks"; mkdir -p "$SHD"
+for h in pre-commit pre-push post-checkout post-merge post-rewrite post-commit; do
+  sed "s/__HOOK__/$h/g" "$KIT_ROOT/plugin/guard/shim.sh" > "$SHD/$h"; chmod 755 "$SHD/$h"
+done
+printf 'kit_root = "%s"\n' "$KIT_ROOT" > "$KIT_CONFIG_HOME/config.toml"
+git config --file "$W/gitconfig" core.hooksPath "$SHD"
+R="$W/m14"; make_v4 "$R"; echo "# mine" > "$R/.claude/skills/my-skill.md"; g "$R" add -A; g "$R" commit -qm mine; g "$R" tag v4-state
+OUT="$(km "$R" --commit)"; CODE=$?
+eq "M14: migrate --commit exit 0" "$CODE" "0"
+has "M14: migrate warns that pre-migration commits still track the local files" "$OUT" "pre-migration commits still TRACK"
+has "M14: …and names the store" "$OUT" "localfiles/"
+echo "edited after migration" >> "$R/PROJECT.toml"; echo "- two (after migration)" >> "$R/docs/LESSONS.md"
+echo "# mine, edited" >> "$R/.claude/skills/my-skill.md"
+CO1="$(cd "$R" && git checkout -q v4-state 2>&1)"
+eq "M14: on the old ref PROJECT.toml is the tracked v4 version" "$(cat "$R/PROJECT.toml")" "$(printf 'name = "proj-a"\nstatus = "active"')"
+has "M14: …and the hook says the owner's copy is kept" "$CO1" "kept in"
+CO2="$(cd "$R" && git checkout -q main 2>&1)"
+has "M14: back on main PROJECT.toml has the post-migration edit" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "edited after migration"
+has "M14: …docs/LESSONS.md too" "$(cat "$R/docs/LESSONS.md" 2>/dev/null)" "two (after migration)"
+exists "M14: …docs/plans/p.md is back" "$R/docs/plans/p.md"
+exists "M14: …docs/superpowers/plans/q.md is back" "$R/docs/superpowers/plans/q.md"
+has "M14: …the owner's own .claude file with its edit" "$(cat "$R/.claude/skills/my-skill.md" 2>/dev/null)" "mine, edited"
+exists "M14: …settings.local.json survived" "$R/.claude/settings.local.json"
+absent "M14: v4 kit files are NOT resurrected (.claude/kit-version)" "$R/.claude/kit-version"
+has "M14: the hook reports the restore" "$CO2" "restored"
+eq "M14: tree clean (restored files are ignored, not tracked)" "$(g "$R" status --porcelain)" ""
+# an editor that saves by rename breaks the hard link; the next commit re-links
+sed -i 's/edited after migration/re-edited by rename-save/' "$R/PROJECT.toml"
+g "$R" commit -q --allow-empty -m "later work"
+(cd "$R" && git checkout -q v4-state 2>/dev/null && git checkout -q main 2>/dev/null)
+has "M14: rename-saved edit survives after the post-commit snapshot" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "re-edited by rename-save"
+# bisect walks old commits too
+(cd "$R" && git bisect start -q main v4-state >/dev/null 2>&1; git bisect reset -q >/dev/null 2>&1)
+has "M14: after a bisect PROJECT.toml is intact" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "re-edited by rename-save"
+# another clone pulls the migration commit: git deletes the files — they come back from the old blob
+RB="$W/m14.git"; git clone -q --bare "$R" "$RB" 2>/dev/null; RC="$W/m14-clone"
+git clone -q "$RB" "$RC" 2>/dev/null; (cd "$RC" && git checkout -q v4-state -B main 2>/dev/null)
+eq "M14: clone starts on the v4 commit with PROJECT.toml tracked" "$(g "$RC" ls-files PROJECT.toml)" "PROJECT.toml"
+(cd "$RC" && git pull -q --ff-only origin main >/dev/null 2>&1)
+eq "M14: after pulling the migration commit PROJECT.toml is untracked" "$(g "$RC" ls-files PROJECT.toml)" ""
+exists "M14: …and still on disk (restored from the previous commit)" "$RC/PROJECT.toml"
+exists "M14: …docs/LESSONS.md too" "$RC/docs/LESSONS.md"
+absent "M14: …but no v4 .claude kit files" "$RC/.claude/kit-version"
+# kit guard status and the session start refresh the snapshot too
+RID14="$(printf '%s' "$R" | sha1sum | cut -c1-12)"
+rm -rf "$W/state/localfiles/$RID14"
+GS="$(cd "$R" && python3 "$KIT_ROOT/bin/kit" guard status 2>&1)"
+exists "M14: kit guard status re-creates the snapshot" "$W/state/localfiles/$RID14/files/PROJECT.toml"
+has "M14: …and reports it" "$GS" "local-only files:"
+rm -rf "$W/state/localfiles/$RID14"
+printf '{"session_id":"m14s","cwd":"%s","hook_event_name":"SessionStart","source":"startup"}' "$R" \
+  | CLAUDE_PLUGIN_ROOT="$KIT_ROOT/plugin" CLAUDE_PROJECT_DIR="$R" bash "$KIT_ROOT/plugin/hooks/session-start.sh" >/dev/null 2>&1
+exists "M14: session start re-creates the snapshot" "$W/state/localfiles/$RID14/files/PROJECT.toml"
+rm -f /tmp/claude-kit-baseline-m14s
+# a repo that is not a kit repo gets no store
+NK="$W/m14-nokit"; g "$W" init -q -b main m14-nokit; echo a > "$NK/a"; g "$NK" add a; g "$NK" commit -qm a; g "$NK" checkout -q -b x
+NKID="$(printf '%s' "$NK" | sha1sum | cut -c1-12)"
+absent "M14: non-kit repo: no localfiles store" "$W/state/localfiles/$NKID"
+git config --file "$W/gitconfig" --unset core.hooksPath
+
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1

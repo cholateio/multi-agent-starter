@@ -142,6 +142,16 @@ def status() -> int:
         print(f"local hooksPath: {local} — OVERRIDDEN: the global kit guard does NOT run in this repo "
               f"(git config --local --unset core.hooksPath; chain your hooks from .git/hooks instead)")
     print(f"bypass: {_bypass_state(key)}")
+    if top:   # refresh the local-only file snapshot (plugin/guard/localfiles.sh; review F3)
+        try:
+            r = subprocess.run(["bash", str(paths.plugin_dir() / "guard" / "localfiles.sh"), "snapshot", "--report"],
+                               cwd=top, capture_output=True, text=True, timeout=60)
+            note = r.stderr.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            note = "snapshot failed"
+        store = paths.state_dir() / "localfiles" / repo_id(top) / "files"
+        if store.is_dir():
+            print(f"local-only files: snapshot in {store}" + (f" — {note}" if note else ""))
     return 0
 
 

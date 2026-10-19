@@ -533,6 +533,28 @@ def _backup(root: Path) -> Path:
     return dest
 
 
+def _snapshot_local(root: Path) -> str:
+    """Hard-link the now-untracked local-only files into the guard's store
+    (plugin/guard/localfiles.sh) so a checkout of a pre-migration commit — which still
+    tracks them — cannot lose them (review F3). Returns the store path."""
+    script = paths.plugin_dir() / "guard" / "localfiles.sh"
+    try:
+        subprocess.run(["bash", str(script), "snapshot"], cwd=root, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    import hashlib
+    top = gitutil.repo_root(root) or root
+    return str(paths.state_dir() / "localfiles" / hashlib.sha1(str(top).encode()).hexdigest()[:12])
+
+
+LOCAL_WARNING = (
+    "note: pre-migration commits still TRACK PROJECT.toml / docs/LESSONS.md / plans / .claude/. Checking one out\n"
+    "  (bisect, an old tag, a worktree of an old ref) overwrites these local files with the old version and\n"
+    "  switching back deletes them. kit's git hooks (kit setup) keep a hard-linked copy in\n"
+    "  {store}/files and put it back on the way out; without the hooks your only copy is the backup above.\n"
+    "  Rewriting history to drop them ends this (design §12 step 6).")
+
+
 def _print(results: list[Result], show_diff: bool):
     for r in results:
         print(f"{r.status} {r.step}" + (f" — {r.detail}" if r.detail else ""))
@@ -608,10 +630,11 @@ def run(args) -> int:
             print("skip commit — nothing staged")
 
     if pending:
+        store = _snapshot_local(root)
         print("\nnext (D18, README is content work — paste into a claude session in this repo):")
         print("  " + README_PROMPT)
-        print("note: history still contains PROJECT.toml / LESSONS / plans if they were ever committed — "
-              "history rewrite is a separate runbook (design §12 step 6).")
+        if gitutil.run_git(root, "log", "-1", "--format=%H", "--", *UNTRACK, check=False).strip():
+            print(LOCAL_WARNING.format(store=store))
     else:
         print("\nnothing to do — already migrated.")
     return 0
