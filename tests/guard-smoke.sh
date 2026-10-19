@@ -876,10 +876,11 @@ G9="$W/g9"; newrepo "$G9" none noproj
 SHA="$(git -C "$G9" rev-parse HEAD)"
 T0=$(date +%s%N)
 PO="$(cd "$G9" && printf 'refs/heads/main %s refs/heads/main %s\n' "$SHA" 0000000000000000000000000000000000000000 \
-      | PATH="$GL_PATH" GIT_SSH_COMMAND="$W/slowssh/ssh" bash "$GUARD/pre-push.sh" origin ssh://kit.invalid/x.git 2>&1)"; PC=$?
+      | PATH="$GL_PATH" GIT_SSH_COMMAND="$W/slowssh/ssh" KIT_GUARD_LS_REMOTE_TIMEOUT=2 KIT_GUARD_LS_REMOTE_RETRY_TIMEOUT=3 \
+        bash "$GUARD/pre-push.sh" origin ssh://kit.invalid/x.git 2>&1)"; PC=$?
 MS=$(( ($(date +%s%N) - T0) / 1000000 ))
-[ "$MS" -lt 9000 ] && pass "G-F8: unreachable push URL gives up quickly (${MS}ms)" || fail "G-F8: ls-remote timeout" "${MS}ms"
-has  "G-F8: …and says it falls back to a full-history scan" "$PO" "scanning the full history"
+[ "$MS" -lt 9000 ] && pass "G-F8: unreachable push URL gives up within its caps, retry included (${MS}ms)" || fail "G-F8: ls-remote timeout" "${MS}ms"
+has  "G-F8: …and says it could not list the push URL, retry included" "$PO" "could not list the refs at the push URL (2s, then 3s)"
 eq   "G-F8: …clean history still passes" "$PC" "0"
 
 # O3/F13: the guard finds gitleaks in config.toml tools_dir (kit setup --bin-dir), off PATH
@@ -1175,6 +1176,66 @@ psh "$P1" "" origin main
 eq   "J1: after git fetch + rebase the push passes" "$PC" "0"
 lacks "J1: …without old-history findings" "$PO" "BLOCKED"
 eq   "J1: …remote has the rebased work" "$(git -C "$P1.git" rev-parse main)" "$(git -C "$P1" rev-parse main)"
+# J2 (review V1): a NEW branch whose push URL cannot be listed (the 5 s cap, then a 15 s retry)
+# has no bound — the whole-history findings (here all long published) are folded into ONE
+# bypassable [R0 remote-unreachable] block, never a list of old R2 / R3 lines
+git -C "$P1" checkout -q -b feature; echo f > "$P1/f.txt"; git -C "$P1" add f.txt; nc "$P1" feature
+glsel "$GL_PATH"
+PO="$(cd "$P1" && PATH="$W/faketo:$GL_PATH" git -c core.hooksPath="$TH" push -q origin feature 2>&1)"; PC=$?
+eq   "J2: new branch, push URL cannot be listed even on the retry → blocked" "$PC" "1"
+has  "J2: …with one remote-unreachable reason" "$PO" "BLOCKED [R0 remote-unreachable] feature"
+eq   "J2: …exactly one block line" "$(printf '%s\n' "$PO" | grep -c 'KIT GUARD BLOCKED')" "1"
+lacks "J2: …no R2 lines about long-published history" "$PO" "BLOCKED [R2 forbidden-path]"
+lacks "J2: …no R3 lines about old commits" "$PO" "BLOCKED [R3 local-path]"
+has  "J2: …names the likely causes" "$PO" "ssh-agent"
+has  "J2: …says what the full scan found" "$PO" "R2 forbidden-path ×"
+has  "J2: …and that the user can bypass it" "$PO" "bypass (user only)"
+eq   "J2: …remote has no feature branch" "$(git -C "$P1.git" rev-parse -q --verify refs/heads/feature)" ""
+mkdir -p "$W/faketo5"; printf '#!/bin/sh\n[ "$3" = 5 ] && exit 124\nshift 3; exec "$@"\n' > "$W/faketo5/timeout"; chmod +x "$W/faketo5/timeout"
+PO="$(cd "$P1" && PATH="$W/faketo5:$GL_PATH" git -c core.hooksPath="$TH" push -q origin feature 2>&1)"; PC=$?
+eq   "J2: the same push when only the first ls-remote times out (the retry works) passes" "$PC" "0"
+lacks "J2: …without any block" "$PO" "BLOCKED"
+eq   "J2: …remote has the feature branch" "$(git -C "$P1.git" rev-parse -q --verify refs/heads/feature)" "$(git -C "$P1" rev-parse feature)"
+git -C "$P1" checkout -q -b feature2; echo g > "$P1/g.txt"; git -C "$P1" add g.txt; nc "$P1" feature2
+BO="$(cd "$P1" && script -qec "$KIT guard bypass 'remote unreachable from the hook'" /dev/null 2>&1)"
+PO="$(cd "$P1" && PATH="$W/faketo:$GL_PATH" git -c core.hooksPath="$TH" push -q origin feature2 2>&1)"; PC=$?
+eq   "J2: …a user bypass lets the (whole-history-scanned) new branch through" "$PC" "0"
+has  "J2: …and says so" "$PO" "bypass consumed"
+# J3 (review: Codex medium, Fable V2): the fetch-first hint is a command that really fetches the
+# missing tip — from the push URL when it differs from the fetch URL, by ref name (a
+# --single-branch clone or a narrowed fetch refspec does not fetch it with a plain git fetch)
+P3="$W/jp3"; newrepo "$P3" none noproj; rm -rf "$P3.git" "$P3-mirror.git"; git init -q --bare "$P3.git"
+git -C "$P3" remote add origin "$P3.git"; git -C "$P3" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null
+git clone -q --bare "$P3.git" "$P3-mirror.git"
+git -C "$P3" remote set-url origin "$P3-mirror.git"; git -C "$P3" remote set-url --push origin "$P3.git"
+E3="$(git -C "$P3.git" commit-tree -p main -m heartbeat "main^{tree}")"; git -C "$P3.git" update-ref refs/heads/main "$E3"
+echo w > "$P3/w.txt"; git -C "$P3" add w.txt; nc "$P3" work
+psh "$P3" "" origin main
+eq   "J3: push to a distinct pushurl whose main moved on → fetch first" "$PC" "1"
+has  "J3: …the hint fetches from the push URL, by ref" "$PO" "git fetch $P3.git refs/heads/main"
+git -C "$P3" fetch -q origin
+psh "$P3" "" origin main
+has  "J3: (git fetch origin reads the lagging fetch URL: still fetch first)" "$PO" "BLOCKED [R0 fetch-first] main"
+FC="$(printf '%s\n' "$PO" | grep -o 'git fetch [^ ]* [^ ,;]*' | head -n 1)"
+(cd "$P3" && eval "$FC -q" 2>/dev/null); git -C "$P3" rebase -q FETCH_HEAD >/dev/null 2>&1
+psh "$P3" "" origin main
+eq   "J3: following the printed command, rebase onto FETCH_HEAD, push again → passes" "$PC" "0"
+eq   "J3: …the push URL has the rebased work" "$(git -C "$P3.git" rev-parse main)" "$(git -C "$P3" rev-parse main)"
+git -C "$P3.git" update-ref refs/heads/side "$E3"
+P4="$W/jp4"; rm -rf "$P4"; git clone -q --single-branch --branch main "$P3.git" "$P4"
+E4="$(git -C "$P3.git" commit-tree -p side -m "side heartbeat" "side^{tree}")"; git -C "$P3.git" update-ref refs/heads/side "$E4"
+git -C "$P4" checkout -q -b side; echo s > "$P4/s.txt"; git -C "$P4" add s.txt; nc "$P4" side
+psh "$P4" "" origin side
+eq   "J3: single-branch clone, push of a branch the remote moved on → fetch first" "$PC" "1"
+has  "J3: …the hint names the ref" "$PO" "git fetch origin refs/heads/side"
+git -C "$P4" fetch -q origin
+psh "$P4" "" origin side
+has  "J3: (git fetch origin fetches main only: still fetch first)" "$PO" "BLOCKED [R0 fetch-first] side"
+FC="$(printf '%s\n' "$PO" | grep -o 'git fetch [^ ]* [^ ,;]*' | head -n 1)"
+(cd "$P4" && eval "$FC -q" 2>/dev/null); git -C "$P4" rebase -q FETCH_HEAD >/dev/null 2>&1
+psh "$P4" "" origin side
+eq   "J3: following the printed command, rebase onto FETCH_HEAD, push again → passes" "$PC" "0"
+eq   "J3: …the remote side has the rebased work" "$(git -C "$P3.git" rev-parse side)" "$(git -C "$P4" rev-parse side)"
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"
