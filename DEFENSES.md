@@ -224,7 +224,7 @@ claude 啟動時的環境)。
   `KIT GUARD: not configured` 並 **exit 1**;讀不到 staged diff / 推送範圍 → block。
   `privacy.local.toml` 缺 → R4/R5 跳過 + warn(R3 仍認得 OS user)。
 - 審計:每次 block / bypass 寫 `~/.local/state/kit/guard/audit.jsonl`。
-- 速度(Phase 4 實測):小 diff pre-commit 中位數 44ms 不含 gitleaks、264ms 含;
+- 速度(Phase 4 實測):小 diff pre-commit 中位數 52ms 不含 gitleaks、270ms 含(final-review 修正後重測);
   7-commit push 320ms 含 gitleaks;8,000 行 email CSV(8k 個 R6 warn)< 1s。
 
 **Bypass(user-only)**:`kit guard bypass "<reason>"` 只在有 TTY 的終端機執行

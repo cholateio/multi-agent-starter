@@ -521,8 +521,8 @@ git 原生繞道，guard 擋不了：對模型由 tool-breaker 擋（§4.5），
 ### 7.5 速度預算與失效模式
 
 - 實測：gitleaks staged 掃描 0.22s、52-commit 全史 0.27s、667-commit 全史 0.40s；
-  （Phase 4 實測 2026-10-19：小 diff（4 檔、22 行、40 檔 repo）pre-commit 中位數 **264ms** 含 gitleaks、
-  **44ms** 不含 gitleaks（gitleaks 單獨 219ms）；pre-push 7 commits 中位數 320ms 含 gitleaks、103ms 不含）
+  （Phase 4 實測 2026-10-19：小 diff（4 檔、22 行、40 檔 repo）pre-commit 中位數 **270ms** 含 gitleaks、
+  **52ms** 不含 gitleaks（gitleaks 單獨 219ms；final-review 修正後重測）；pre-push 7 commits 中位數 320ms 含 gitleaks、103ms 不含）
   grep 層 <0.1s。預算：pre-commit 典型 <1s、pre-push 典型 <3s；pre-push 超過 10s 印
   一行提示但不中止（正確性優先）。
 - 失效模式：`config.toml` 缺／`kit_root` 不存在 → shim 印 `KIT GUARD: not configured`
