@@ -1036,6 +1036,63 @@ PO="$(cd "$I2" && PATH="$NOGL_PATH" git -c core.hooksPath="$TH" push -q origin m
 eq   "H-R4-1b: the hash-equal binary restored → push scans again (blocked by R1 or passes without real gitleaks)" "$PC" "$([ -n "$GITLEAKS" ] && echo 1 || echo 0)"
 lacks "H-R4-1b: …no R8" "$PO" "R8 gitleaks-missing"
 
+# R4-2: the remote's old tip (non-zero rsha) is not here and the HOOK's own connection fails
+# (passphrase key without agent, auth prompt…) while the push transport works: fail closed
+mkdir -p "$W/faketo"; printf '#!/bin/sh\nexit 124\n' > "$W/faketo/timeout"; chmod +x "$W/faketo/timeout"
+K="$W/k"; pushrepo "$K" public; git -C "$K" rm -q --cached PROJECT.toml; rm -f "$K/PROJECT.toml"; nc "$K"
+git -C "$K" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null
+J="$W/j"; rm -rf "$J"; git init -q "$J"; git -C "$J" remote add origin "$K.git"
+mkdir -p "$J/.claude"; echo '{}' > "$J/.claude/settings.local.json"; printf 'status = "x"\n' > "$J/PROJECT.toml"
+git -C "$J" add -f .claude PROJECT.toml; nc "$J" unrelated
+glsel "$GL_PATH"
+PO="$(cd "$J" && PATH="$W/faketo:$GL_PATH" git -c core.hooksPath="$TH" push -q -f origin main 2>&1)"; PC=$?
+eq   "H-R4-2: force-push over an unfetched remote tip while the hook cannot reach the remote → blocked" "$PC" "1"
+has  "H-R4-2: …kit-status-unknown" "$PO" "[R2 kit-status-unknown]"
+eq   "H-R4-2: …remote main unchanged" "$(git -C "$K.git" rev-parse main)" "$(git -C "$K" rev-parse main)"
+J2="$W/j2"; rm -rf "$J2"; git init -q "$J2"; git -C "$J2" remote add origin "$K.git"; echo hi > "$J2/hi.txt"; git -C "$J2" add hi.txt; nc "$J2"
+PO="$(cd "$J2" && PATH="$W/faketo:$GL_PATH" git -c core.hooksPath="$TH" push -q origin main:refs/heads/new-ref 2>&1)"; PC=$?
+eq   "H-R4-2: a NEW ref (zero rsha) with the hook offline uses local signals only (clean non-kit push passes)" "$PC" "0"
+
+# R4-3: classify from local branch tips first; then fetch ONLY the old tip of the pushed ref
+# and the remote HEAD — shallow, blob-less where supported, into a throwaway repo (nothing
+# lands in this repo); never the whole advertised namespace
+M="$W/m"; pushrepo "$M" public; git -C "$M" rm -q --cached PROJECT.toml; rm -f "$M/PROJECT.toml"; nc "$M"
+git -C "$M" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null
+for i in $(seq 1 40); do
+  git -C "$M" checkout -q --orphan "b$i"; git -C "$M" rm -r -q --cached . >/dev/null; rm -f "$M/kit.toml" "$M/README.md"
+  head -c 65536 /dev/urandom | od -An -tx1 > "$M/blob$i.txt"; git -C "$M" add "blob$i.txt"; nc "$M" "b$i"
+  git -C "$M" -c core.hooksPath=/dev/null push -q origin "b$i" 2>/dev/null; rm -f "$M/blob$i.txt"
+done
+git -C "$M" checkout -q --orphan gh-pages; git -C "$M" rm -r -q --cached . >/dev/null 2>&1; echo '<p>old</p>' > "$M/index.html"; git -C "$M" add index.html; nc "$M" oldsite
+git -C "$M" -c core.hooksPath=/dev/null push -q origin gh-pages 2>/dev/null; git -C "$M" checkout -q -f main
+git -C "$M.git" config uploadpack.allowFilter true
+MC="$W/mc"; rm -rf "$MC"; git clone -q --no-local --single-branch --branch main "$M.git" "$MC" 2>/dev/null
+BSHAS="$(git -C "$M.git" for-each-ref --format='%(objectname)' 'refs/heads/b*')"
+nolocal() { local x n=0; for x in $BSHAS; do git -C "$MC" cat-file -e "$x" 2>/dev/null && n=$((n + 1)); done; echo "$n"; }
+mpush() { glsel "$GL_PATH"; rm -f "$W/tr"; PO="$(cd "$1" && GIT_TRACE_PACKET="$W/tr" PATH="$GL_PATH" git -c core.hooksPath="$TH" push -q "${@:2}" 2>&1)"; PC=$?
+          # distinct COMMITS the hook asked the remote for (a lazily fetched kit.toml blob is not one)
+          WANTS="$(sed -n 's/.*fetch> want \([0-9a-f]*\).*/\1/p' "$W/tr" 2>/dev/null | sort -u \
+                   | while read -r x; do [ "$(git -C "$M.git" cat-file -t "$x" 2>/dev/null)" = commit ] && echo "$x"; done | grep -c .)"; }
+git -C "$MC" checkout -q --orphan site; git -C "$MC" rm -r -q --cached .; rm -f "$MC/kit.toml" "$MC/README.md"
+echo '<p>new</p>' > "$MC/index.html"; git -C "$MC" add index.html; nc "$MC" site
+mpush "$MC" origin site:refs/heads/preview
+eq   "H-R4-3a: new orphan branch of a kit repo (remote has 41 unfetched branches) passes" "$PC" "0"
+eq   "H-R4-3a: …kit status from the local main: nothing fetched" "${WANTS:-0}" "0"
+eq   "H-R4-3a: …no remote branch objects landed here" "$(nolocal)" "0"
+mpush "$MC" -f origin site:gh-pages
+eq   "H-R4-3b: orphan force-push over the remote's unfetched gh-pages passes" "$PC" "0"
+eq   "H-R4-3b: …only the old gh-pages tip was fetched" "$WANTS" "1"
+has  "H-R4-3b: …shallow (depth 1)" "$(cat "$W/tr" 2>/dev/null)" "fetch> deepen 1"
+has  "H-R4-3b: …blob-less where the server allows it" "$(cat "$W/tr" 2>/dev/null)" "fetch> filter blob:none"
+eq   "H-R4-3b: …no remote branch objects landed here" "$(nolocal)" "0"
+eq   "H-R4-3b: …and this repo did not become shallow" "$(git -C "$MC" rev-parse --is-shallow-repository)" "false"
+eq   "H-R4-3b: …no temporary refs left" "$(git -C "$MC" for-each-ref refs/kit-guard/ refs/kit-probe/)" ""
+MN="$W/mn"; rm -rf "$MN"; git init -q "$MN"; git -C "$MN" remote add origin "$M.git"; printf 'status = "x"\n' > "$MN/PROJECT.toml"; git -C "$MN" add PROJECT.toml; nc "$MN"
+mpush "$MN" origin main:refs/heads/side
+eq   "H-R4-3c: a non-kit repo pushing PROJECT.toml to a kit remote (unfetched HEAD) → blocked" "$PC" "1"
+has  "H-R4-3c: …R2 (kit status from the remote HEAD)" "$PO" "[R2 forbidden-path] PROJECT.toml"
+eq   "H-R4-3c: …only the remote HEAD was fetched" "$WANTS" "1"
+
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1

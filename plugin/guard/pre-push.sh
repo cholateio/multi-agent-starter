@@ -21,9 +21,12 @@
 # A tip WITHOUT kit.toml whose remote old tip / range boundary / range history had one
 # is still a kit push, and the removal is a BLOCK (user bypass only). A tip without
 # kit.toml is also a kit push when any local branch tip or any advertised remote
-# HEAD / branch / tag has kit.toml (review R3-2: orphan branches, unrelated history);
-# advertised objects missing locally are fetched first (temporary refs, deleted after),
-# and one that cannot be fetched fails closed (BLOCK, user bypass only).
+# HEAD / branch / tag already present locally has kit.toml (review R3-2: orphan branches,
+# unrelated history). Only then the network (review R4-3): the pushed ref's old remote tip
+# when it is not here, and the remote HEAD while nothing says "kit" — shallow, blob-less,
+# into a throwaway repo. An old tip that cannot be fetched (offline, the hook's own
+# connection cannot authenticate) fails closed (BLOCK, user bypass only — R4-2); a new
+# ref whose remote cannot be listed uses the local signals only.
 # Every git call pins its output format explicitly (--no-color, prefixes, --root,
 # --text, --format …): the caller's config cannot blind the scan (final review C2).
 set -uo pipefail
@@ -75,20 +78,47 @@ while read -r lref lsha rref rsha; do
     HAS_KIT=0; KT=""; REMOVED=0
     if KT="$(git show "$c:kit.toml" 2>/dev/null)"; then HAS_KIT=1
     else
-        # the tip has no kit.toml: is this still a kit push? (review O5, R3-2)
+        # the tip has no kit.toml: is this still a kit push? (review O5, R3-2, R4-2, R4-3)
+        RSHA_GONE=0
+        [[ -n "${rsha:-}" && ! "$rsha" =~ ^0+$ ]] && ! git cat-file -e "${rsha}^{commit}" 2>/dev/null && RSHA_GONE=1
         if KT="$(guard_kit_toml_before "$D/revs" "${rsha:-}")"; then REMOVED=1
         else
-            # objects the remote advertises but this clone never fetched (a force-push over
-            # an unseen tip, a new branch next to an unseen default branch): fetch them once
-            if [[ $REMOTE_HAS_OK -eq 1 && -z "${ADV_FETCHED:-}" ]]; then
-                ADV_FETCHED=1; guard_fetch_advertised "$URL" "$TMPD/ls-remote"
+            # 1) local evidence, no network: local branch tips, advertised objects already here
+            if KT="$(guard_kit_toml_elsewhere "$( [[ $REMOTE_HAS_OK -eq 1 ]] && echo "$TMPD/ls-remote")")"; then HAS_KIT=1; fi
+            # 2) then fetch only what is needed (shallow, throwaway repo): the remote's old tip of
+            #    THIS ref when it is not here — it may hold a kit.toml this push removes — and the
+            #    remote HEAD while nothing says "kit" yet. Never the whole advertised namespace.
+            HSHA=""
+            if [[ $HAS_KIT -eq 0 && $REMOTE_HAS_OK -eq 1 ]]; then
+                HSHA="$(awk -F'\t' '$2 == "HEAD" { print $1; exit }' "$TMPD/ls-remote")"
+                [[ -n "$HSHA" ]] && git cat-file -e "${HSHA}^{commit}" 2>/dev/null && HSHA=""
             fi
-            if KT="$(guard_kit_toml_before "$D/revs" "${rsha:-}")"; then REMOVED=1
-            elif KT="$(guard_kit_toml_elsewhere "$( [[ $REMOTE_HAS_OK -eq 1 ]] && echo "$TMPD/ls-remote")")"; then HAS_KIT=1
-            elif [[ -n "${ADV_MISSING:-}" ]]; then
-                HAS_KIT=1; KT=""      # fail closed: R2 applies, and the push needs the user
-                guard_add BLOCK "R2 kit-status-unknown" "$lref" "the pushed tip has no kit.toml and the remote's ${ADV_MISSING} could not be fetched to check whether this is a kit repo — git fetch the remote and push again; if intended, the user runs kit guard bypass"
-            elif [[ -n "$TOP" && -f "$TOP/kit.toml" ]]; then HAS_KIT=1; KT=""; fi
+            if [[ $RSHA_GONE -eq 1 || -n "$HSHA" ]]; then
+                SPECS=()
+                [[ $RSHA_GONE -eq 1 ]] && SPECS+=("+${rref}:refs/kit-probe/old")
+                [[ -n "$HSHA" ]] && SPECS+=("+HEAD:refs/kit-probe/head")
+                guard_probe "$URL" "${SPECS[@]}"
+                if [[ $RSHA_GONE -eq 1 ]]; then
+                    if [[ "$(guard_probe_rev refs/kit-probe/old)" == "$rsha" ]]; then
+                        if K2="$(guard_probe_kit_toml "$rsha")"; then KT="$K2"; REMOVED=1; fi
+                    else
+                        # R4-2: an old tip that cannot be inspected — whatever the reason (offline,
+                        # the hook's own connection cannot authenticate) — fails closed
+                        HAS_KIT=1
+                        guard_add BLOCK "R2 kit-status-unknown" "$lref" "the pushed tip has no kit.toml and the remote's current ${rref} (${rsha:0:12}) is not here and could not be fetched to check whether it has one — git fetch the remote and push again; if intended, the user runs kit guard bypass"
+                    fi
+                fi
+                if [[ -n "$HSHA" && $HAS_KIT -eq 0 && $REMOVED -eq 0 ]]; then
+                    H2="$(guard_probe_rev refs/kit-probe/head)"
+                    if [[ -n "$H2" ]]; then
+                        if K2="$(guard_probe_kit_toml "$H2")"; then KT="$K2"; HAS_KIT=1; fi
+                    else
+                        HAS_KIT=1; KT=""      # fail closed: R2 applies, and the push needs the user
+                        guard_add BLOCK "R2 kit-status-unknown" "$lref" "the pushed tip has no kit.toml and the remote's HEAD could not be fetched to check whether this is a kit repo — git fetch the remote and push again; if intended, the user runs kit guard bypass"
+                    fi
+                fi
+            fi
+            [[ $HAS_KIT -eq 0 && $REMOVED -eq 0 && -n "$TOP" && -f "$TOP/kit.toml" ]] && { HAS_KIT=1; KT=""; }
         fi
         if [[ $REMOVED -eq 1 ]]; then
             # the remote's old tip or the pushed history had kit.toml and the tip drops it:

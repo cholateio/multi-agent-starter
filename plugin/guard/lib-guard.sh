@@ -109,9 +109,9 @@ guard_kit_toml_first() {
 }
 
 # guard_kit_toml_elsewhere [<ls-remote file>]: the kit.toml of any local branch tip or of
-# any advertised HEAD / refs/heads/* / refs/tags/* object present locally (review R3-2:
-# an orphan branch or unrelated history pushed from a kit repo / to a kit remote is a
-# kit push even though nothing in its own history ever had kit.toml)
+# any advertised HEAD / refs/heads/* / refs/tags/* object ALREADY present locally — no
+# network (review R3-2, R4-3: an orphan branch or unrelated history pushed from a kit repo /
+# to a kit remote is a kit push even though nothing in its own history ever had kit.toml)
 guard_kit_toml_elsewhere() {
     { git for-each-ref --format='%(objectname)' refs/heads/ 2>/dev/null
       if [[ -n "${1:-}" && -s "$1" ]]; then guard_adv_refs "$1" | cut -f1; fi
@@ -124,31 +124,52 @@ guard_adv_refs() {
     awk -F'\t' '$2 == "HEAD" || ($2 ~ /^refs\/(heads|tags)\// && $2 !~ /\^\{\}$/) { print $1 "\t" $2 }' "$1"
 }
 
-# guard_fetch_advertised <url> <ls-remote file>: fetch every advertised HEAD / branch / tag
-# whose object is not present locally into a temporary namespace (refs/kit-guard/tmp/<pid>/),
-# then delete those refs — the objects stay, so a later push does not fetch them again.
-# Sets ADV_MISSING = advertised refs still not inspectable afterwards ("" = all present).
-guard_fetch_advertised() {
-    local url="$1" lsr="$2" sha ref i=0 ns="refs/kit-guard/tmp/$$"
-    local -a specs=() TO=() SSHC=()
-    ADV_MISSING=""
-    while IFS=$'\t' read -r sha ref; do
-        git cat-file -e "$sha" 2>/dev/null && continue
-        i=$((i + 1)); specs+=("+$ref:$ns/$i")
-    done < <(guard_adv_refs "$lsr")
-    [[ ${#specs[@]} -gt 0 ]] || return 0
-    command -v timeout >/dev/null 2>&1 && TO=(timeout -k 2 "${KIT_GUARD_FETCH_TIMEOUT:-30}")
+# Network access for the R2 kit-identity check (review R3-2, R4-2, R4-3) — bounded and
+# non-interactive: KIT_GUARD_FETCH_TIMEOUT (default 30 s), no credential / passphrase
+# prompt (ssh BatchMode appended to the user's own ssh command, untouched when GIT_SSH is set).
+guard_net_env() {
+    GN_ENV=(env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false)
     if [[ -z "${GIT_SSH:-}" ]]; then
         local sc="${GIT_SSH_COMMAND:-$(git config --get core.sshCommand 2>/dev/null)}"
-        SSHC=(GIT_SSH_COMMAND="${sc:-ssh} -o BatchMode=yes -o ConnectTimeout=${LS_TIMEOUT:-5}")
+        GN_ENV+=(GIT_SSH_COMMAND="${sc:-ssh} -o BatchMode=yes -o ConnectTimeout=${LS_TIMEOUT:-5}")
     fi
-    env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false "${SSHC[@]}" "${TO[@]}" \
-        git -c gc.auto=0 -c maintenance.auto=false -c fetch.writeCommitGraph=false fetch -q --no-tags \
-        --no-write-fetch-head --no-recurse-submodules "$url" "${specs[@]}" </dev/null >/dev/null 2>&1
-    git for-each-ref --format='delete %(refname)' "$ns/" 2>/dev/null | git update-ref --stdin 2>/dev/null
-    while IFS=$'\t' read -r sha ref; do
-        git cat-file -e "$sha" 2>/dev/null || ADV_MISSING+="${ADV_MISSING:+, }$ref"
-    done < <(guard_adv_refs "$lsr")
+    command -v timeout >/dev/null 2>&1 && GN_ENV+=(timeout -k 2 "${KIT_GUARD_FETCH_TIMEOUT:-30}")
+}
+# guard_pgit <args…>: git in the probe repo — never this repo's GIT_DIR / index / object env
+guard_pgit() {
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR \
+        -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_QUARANTINE_PATH git -C "$PROBE" "$@"
+}
+# guard_probe <url> <refspec>…: fetch ONLY the given remote refs (the pushed ref's old tip,
+# the remote HEAD) — depth 1, blob-less where the server allows it — into a THROWAWAY bare
+# repo under $TMPD that borrows this repo's objects (alternates). Nothing is written to this
+# repo: no refs, no objects, no .git/shallow; the probe goes with $TMPD (review R4-3).
+# kit.toml's blob is fetched lazily (promisor remote) only when the tree has one.
+guard_probe() {
+    local url="$1" fmt objs; shift
+    PROBE="$TMPD/probe"; rm -rf "$PROBE"
+    fmt="$(git rev-parse --show-object-format 2>/dev/null)"; fmt="${fmt:-sha1}"
+    objs="$(git rev-parse --path-format=absolute --git-path objects 2>/dev/null)"
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR \
+        git init -q --bare --object-format="$fmt" "$PROBE" >/dev/null 2>&1 || return 1
+    [[ -n "$objs" && -d "$objs" ]] && printf '%s\n' "$objs" > "$PROBE/objects/info/alternates"
+    guard_pgit config core.repositoryformatversion 1 && guard_pgit config extensions.partialClone kitprobe \
+        && guard_pgit config remote.kitprobe.url "$url" && guard_pgit config remote.kitprobe.promisor true \
+        && guard_pgit config remote.kitprobe.partialclonefilter blob:none || return 1
+    guard_net_env
+    "${GN_ENV[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR \
+        -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_QUARANTINE_PATH \
+        git -C "$PROBE" -c gc.auto=0 -c maintenance.auto=false -c fetch.writeCommitGraph=false \
+        fetch -q --no-tags --no-write-fetch-head --no-recurse-submodules --depth=1 --filter=blob:none \
+        kitprobe "$@" </dev/null >/dev/null 2>&1
+}
+guard_probe_rev() { [[ -d "${PROBE:-}" ]] && guard_pgit rev-parse -q --verify "$1^{commit}" 2>/dev/null; }
+# guard_probe_kit_toml <commit>: rc 0 when its tree has kit.toml (printed when readable)
+guard_probe_kit_toml() {
+    [[ -n "$(guard_pgit ls-tree "$1" -- kit.toml 2>/dev/null)" ]] || return 1
+    guard_net_env
+    "${GN_ENV[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR \
+        git -C "$PROBE" cat-file blob "$1:kit.toml" </dev/null 2>/dev/null
     return 0
 }
 
