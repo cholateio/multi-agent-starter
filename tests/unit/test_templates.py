@@ -183,7 +183,7 @@ class TestRendered(Rendered):
         script = "\n".join(l[10:] for l in m.group(1).splitlines())
         run = lambda: subprocess.run(["bash", "-c", script], cwd=d, capture_output=True, text=True)
         self.assertEqual(run().returncode, 0, run().stdout)   # no self-match of its own patterns
-        (d / "notes.txt").write_text("see /home/someone/x\n")
+        (d / "notes.txt").write_text("see /ho" + "me/someone/x\n")
         subprocess.run(["git", "-C", str(d), "add", "-f", "notes.txt"], check=True)
         self.assertNotEqual(run().returncode, 0)
         subprocess.run(["git", "-C", str(d), "rm", "-qf", "notes.txt"], check=True)
