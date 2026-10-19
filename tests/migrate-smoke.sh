@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# tests/migrate-smoke.sh - `kit migrate` on v4 fixtures generated at run time
+# (nothing .claude/ is tracked in the kit repo). Isolated HOME / state dir; a
+# fake `gh` that fails simulates offline / not logged in.
+set -uo pipefail
+KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PASS_COUNT=0; FAIL_COUNT=0
+pass() { PASS_COUNT=$((PASS_COUNT + 1)); printf 'PASS %s\n' "$1"; }
+fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); printf 'FAIL %s (%s)\n' "$1" "$2"; }
+has() { if printf '%s' "$2" | grep -qF -- "$3"; then pass "$1"; else fail "$1" "missing [$3]"; fi; }
+lacks() { if printf '%s' "$2" | grep -qF -- "$3"; then fail "$1" "unexpected [$3]"; else pass "$1"; fi; }
+eq() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "got [$2] want [$3]"; fi; }
+exists() { if [ -e "$2" ]; then pass "$1"; else fail "$1" "missing $2"; fi; }
+absent() { if [ ! -e "$2" ]; then pass "$1"; else fail "$1" "exists $2"; fi; }
+
+W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+mkdir -p "$W/home" "$W/fakebin"
+printf '#!/bin/sh\necho "gh: not logged in" >&2\nexit 1\n' > "$W/fakebin/gh"; chmod +x "$W/fakebin/gh"
+printf '[user]\n\tname = Test User\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n' > "$W/gitconfig"
+export HOME="$W/home" KIT_CONFIG_HOME="$W/home/.config/kit" KIT_STATE_HOME="$W/state" \
+       GIT_CONFIG_GLOBAL="$W/gitconfig" GIT_CONFIG_NOSYSTEM=1 PATH="$W/fakebin:$PATH"
+km() { python3 "$KIT_ROOT/bin/kit" migrate "$@" 2>&1; }
+g() { git -C "$@"; }
+pyconst() { (cd "$KIT_ROOT" && python3 -c "import sys; from tests.unit.test_migrate import $1 as v; sys.stdout.write(v)"); }
+state() { (cd "$1" && g . write-tree && find . -path ./.git -prune -o -type f -print | sort | xargs cksum); }
+
+# make_v4 <dir> [tracked|untracked]: a v4 project as init.sh --update left it
+make_v4() {
+  local R="$1" mode="${2:-tracked}"
+  mkdir -p "$R/.claude/"{rules,hooks,skills,agents,docs} "$R/docs/plans" "$R/docs/superpowers/plans" "$R/src/legacy"
+  g "$R" init -q -b main
+  for f in kit-workflow kit-delegation kit-judgment kit-evolution project-manifest; do cp "$KIT_ROOT/plugin/rules/$f.md" "$R/.claude/rules/"; done
+  for f in session-start classify-task protect-paths tool-breaker verify-final-review; do cp "$KIT_ROOT/plugin/hooks/$f.sh" "$R/.claude/hooks/"; done
+  for s in kit-review kit-skip-review kit-dispatch research-before-planning; do mkdir -p "$R/.claude/skills/$s"; echo "# $s" > "$R/.claude/skills/$s/SKILL.md"; done
+  cp "$KIT_ROOT/plugin/agents/"*.md "$R/.claude/agents/"
+  echo "# jm" > "$R/.claude/docs/judgment-matrix.md"; echo "# vs" > "$R/.claude/docs/verification-signals.md"
+  echo "v4.10.0 abcdef0 2026-08-02" > "$R/.claude/kit-version"
+  printf '# legacy\nsrc/legacy/*\n' > "$R/.claude/protected-paths"
+  pyconst V4_SETTINGS_JSON | python3 -c 'import json,sys; d=json.load(sys.stdin); d["permissions"]["allow"].append("Bash(pnpm *)"); print(json.dumps(d, indent=2))' > "$R/.claude/settings.json"
+  pyconst V4_CLAUDE_MD > "$R/CLAUDE.md"
+  printf 'name = "proj-a"\nstatus = "active"\n' > "$R/PROJECT.toml"
+  printf '# Lessons\n- one\n' > "$R/docs/LESSONS.md"
+  echo "plan p" > "$R/docs/plans/p.md"; echo "plan q" > "$R/docs/superpowers/plans/q.md"
+  echo "x = 1" > "$R/src/legacy/old.py"; echo "# proj-a" > "$R/README.md"
+  if [ "$mode" = tracked ]; then
+    printf 'node_modules/\n\n# Claude Code runtime state. `.claude/` itself IS tracked on purpose:\n# kit-owned files are regenerable via `init.sh --update`, but settings.json\n# (accumulated permission approvals) and protected-paths (project no-touch\n# zones) are project truth that nothing can rebuild. Only machine-local\n# state is excluded.\n.claude/settings.local.json\n.claude/scheduled_tasks.lock\n' > "$R/.gitignore"
+  else
+    printf 'node_modules/\n.claude/\nPROJECT.toml\ndocs/LESSONS.md\ndocs/plans/\ndocs/superpowers/plans/\n' > "$R/.gitignore"
+  fi
+  g "$R" add -A; g "$R" commit -q -m "v4 project"
+}
+
+# ---- M1: dry-run changes nothing
+R="$W/m1"; make_v4 "$R"
+BEFORE="$(state "$R")"
+OUT="$(km "$R")"; CODE=$?
+eq "M1: dry-run exit 0" "$CODE" "0"
+eq "M1: dry-run leaves git status clean" "$(g "$R" status --short)" ""
+eq "M1: dry-run leaves tree + files unchanged" "$(state "$R")" "$BEFORE"
+absent "M1: dry-run writes no backup" "$W/state/migrate-backup"
+has "M1: dry-run says what it would do" "$OUT" "would kit.toml"
+has "M1: dry-run shows the CLAUDE.md diff" "$OUT" "+@AGENTS.md"
+
+# ---- M2: --apply
+OUT="$(km "$R" --apply)"; CODE=$?
+eq "M2: apply exit 0" "$CODE" "0"
+has "M2: offline → assume public (warned)" "$OUT" "WARN: offline, assuming public"
+KT="$(cat "$R/kit.toml" 2>/dev/null)"
+has "M2: kit.toml visibility public" "$KT" 'visibility = "public"'
+has "M2: kit.toml protected keeps # legacy" "$KT" "  # legacy"
+has "M2: kit.toml protected has src/legacy/*" "$KT" '"src/legacy/*",'
+CONSTRAINTS="$(pyconst V4_CLAUDE_MD | sed -n '/^## Project-specific constraints/,/^\*\*同步執法\*\*/p' | sed '$d')"
+if grep -qF -- "$(printf '%s' "$CONSTRAINTS" | head -3)" "$R/AGENTS.md" 2>/dev/null; then pass "M2: AGENTS.md carries the constraints verbatim"; else fail "M2: AGENTS.md carries the constraints verbatim" "not found"; fi
+eq "M2: CLAUDE.md first line is @AGENTS.md" "$(head -1 "$R/CLAUDE.md")" "@AGENTS.md"
+TRACKED="$(g "$R" ls-files)"
+for p in .claude/ PROJECT.toml docs/LESSONS.md docs/plans/ docs/superpowers/plans/; do lacks "M2: $p no longer tracked" "$TRACKED" "$p"; done
+for f in PROJECT.toml docs/LESSONS.md docs/plans/p.md docs/superpowers/plans/q.md; do exists "M2: $f still on disk" "$R/$f"; done
+eq "M2: .claude holds only settings.local.json" "$(cd "$R/.claude" && find . -type f | sort | tr '\n' ' ')" "./settings.local.json "
+has "M2: settings.local.json keeps pnpm" "$(cat "$R/.claude/settings.local.json")" "Bash(pnpm *)"
+lacks "M2: settings.local.json has no kit hooks" "$(cat "$R/.claude/settings.local.json")" "hooks"
+absent "M2: kit-version removed" "$R/.claude/kit-version"
+eq "M2: gitignore kit block exactly once" "$(grep -c '^# >>> kit v5' "$R/.gitignore")" "1"
+lacks "M2: v4 'tracked on purpose' block gone" "$(cat "$R/.gitignore")" "IS tracked on purpose"
+has "M2: project gitignore lines kept" "$(cat "$R/.gitignore")" "node_modules/"
+BK="$(ls -d "$W/state/migrate-backup/m1/"*/ 2>/dev/null | head -1)"
+exists "M2: backup has .claude/kit-version" "${BK}.claude/kit-version"
+exists "M2: backup has PROJECT.toml" "${BK}PROJECT.toml"
+exists "M2: backup has docs/superpowers/plans/q.md" "${BK}docs/superpowers/plans/q.md"
+exists "M2: LICENSE added (public, was missing)" "$R/LICENSE"
+has "M2: prints README bootstrap prompt" "$OUT" "README"
+has "M2: reminds about history rewrite" "$OUT" "history"
+eq "M2: kit doctor validator accepts kit.toml" "$(cd "$KIT_ROOT" && python3 -c "from cli.kittoml import validate_kit_toml as v; print(v('$R/kit.toml'))")" "[]"
+
+# ---- M3: re-run apply → every line skip, nothing changes
+BEFORE="$(state "$R")"
+OUT="$(km "$R" --apply)"; CODE=$?
+eq "M3: rerun exit 0" "$CODE" "0"
+if printf '%s\n' "$OUT" | grep -E '^(done|would|needs-review) ' | grep -q .; then fail "M3: rerun lines are all skip" "$(printf '%s\n' "$OUT" | grep -E '^(done|would|needs-review) ' | head -2)"; else pass "M3: rerun lines are all skip"; fi
+has "M3: rerun says nothing to do" "$OUT" "nothing to do"
+eq "M3: rerun changes nothing" "$(state "$R")" "$BEFORE"
+eq "M3: rerun made no second backup" "$(ls "$W/state/migrate-backup/m1" | wc -l | tr -d ' ')" "1"
+
+# ---- M4: --commit
+OUT="$(km "$R" --commit)"; CODE=$?
+eq "M4: commit exit 0" "$CODE" "0"
+eq "M4: commit subject" "$(g "$R" log -1 --format=%s)" "chore(kit): migrate to kit v5 — untrack .claude, add AGENTS.md + kit.toml"
+eq "M4: tree clean after commit" "$(g "$R" status --porcelain)" ""
+for f in kit.toml AGENTS.md CLAUDE.md .gitignore LICENSE; do has "M4: $f committed" "$(g "$R" ls-files)" "$f"; done
+exists "M4: PROJECT.toml still on disk after commit" "$R/PROJECT.toml"
+
+# ---- M5: dirty tree refused; --allow-dirty passes
+R="$W/m5"; make_v4 "$R"; echo "owner edit" >> "$R/README.md"
+OUT="$(km "$R" --apply)"; CODE=$?
+eq "M5: dirty tree exit 1" "$CODE" "1"
+has "M5: says dirty" "$OUT" "dirty"
+absent "M5: refused run wrote nothing" "$R/kit.toml"
+OUT="$(km "$R" --apply --allow-dirty)"; CODE=$?
+eq "M5: --allow-dirty exit 0" "$CODE" "0"
+exists "M5: --allow-dirty migrated" "$R/kit.toml"
+has "M5: owner edit untouched" "$(cat "$R/README.md")" "owner edit"
+OUT="$(km "$R" --commit --allow-dirty)"; CODE=$?
+has "M5: commit leaves owner's unstaged edit out" "$(g "$R" status --porcelain)" " M README.md"
+
+# ---- M6: CLAUDE.md without kit markers → needs-review, content kept verbatim
+R="$W/m6"; make_v4 "$R"
+printf '# custom\n\n## Goal\n\nOwner-written, no kit boilerplate.\n' > "$R/CLAUDE.md"; g "$R" commit -qam "custom claude"
+OUT="$(km "$R" --apply)"
+has "M6: needs-review reported" "$OUT" "needs-review"
+eq "M6: AGENTS.md == original" "$(cat "$R/AGENTS.md")" "$(printf '# custom\n\n## Goal\n\nOwner-written, no kit boilerplate.')"
+
+# ---- M7: interrupted apply converges; the v4-yield gate protects meanwhile
+R="$W/m7"; make_v4 "$R"
+OUT="$(KIT_TEST_MIGRATE_STOP_AFTER=agents km "$R" --apply)"; CODE=$?
+eq "M7: simulated interrupt exits 3" "$CODE" "3"
+exists "M7: kit.toml written before the interrupt" "$R/kit.toml"
+exists "M7: kit-version still present" "$R/.claude/kit-version"
+GATE="$(cd "$KIT_ROOT" && CWD="$R" CLAUDE_PROJECT_DIR= KIT=on bash -c 'source plugin/hooks/lib.sh; kit_project_root' 2>&1)"; GRC=$?
+eq "M7: plugin gate yields mid-migration (rc 1)" "$GRC" "1"
+has "M7: gate names the v4 layout" "$GATE" "v4 layout detected"
+rm "$R/kit.toml"
+OUT="$(km "$R" --apply)"; CODE=$?
+eq "M7: rerun after interrupt exit 0" "$CODE" "0"
+exists "M7: kit.toml restored" "$R/kit.toml"
+absent "M7: kit-version gone after convergence" "$R/.claude/kit-version"
+eq "M7: .claude converged" "$(cd "$R/.claude" && find . -type f | sort | tr '\n' ' ')" "./settings.local.json "
+OUT="$(km "$R" --apply)"; has "M7: third run nothing to do" "$OUT" "nothing to do"
+eq "M7: two backups, distinct dirs" "$(ls "$W/state/migrate-backup/m7" | wc -l | tr -d ' ')" "2"
+
+# ---- M8: .claude already untracked (gitignored) but v4 files on disk
+R="$W/m8"; make_v4 "$R" untracked
+eq "M8: fixture has nothing tracked under .claude" "$(g "$R" ls-files .claude | wc -l | tr -d ' ')" "0"
+OUT="$(km "$R" --apply)"; CODE=$?
+eq "M8: apply exit 0" "$CODE" "0"
+has "M8: untrack step skipped" "$OUT" "skip untrack"
+absent "M8: kit-version removed" "$R/.claude/kit-version"
+absent "M8: v4 hooks removed" "$R/.claude/hooks"
+exists "M8: kit.toml written" "$R/kit.toml"
+eq "M8: gitignore kit block once" "$(grep -c '^# >>> kit v5' "$R/.gitignore")" "1"
+
+# ---- M9: absolute protected entries never reach the tracked kit.toml
+R="$W/m9"; make_v4 "$R"
+printf 'src/legacy/*\n/home/testuser/notes/\n' > "$R/.claude/protected-paths"; g "$R" commit -qam "abs protected"
+OUT="$(km "$R" --apply)"
+lacks "M9: absolute path not in kit.toml" "$(cat "$R/kit.toml")" "/home/testuser"
+has "M9: absolute path flagged needs-review" "$OUT" "needs-review"
+has "M9: relative entry kept" "$(cat "$R/kit.toml")" '"src/legacy/*",'
+
+# ---- M10: unknown file in a kit dir is kept and flagged; non-kit repo refused
+R="$W/m10"; make_v4 "$R"; echo "# mine" > "$R/.claude/skills/my-skill.md"; g "$R" add -A; g "$R" commit -qm mine
+OUT="$(km "$R" --apply)"
+exists "M10: user file kept" "$R/.claude/skills/my-skill.md"
+has "M10: user file flagged" "$OUT" ".claude/skills/my-skill.md"
+mkdir -p "$W/plain"; g "$W/plain" init -q -b main
+OUT="$(km "$W/plain" --apply)"; CODE=$?
+eq "M10: non-kit repo refused (exit 1)" "$CODE" "1"
+has "M10: points at kit init" "$OUT" "kit init"
+
+echo
+echo "passed $PASS_COUNT, failed $FAIL_COUNT"
+[ "$FAIL_COUNT" -eq 0 ] || exit 1

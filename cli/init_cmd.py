@@ -31,22 +31,26 @@ def gitignore_block() -> str:
     return tpl[start:end] + "\n"
 
 
-def ensure_gitignore_block(path: Path, dry_run: bool = False) -> bool:
-    """Insert (or refresh) the managed kit block; lines outside the markers are the
-    project's and are never touched. Returns True when the file (would) change."""
-    path = Path(path)
+def with_gitignore_block(text: str) -> str:
+    """Return `text` with the managed kit block inserted (appended) or refreshed in place."""
     block = gitignore_block()
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
     if BLOCK_START in text and BLOCK_END in text:
         s = text.index(BLOCK_START)
         s = text.rfind("\n", 0, s) + 1
         e = text.index(BLOCK_END) + len(BLOCK_END)
         if e < len(text) and text[e] == "\n":
             e += 1
-        new = text[:s] + block + text[e:]
-    else:
-        sep = "" if not text or text.endswith("\n\n") else ("\n" if text.endswith("\n") else "\n\n")
-        new = text + sep + block
+        return text[:s] + block + text[e:]
+    sep = "" if not text or text.endswith("\n\n") else ("\n" if text.endswith("\n") else "\n\n")
+    return text + sep + block
+
+
+def ensure_gitignore_block(path: Path, dry_run: bool = False) -> bool:
+    """Insert (or refresh) the managed kit block; lines outside the markers are the
+    project's and are never touched. Returns True when the file (would) change."""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    new = with_gitignore_block(text)
     if new == text:
         return False
     if not dry_run:
