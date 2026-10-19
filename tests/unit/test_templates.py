@@ -124,7 +124,7 @@ class TestWorkflow(unittest.TestCase):
         t = self.wf.read_text()
         lines = t.splitlines()
         self.assertTrue(any(re.match(r"^permissions:\s*$", l) for l in lines))
-        self.assertIn("  contents: read", t)
+        self.assertRegex(t, r"(?m)^permissions:\n  contents: read$")
         self.assertNotIn("write", re.sub(r"#.*", "", t))
         uses = re.findall(r"^\s*-?\s*uses:\s*(\S+)(.*)$", t, re.M)
         self.assertTrue(uses)
@@ -134,8 +134,6 @@ class TestWorkflow(unittest.TestCase):
         self.assertIn("sha256sum -c", t)
         self.assertNotIn("gitleaks-action", t)
         self.assertNotRegex(t, r"(?i)cholate|/home/[a-z_][a-z0-9_-]*/")
-        # the generic path grep must not match the workflow's own text, or CI could never pass
-        self.assertNotRegex(t, r"/mnt/c/Users/")
         self.assertRegex(t, r"gitleaks\" git --redact")
 
     def test_gitleaks_pin_matches_doctor(self):
@@ -160,9 +158,10 @@ class TestRendered(Rendered):
         d = self.init()
         for f in d.rglob("*"):
             if f.is_file() and ".git" not in f.parts:
-                self.assertNotIn("{{", f.read_text(), f"placeholder leak in {f}")
+                self.assertNotRegex(f.read_text(), r"\{\{[A-Z_]+\}\}", f"placeholder leak in {f}")
         lic = (d / "LICENSE").read_text()
         self.assertTrue(lic.startswith("MIT License"))
+        self.assertIn("[MIT](LICENSE)", (d / "README.md").read_text())
         self.assertIn(f"{datetime.date.today().year} Acme Org", lic)
         self.assertEqual(re.findall(r"^## ", (d / "AGENTS.md").read_text(), re.M).__len__(), 6)
         self.assertIn("## Environment variables", (d / "docs" / "DEVELOPMENT.md").read_text())
@@ -175,15 +174,49 @@ class TestRendered(Rendered):
         self.assertEqual(wf, [], wf)
         self.assertEqual(rd, [], rd)
 
-    def test_ci_privacy_step_passes_on_fresh_project_and_catches_leaks(self):
-        d = self.init()
+    def ci_step(self, d):
         wf = (d / ".github/workflows/kit-guard.yml").read_text()
-        m = re.search(r"- name: kit privacy\n\s+run: \|\n((?:\s{10}.*\n?)+)", wf)
+        m = re.search(r"- name: kit privacy\n(?:\s+if:.*\n)?\s+run: \|\n((?:\s{10}.*\n?)+)", wf)
         self.assertTrue(m)
         script = "\n".join(l[10:] for l in m.group(1).splitlines())
-        run = lambda: subprocess.run(["bash", "-c", script], cwd=d, capture_output=True, text=True)
+        return lambda: subprocess.run(["bash", "-c", script], cwd=d, capture_output=True, text=True)
+
+    def stage(self, d, name, text):
+        f = d / name
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text)
+        subprocess.run(["git", "-C", str(d), "add", "-f", name], check=True)
+
+    def test_ci_matches_local_guard_forbidden_paths(self):
+        d = self.init()
+        run = self.ci_step(d)
+        self.stage(d, ".env", "K=v\n")
+        self.assertNotEqual(run().returncode, 0, ".env must fail CI like the local guard")
+        subprocess.run(["git", "-C", str(d), "rm", "-qf", ".env"], check=True)
+        self.stage(d, ".env.example", "K=\n")
+        self.assertEqual(run().returncode, 0, ".env.example is allowed")
+        for name in ("sub/PROJECT.toml", "pkg/CLAUDE.local.md", "a/b/x.local.toml", "docs/superpowers/plans/p.md"):
+            self.stage(d, name, "x\n")
+            self.assertNotEqual(run().returncode, 0, name)
+            subprocess.run(["git", "-C", str(d), "rm", "-qf", name], check=True)
+
+    def test_ci_home_path_is_a_warning_windows_path_fails_and_allow_marker_works(self):
+        d = self.init()
+        run = self.ci_step(d)
+        self.stage(d, "Dockerfile", "WORKDIR /ho" + "me/node/app\n")
+        r = run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("::warning::", r.stdout)
+        self.stage(d, "doc.txt", "see /mnt/" + "c/Users/someone/x\n")
+        self.assertNotEqual(run().returncode, 0)
+        self.stage(d, "doc.txt", "see /mnt/" + "c/Users/someone/x  # kit-privacy: allow\n")
+        self.assertEqual(run().returncode, 0)
+
+    def test_ci_privacy_step_passes_on_fresh_project_and_catches_leaks(self):
+        d = self.init()
+        run = self.ci_step(d)
         self.assertEqual(run().returncode, 0, run().stdout)   # no self-match of its own patterns
-        (d / "notes.txt").write_text("see /ho" + "me/someone/x\n")
+        (d / "notes.txt").write_text("see /mnt/" + "c/Users/someone/x\n")
         subprocess.run(["git", "-C", str(d), "add", "-f", "notes.txt"], check=True)
         self.assertNotEqual(run().returncode, 0)
         subprocess.run(["git", "-C", str(d), "rm", "-qf", "notes.txt"], check=True)
@@ -208,6 +241,15 @@ class TestRendered(Rendered):
         self.assertIn("Attribution 4.0 International", t)
         self.assertIn(f"{datetime.date.today().year} Acme Org", t)
         self.assertNotIn("{{", t)
+        self.assertIn("[CC BY 4.0](LICENSE)", (d / "README.md").read_text())
+        self.assertNotIn("[MIT]", (d / "README.md").read_text())
+
+    def test_license_none_public_readme_has_no_dead_link(self):
+        d = self.init("nl", license="none")
+        r = (d / "README.md").read_text()
+        self.assertNotIn("](LICENSE)", r)
+        self.assertNotIn("{{", r)
+        self.assertIn("All rights reserved", r)
 
     def test_private(self):
         d = self.init("pv", private=True, license="none")

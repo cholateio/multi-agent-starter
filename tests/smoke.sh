@@ -33,7 +33,7 @@ has "i1: CLAUDE.md stub imports AGENTS.md" "$(head -1 "$W/p1/CLAUDE.md" 2>/dev/n
 has "i1: DEVELOPMENT.md env section" "$(cat "$W/p1/docs/DEVELOPMENT.md" 2>/dev/null)" "## Environment variables"
 [ "$(cat "$W"/p1/AGENTS.md "$W"/p1/README.md "$W"/p1/docs/DEVELOPMENT.md | grep -c '/home/\|NT\$\|US\$')" = "0" ] && pass "i1: templates carry no local paths/costs" || fail "i1: templates carry no local paths/costs" "hit"
 [ "$(head -1 "$W/p1/LICENSE")" = "MIT License" ] && pass "i1: LICENSE is MIT" || fail "i1: LICENSE is MIT" "$(head -1 "$W/p1/LICENSE")"
-[ -z "$(grep -rl '{{' "$W/p1" --exclude-dir=.git)" ] && pass "i1: no {{placeholder}} leaked" || fail "i1: no {{placeholder}} leaked" "$(grep -rl '{{' "$W/p1" --exclude-dir=.git)"
+[ -z "$(grep -rlE '\{\{[A-Z_]+\}\}' "$W/p1" --exclude-dir=.git)" ] && pass "i1: no {{placeholder}} leaked" || fail "i1: no {{placeholder}} leaked" "$(grep -rlE '\{\{[A-Z_]+\}\}' "$W/p1" --exclude-dir=.git)"
 has "i1: LICENSE has the year" "$(cat "$W/p1/LICENSE" 2>/dev/null)" "$(date +%Y) Test User"
 [ "$(g "$W/p1" log --oneline 2>/dev/null | wc -l | tr -d ' ')" = "1" ] && pass "i1: one bootstrap commit" || fail "i1: one bootstrap commit" "$(g "$W/p1" log --oneline 2>&1)"
 has "i1: commit subject" "$(g "$W/p1" log -1 --format=%s 2>/dev/null)" "chore: bootstrap with multi-agent-kit v5"

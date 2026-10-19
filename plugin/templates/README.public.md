@@ -52,7 +52,7 @@
 
 ## License
 
-[MIT](LICENSE). [Credits: libraries, data sources or people to thank, one line.]
+{{LICENSE_LINE}}. [Credits: libraries, data sources or people to thank, one line.]
 
 <!--
 What this README deliberately leaves out: stack lists, badges, dev commands, env tables, file layout,

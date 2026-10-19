@@ -101,7 +101,9 @@ def run(args) -> int:
     else:
         kt.write_text(kittoml.render_kit_toml(visibility, args.license, args.lang, []), encoding="utf-8")
         log("done", f"kit.toml (visibility={visibility}, license={args.license}, readme_lang={args.lang})")
-    from_template("README.private.md" if args.private else "README.public.md", "README.md")
+    license_line = {"MIT": "[MIT](LICENSE)", "CC-BY-4.0": "[CC BY 4.0](LICENSE)"}.get(args.license, "All rights reserved")
+    from_template("README.private.md" if args.private else "README.public.md", "README.md",
+                  {"{{LICENSE_LINE}}": license_line})
     from_template("DEVELOPMENT.md", "docs/DEVELOPMENT.md")
     if args.license != "none":
         owner = args.owner or gitutil.config_get(root, "user.name") or "the authors"
