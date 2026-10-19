@@ -433,6 +433,31 @@ eq "M20f: non-ff merge of the migrated main untracks PROJECT.toml" "$(g "$R" ls-
 has "M20f: …PROJECT.toml is back with the owner's content" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "edited just before the rebase"
 lacks "M20f: …nothing moved to trash" "$MGO" "moved to"
 (cd "$R" && git checkout -q main 2>/dev/null)
+# ---- M21 (v5.0.1 review): the repo's own pre-rebase hook runs BEFORE the localfiles snapshot —
+# what it writes (atomic rename) or deletes is what the store keeps, and a refusing hook stops
+# the rebase with no snapshot taken
+R="$W/m21"; m20repo "$R"; g "$R" fetch -q origin
+ST21="$W/state/localfiles/$(printf '%s' "$R" | sha1sum | cut -c1-12)"
+cat > "$R/.git/hooks/pre-rebase" <<'EOF'
+#!/bin/sh
+printf 'status = "rewritten by the repo hook"\n' > PROJECT.toml.tmp && mv PROJECT.toml.tmp PROJECT.toml
+rm -f docs/plans/p.md
+EOF
+chmod +x "$R/.git/hooks/pre-rebase"
+RO="$(cd "$R" && git rebase origin/main 2>&1)"; RC=$?
+eq "M21: rebase through pre-migration history with a repo pre-rebase hook exit 0" "$RC" "0"
+has "M21: PROJECT.toml has what the repo hook wrote (atomic rename)" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "rewritten by the repo hook"
+absent "M21: …the plan the repo hook deleted stays deleted" "$R/docs/plans/p.md"
+exists "M21: …the other local-only files are back" "$R/docs/LESSONS.md"
+R="$W/m21b"; m20repo "$R"; g "$R" fetch -q origin
+ST21="$W/state/localfiles/$(printf '%s' "$R" | sha1sum | cut -c1-12)"
+printf '#!/bin/sh\necho "repo hook: not now" >&2\nexit 3\n' > "$R/.git/hooks/pre-rebase"; chmod +x "$R/.git/hooks/pre-rebase"
+rm -f "$R/docs/plans/p.md"; H21="$(g "$R" rev-parse HEAD)"
+RO="$(cd "$R" && git rebase origin/main 2>&1)"; RC=$?
+[ "$RC" -ne 0 ] && pass "M21b: a refusing repo pre-rebase hook stops the rebase (exit $RC)" || fail "M21b: refusing hook" "exit 0"
+has "M21b: …its message is shown" "$RO" "repo hook: not now"
+eq "M21b: …HEAD unchanged" "$(g "$R" rev-parse HEAD)" "$H21"
+eq "M21b: …no snapshot taken (the owner's rm is not trashed yet)" "$(ntrash "$ST21")" "0"
 git config --file "$W/gitconfig" --unset core.hooksPath
 
 # ---- M15 (review O8): an owner edit to a file migrate wrote, between --apply and --commit

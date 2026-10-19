@@ -14,9 +14,11 @@
 #   pre-rebase / post-checkout / post-merge / post-rewrite / post-commit: also keep the
 #     repo's local-only files (PROJECT.toml, docs/LESSONS.md, plans, .claude/) safe across
 #     checkouts / rebases through pre-migration commits ($kit_root/plugin/guard/localfiles.sh;
-#     pre-rebase snapshots the newest owner edits before git touches the tree; best effort,
-#     never changes the hook's exit status). pre-merge-commit / pre-applypatch are not used:
-#     git runs them after it has already rewritten the work tree.
+#     pre-rebase snapshots the newest owner edits before git touches the tree — AFTER the
+#     repo's own pre-rebase hook succeeded, so what that hook wrote or deleted is what the
+#     store keeps, and a refusing hook stops the rebase with no snapshot (v5.0.1 review); best
+#     effort, never changes the hook's exit status). pre-merge-commit / pre-applypatch are
+#     not used: git runs them after it has already rewritten the work tree.
 # Runs as `bash -p` (review R5-1): no shell functions imported from the environment (an
 # exported `cat` / `bash` / `git` function would blind or skip the guard) and no $BASH_ENV
 # for everything after this line; "$BASH" is the running bash by absolute path (no lookup).
@@ -26,12 +28,14 @@ SELF="${BASH_SOURCE[0]}"
 CFG_DIR="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)"
 CFG="$CFG_DIR/config.toml"
 INPUT=""
+localfiles() {  # best effort: never changes the hook's exit status
+    local root lf
+    root="$(sed -nE '/^[[:space:]]*\[/q; s/^[[:space:]]*kit_root[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CFG" 2>/dev/null | head -n 1)"
+    lf="$root/plugin/guard/localfiles.sh"
+    [[ -n "$root" && -f "$lf" ]] && "$BASH" -p "$lf" "$HOOK" "$@" </dev/null || true
+}
 case "$HOOK" in
-    pre-rebase|post-checkout|post-merge|post-rewrite|post-commit)
-        KIT_ROOT="$(sed -nE '/^[[:space:]]*\[/q; s/^[[:space:]]*kit_root[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CFG" 2>/dev/null | head -n 1)"
-        LF="$KIT_ROOT/plugin/guard/localfiles.sh"
-        [[ -n "$KIT_ROOT" && -f "$LF" ]] && "$BASH" -p "$LF" "$HOOK" "$@" </dev/null || true
-        ;;
+    post-checkout|post-merge|post-rewrite|post-commit) localfiles "$@" ;;
     pre-commit|pre-push)
         KIT_ROOT="$(sed -nE '/^[[:space:]]*\[/q; s/^[[:space:]]*kit_root[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CFG" 2>/dev/null | head -n 1)"
         GUARD="$KIT_ROOT/plugin/guard/$HOOK.sh"
@@ -52,6 +56,14 @@ case "$HOOK" in
 esac
 GCD="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || git rev-parse --git-common-dir 2>/dev/null)"
 LOCAL="${GCD:+$GCD/hooks/$HOOK}"
+if [[ "$HOOK" == pre-rebase ]]; then
+    # the repo's own hook first: its exit status decides; snapshot only once it said yes
+    if [[ -n "$LOCAL" && -f "$LOCAL" && -x "$LOCAL" && ! "$LOCAL" -ef "$SELF" ]]; then
+        "$LOCAL" "$@" || exit $?
+    fi
+    localfiles "$@"
+    exit 0
+fi
 if [[ -n "$LOCAL" && -f "$LOCAL" && -x "$LOCAL" && ! "$LOCAL" -ef "$SELF" ]]; then
     if [[ "$HOOK" == pre-push ]]; then
         printf '%s' "$INPUT" | "$LOCAL" "$@"
