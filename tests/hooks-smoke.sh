@@ -1602,7 +1602,9 @@ bgp deny "python pty spawning kit guard bypass denied"                "python3 -
 bgp deny "unbuffer kit guard bypass denied"                           'unbuffer kit guard bypass x'
 bgp deny "cd into the guard dir then write a bypass file denied"      "cd ~/.local/state/kit/guard && printf '{}' > bypass-0123456789ab"
 bgp deny "writing the guard audit log denied"                         'echo x >> ~/.local/state/kit/guard/audit.jsonl'
-bgp deny "PATH= before git push denied (gitleaks shadowing)"          'PATH=/tmp/fake:$PATH git push origin main'
+# review fix F7: PATH is not a guard input any more (the guard resolves gitleaks from
+# config.toml tools_dir / ~/.local/bin before PATH), so PATH= on a push is routine
+bgp ""   "PATH= before git push allowed (gitleaks resolved from tools_dir first)" 'PATH=/tmp/fake:$PATH git push origin main'
 bgp deny "removing a kit git-hooks shim denied"                       'rm ~/.config/kit/git-hooks/pre-commit'
 bgp deny "moving a kit git-hooks shim denied"                         'mv ~/.config/kit/git-hooks/pre-push /tmp/x'
 bgp deny "sed -i on ~/.gitconfig denied"                              "sed -i 's/hooksPath/x/' ~/.gitconfig"
@@ -1611,6 +1613,46 @@ bgp ""   "listing the shims allowed"                                  'ls -l ~/.
 bgp ""   "reading ~/.gitconfig allowed"                               'cat ~/.gitconfig'
 bgp ""   "listing the guard dir with 2>/dev/null allowed"             'ls ~/.local/state/kit/guard 2>/dev/null'
 bgp ""   "PATH= for a test runner allowed"                            'PATH=/tmp/bin:$PATH bash tests/guard-smoke.sh'
+# kit-v5 review round (Codex x Fable): F1 direct forms of the covered class
+bgp deny "env -i git push denied (no HOME → no global hooksPath)"   'env -i git push origin main'
+bgp deny "env -u HOME git push denied"                               'env -u HOME git push origin main'
+bgp deny "env -uHOME git commit denied"                              'env -uHOME git commit -m x'
+bgp deny "env --ignore-environment git commit denied"                'env --ignore-environment git commit -m x'
+bgp deny "env --unset=HOME git push denied"                          'env --unset=HOME git push origin main'
+bgp deny "env - git push denied"                                     'env - PATH=/usr/bin git push origin main'
+bgp deny "unset HOME then git push denied"                           'unset HOME; git push origin main'
+bgp deny "git -c include.path=<file> push denied"                    'git -c include.path=/tmp/x.conf push origin main'
+bgp deny "git -c include.path=<file> commit denied"                  'git -c include.path=/tmp/x.conf commit -m x'
+bgp deny "git -c includeIf.<cond>.path= commit denied"               'git -c includeIf.gitdir:/r/.path=/tmp/x.conf commit -m x'
+bgp deny "git --config-env=include.path= push denied"                'git --config-env=include.path=EVIL push origin main'
+bgp deny "GIT_CONFIG_KEY_n=include.path denied"                      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=include.path GIT_CONFIG_VALUE_0=/tmp/x git push'
+bgp deny "git config --global include.path <file> denied"            'git config --global include.path /tmp/x.conf'
+bgp ""   "env -i for a test runner allowed"                          'env -i PATH=/usr/bin bash tests/run-all.sh'
+bgp ""   "env -u HOME for a non-git command allowed"                 'env -u HOME python3 x.py'
+bgp ""   "reading include.path allowed"                              'git config --get-all include.path'
+# F6 direct Bash writes to the guard's own inputs
+bgp deny "sed -i on privacy.local.toml denied"                       "sed -i '/value/d' ~/.config/kit/privacy.local.toml"
+bgp deny "redirect into kit config.toml denied"                      "echo 'kit_root = \"/tmp/fake\"' > ~/.config/kit/config.toml"
+bgp deny "sed -i on an installed plugin/guard script denied"         "sed -i 's/exit 1/exit 0/' ~/.claude/plugins/cache/k/plugin/guard/pre-push.sh"
+bgp deny "cp over plugin/guard/pre-commit.sh denied"                 'cp /tmp/noop.sh plugin/guard/pre-commit.sh'
+bgp deny "tee -a into ~/.gitconfig denied"                           'echo x | tee -a ~/.gitconfig'
+bgp deny "git diff --output= into .git/config denied"                'git diff --output=.git/config'
+bgp deny "dd of=privacy.local.toml denied"                           'dd if=/dev/null of=/h/.config/kit/privacy.local.toml'
+bgp ""   "reading privacy.local.toml allowed"                        'cat ~/.config/kit/privacy.local.toml'
+bgp ""   "grep in plugin/guard allowed"                              'grep -n R3 plugin/guard/lib-guard.sh'
+bgp ""   "backing up kit config.toml (source operand) allowed"       'cp ~/.config/kit/config.toml /tmp/cfg.bak'
+# F7 false positives on routine work
+bgp ""   "sed -n reading .git/config allowed"                        "sed -n '1,20p' .git/config"
+bgp ""   "cat .git/config piped to sed allowed"                      "cat .git/config | sed 's/url/URL/'"
+bgp ""   "rm of something else, then reading .git/config allowed"    'rm -rf dist && cat .git/config'
+bgp ""   "rsync elsewhere, then reading git config allowed"          'rsync -a src/ dest/ && cat ~/.config/git/config'
+bgp ""   "export PATH then git push allowed"                         'export PATH="$HOME/.local/bin:$PATH" && git push origin main'
+bgp ""   "PATH= prefix on git push allowed"                          'PATH=/usr/local/bin:$PATH git push origin main'
+bgp ""   "git commit -uno allowed (n is -u's mode)"                  'git commit -m x -uno'
+bgp ""   "git commit -mnote allowed (n inside -m's value)"           'git commit -mnote'
+bgp ""   "bash -c with a message naming --no-verify allowed"         "bash -c 'git commit -m \"no --no-verify here\"'"
+bgp deny "git commit -an (clustered) still denied"                   'git commit -an -m x'
+bgp deny "doubly nested bash -c --no-verify still denied"            "bash -c \"bash -c 'git commit --no-verify -m x'\""
 
 # ===========================================================================
 # B-scope - guard-preserve runs in EVERY directory (orchestrator ruling

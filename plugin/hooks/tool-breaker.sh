@@ -60,9 +60,11 @@ hash_stdin() {
 # dry run and stays allowed), KIT_GUARD= (never honored by the guard anyway),
 # any core.hooksPath touch, and overriding the config that carries it
 # (GIT_CONFIG_GLOBAL/COUNT/PARAMETERS=, HOME=/XDG_CONFIG_HOME= on a
-# commit/push; KIT_STATE_HOME= too — it moves where the guard looks for a
-# bypass file), arming a bypass (`kit guard bypass`, any command naming a
-# guard/bypass-<id> file). The only model route is asking the USER for
+# commit/push, env -i / env -u HOME / unset HOME before one, -c include.path=;
+# KIT_STATE_HOME= too — it moves where the guard looks for a bypass file),
+# arming a bypass (`kit guard bypass`, writing a guard/bypass-<id> file), and
+# direct writes to the guard's inputs (shims, git config, privacy.local.toml,
+# kit config.toml, plugin/guard/). The only model route is asking the USER for
 # `kit guard bypass "<reason>"` (10-minute, single-use, audited). Humans
 # keep `--no-verify` — the audit catches that after the fact.
 # Scope (Phase 3 ruling R-guard-scope): the global git guard covers EVERY
@@ -98,29 +100,86 @@ guard_flatten() {  # stdin: raw command → stdout: flattened single line
           print out }' 2>/dev/null
 }
 GP_SEP='(^|[;&|(`[:space:]])'
+GP_NEST='(^|[;&|(`[:space:]])((bash|sh|zsh|dash|ksh)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*c|eval|xargs|script)([[:space:]]|$)'
+# guard_unquote1: remove ONE level of shell quoting, keeping quoted text verbatim
+# (inner quotes survive for the next guard_flatten); newlines become ';'
+guard_unquote1() {
+    tr '\n' ';' | awk '
+        { out=""; st=0; len=length($0)
+          for(i=1;i<=len;i++){ c=substr($0,i,1)
+            if(st==0){
+              if(c=="\\"){i++; out=out substr($0,i,1); continue}
+              if(c=="$" && substr($0,i+1,1)=="\047"){st=3; i++; continue}
+              if(c=="\047"){st=1; continue}
+              if(c=="\""){st=2; continue}
+              out=out c; continue }
+            if(st==1){ if(c=="\047") st=0; else out=out c; continue }
+            if(st==2){ if(c=="\\"){ n=substr($0,i+1,1); if(n=="\""||n=="\\"||n=="$"||n=="`"){i++; out=out n} else out=out c; continue }
+                       if(c=="\"") st=0; else out=out c; continue }
+            if(st==3){ if(c=="\\"){i++; out=out substr($0,i,1); continue}
+                       if(c=="\047") st=0; else out=out c; continue }
+          }
+          print out }' 2>/dev/null
+}
 # the git token may carry a path (/usr/bin/git, ./git); wrappers like
 # `command git` / `env git` / `\git` are covered by GP_SEP + flattening
 GP_GSEP='(^|[;&|(`[:space:]]|/)'
 GP_GLOBAL='([[:space:]]+(-[Cc][[:space:]]+[^[:space:];&|]+|--[A-Za-z][A-Za-z-]*(=[^[:space:];&|]*)?|-[A-Za-z]))*'
 GP_CFG="${GP_GSEP}git${GP_GLOBAL}[[:space:]]+config[[:space:]]([^;&|]*[[:space:]])?"
-GP_ENVV='(HOME|XDG_CONFIG_HOME|KIT_STATE_HOME|PATH|GIT_CONFIG_(GLOBAL|COUNT|PARAMETERS))'
+# PATH is not here (review F7): the guard resolves gitleaks from config.toml tools_dir
+# (default ~/.local/bin) before PATH, and `export PATH=~/.local/bin:$PATH` is routine
+GP_ENVV='(HOME|XDG_CONFIG_HOME|KIT_STATE_HOME|GIT_CONFIG_(GLOBAL|COUNT|PARAMETERS))'
 GP_GITCP="([^[:space:];&|]*/)?git([[:space:]][^;&|]*)?[[:space:]](commit|push)([[:space:]]|\$)"
+# Guard inputs a Bash command must not WRITE (reads stay allowed): the guard's state
+# (bypass-<id>, audit.jsonl), the git-hooks shims, git config files (they carry
+# core.hooksPath), privacy.local.toml, the kit config.toml (kit_root → the guard
+# scripts) and the guard scripts themselves (plugin/guard/).
+GP_PROT='(kit/guard|kit/git-hooks|guard/bypass-|bypass-[0-9a-f]{6,}|guard/audit\.jsonl|\.gitconfig|\.git/config|/git/config|config\.worktree|privacy\.local\.toml|kit/config\.toml|plugin/guard/)'
+# guard_write_hit <flattened text>: 0 when a simple command WRITES a protected path.
+# Per command segment (split on ; && || | &): a redirect whose target is protected,
+# or a write verb whose written operand is protected — rm/mv/touch/truncate/chmod/
+# chown/tee/shred/unlink: any operand; cp/ln/install/rsync: the destination (last
+# operand); sed/perl/ruby only with -i/--in-place; dd of=; any --output=. A mention
+# elsewhere in the line (`rm -rf dist && cat .git/config`) is not a write (review F7).
+guard_write_hit() {
+    printf '%s' "$1" | grep -qE "$GP_PROT" || return 1
+    local seg w last
+    while IFS= read -r seg || [[ -n "$seg" ]]; do
+        printf '%s' "$seg" | grep -qE "$GP_PROT" || continue
+        printf '%s' "$seg" | grep -qE ">[[:space:]]*[^[:space:]]*${GP_PROT}" && return 0
+        printf '%s' "$seg" | grep -qE "(^|[[:space:]])(of=|--output[=[:space:]])[^[:space:]]*${GP_PROT}" && return 0
+        # the command word: skip assignments and transparent wrappers, then its basename
+        read -ra w <<< "$seg"
+        local i=0
+        while [[ $i -lt ${#w[@]} ]] && [[ "${w[$i]}" =~ ^([A-Za-z_][A-Za-z0-9_]*=.*|\(|sudo|command|env|nohup|time|exec|builtin|-.*)$ ]]; do i=$((i + 1)); done
+        [[ $i -lt ${#w[@]} ]] || continue
+        local verb="${w[$i]##*/}" rest="${w[*]:$((i + 1))}"
+        last="${w[${#w[@]}-1]}"
+        case "$verb" in
+            rm|mv|touch|truncate|chmod|chown|chgrp|tee|shred|unlink)
+                printf '%s' "$rest" | grep -qE "$GP_PROT" && return 0 ;;
+            cp|ln|install|rsync)
+                printf '%s' "$last" | grep -qE "$GP_PROT" && [[ $((i + 1)) -lt ${#w[@]} ]] && return 0 ;;
+            sed|perl|ruby)
+                printf ' %s ' "$rest" | grep -qE '[[:space:]](-[A-Za-z]*i[^[:space:]]*|--in-place[^[:space:]]*)[[:space:]]' \
+                    && printf '%s' "$rest" | grep -qE "$GP_PROT" && return 0 ;;
+        esac
+    done < <(printf '%s' "$1" | sed -E 's/[0-9]*>&[0-9-]+//g; s/&>/>/g; s/(\|\||&&|[;|&])/\n/g')
+    return 1
+}
 guard_preserve_hit() {  # $1 = flattened text → 0 if it bypasses the guard
     local t="$1"
     # --no-verify on any git subcommand (git accepts unique abbreviations)
     printf '%s' "$t" | grep -qE "${GP_GSEP}git[[:space:]]([^;&|]*[[:space:]])?--no-veri[a-z]*([=[:space:]]|\$)" && return 0
     # git commit -n (= --no-verify), clustered short flags included
-    printf '%s' "$t" | grep -qE "${GP_GSEP}git${GP_GLOBAL}[[:space:]]+commit([[:space:]]+[^;&|]*)?[[:space:]]-[A-Za-z]*n[A-Za-z]*([[:space:]]|\$)" && return 0
+    # (letters before the n must be flag letters, not -m/-F/-c/-C/-t/-u/-S whose value
+    # follows attached: `-uno` / `-mnote` are not -n — review F7)
+    printf '%s' "$t" | grep -qE "${GP_GSEP}git${GP_GLOBAL}[[:space:]]+commit([[:space:]]+[^;&|]*)?[[:space:]]-[abd-ln-sv-zA-BD-EG-RT-Z]*n[A-Za-z]*([[:space:]]|\$)" && return 0
     # the bypass itself is USER-only (design §7.4): `kit guard bypass`, or
     # forging its state file (<state>/guard/bypass-<repo-id>) by hand
     printf '%s' "$t" | grep -qE "${GP_GSEP}kit[[:space:]]+guard[[:space:]]+bypass([[:space:]]|\$)" && return 0
-    # … or writing the guard's own files (state: bypass-<id>, audit.jsonl; the
-    # git-hooks shims) or a git config file (it carries core.hooksPath) with a
-    # redirect / copy-like command (final review I4). Reads stay allowed;
-    # `2>/dev/null` is not a write.
-    if printf '%s' "$t" | grep -qE '(kit/guard|kit/git-hooks|guard/bypass-|bypass-[0-9a-f]{6,}|guard/audit\.jsonl|\.gitconfig|\.git/config|/git/config|config\.worktree)'; then
-        printf '%s' "$t" | grep -qE "((^|[^0-9&>])>|${GP_GSEP}(cp|mv|ln|rm|tee|install|touch|dd|rsync|sed|truncate|chmod|perl)([[:space:]]|\$))" && return 0
-    fi
+    # … or writing the guard's own inputs (final review I4; review F6/F7)
+    guard_write_hit "$t" && return 0
     # git send-pack pushes without running pre-push
     printf '%s' "$t" | grep -qE "${GP_GSEP}git(${GP_GLOBAL}[[:space:]]+|-)send-pack([[:space:]]|\$)" && return 0
     # KIT_GUARD= as an assignment (prefix, export, env) — a grep for it is fine
@@ -134,6 +193,15 @@ guard_preserve_hit() {  # $1 = flattened text → 0 if it bypasses the guard
     printf '%s' "$t" | grep -qiE "${GP_CFG}-?-?(remove|rename)-section[[:space:]]+core([[:space:]]|\$)" && return 0
     printf '%s' "$t" | grep -qiE '(^|[[:space:]])(-c[[:space:]]*|--config-env[=[:space:]])core\.hookspath=' && return 0
     printf '%s' "$t" | grep -qiE 'GIT_CONFIG_[A-Z0-9_]*=[^[:space:]]*core\.hookspath' && return 0
+    # an included config file can carry core.hooksPath too (review F1): per-command
+    # -c / --config-env include[If.<cond>].path=, GIT_CONFIG_KEY_n, or a persistent write
+    printf '%s' "$t" | grep -qiE '(^|[[:space:]])(-c[[:space:]]*|--config-env[=[:space:]])include(if\.[^[:space:]]*)?\.path=' && return 0
+    printf '%s' "$t" | grep -qiE 'GIT_CONFIG_[A-Z0-9_]*=[^[:space:]]*include(if\.[^[:space:]]*)?\.path' && return 0
+    printf '%s' "$t" | grep -qiE "${GP_CFG}include(if\.[^[:space:]]*)?\.path[[:space:]]+[^-;&|[:space:]]" && return 0
+    # running git without HOME finds no global config, hence no hooksPath (review F1):
+    # env -i / env - / --ignore-environment / -u HOME / --unset=HOME, or `unset HOME` first
+    printf '%s' "$t" | grep -qE "${GP_SEP}env[[:space:]]([^;&|]*[[:space:]])?(-[A-Za-z]*i[A-Za-z]*|-|--ignore-environment|-[A-Za-z]*u[[:space:]]*HOME|--unset[=[:space:]]*HOME)[[:space:]]([^;&|]*[[:space:]])?${GP_GITCP}" && return 0
+    printf '%s' "$t" | grep -qE "${GP_SEP}unset[[:space:]]+(-[a-z][[:space:]]+)*([^;&|]*[[:space:]])?HOME([[:space:]]|[;&|]|\$).*${GP_SEP}${GP_GITCP}" && return 0
     # redirecting the config that carries the global hooksPath, for a commit/push:
     # prefix assignment on the git command itself ...
     printf '%s' "$t" | grep -qE "${GP_SEP}${GP_ENVV}=[^[:space:]]*[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*${GP_GITCP}" && return 0
@@ -154,10 +222,18 @@ guard_preserve_cmd_hit() {  # $1 = raw Bash command → 0 if it bypasses the gua
        && printf '%s' "$bare" | grep -qE '(pty|unbuffer|expect|script|socat|python|perl|ruby|node)'; then
         return 0
     fi
-    # nested shell code (bash/sh -c, eval, xargs): scan it fully unquoted too
-    if printf '%s' "$flat" | grep -qE "${GP_SEP}((bash|sh|zsh|dash|ksh)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*c|eval|xargs|script)([[:space:]]|\$)"; then
-        guard_preserve_hit "$(printf '%s' "$cmd" | tr '\n' ';' | tr -d "\"'\\\\")" && return 0
-    fi
+    # nested shell code (bash/sh -c, eval, xargs, script): strip ONE quoting level and
+    # scan again, as the inner shell will see it; go one level deeper only while the
+    # text still holds another nested shell (a commit message that merely mentions
+    # --no-verify inside bash -c '…' stays data — review F7)
+    local lvl="$cmd" k nest
+    for k in 1 2 3; do
+        nest=$(printf '%s' "$flat" | sed 's/[[:space:]]/  /g' | grep -oE "${GP_NEST}" | wc -l)
+        [[ $nest -ge $k ]] || break
+        lvl=$(printf '%s' "$lvl" | guard_unquote1)
+        flat=$(printf '%s' "$lvl" | guard_flatten)
+        guard_preserve_hit "$flat" && return 0
+    done
     return 1
 }
 guard_preserve_deny() {
