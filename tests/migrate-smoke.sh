@@ -624,6 +624,32 @@ has "M24b: re-clone: PROJECT.toml restored" "$(cat "$R/PROJECT.toml" 2>/dev/null
 eq "M24b: …the tracked PROJECT.toml.kit-tmp untouched" "$(cat "$R/PROJECT.toml.kit-tmp" 2>/dev/null)" "tracked-tmp"
 eq "M24b: …tree clean" "$(g "$R" status --porcelain)" ""
 eq "M24b: …no temp dir left under the store root" "$(find "$W/state/localfiles" -maxdepth 1 -name '.tmp.*' 2>/dev/null | wc -l | tr -d ' ')" "0"
+# ---- M25 (v5.0.2 review, Fable P3-1): a repository created at the path AFTER the store's last
+# snapshot (HEAD's reflog starts from the null commit later, and does not hold the snapshot's
+# line) is a fresh clone too, however it got there — `clone --no-checkout` + checkout, init + pull
+ST25="$(stkey "$R")"
+# (a) clone --no-checkout, then checkout: post-checkout's previous HEAD is NOT null here
+mv "$R" "$R.a"; git clone -q --no-checkout "$R.git" "$R" 2>/dev/null; CO25="$(g "$R" checkout main 2>&1)"
+has "M25a: --no-checkout + checkout: PROJECT.toml restored" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "m24-owner"
+has "M25a: …one restore line" "$CO25" "restored"
+lacks "M25a: …nothing moved to trash" "$CO25" "moved to"
+eq "M25a: …the trash is empty" "$(st_trash "$ST25")" "0"
+# (b) git init + remote add + pull (no hook runs): the next snapshot point restores, never trashes
+mv "$R" "$R.b"; git init -q "$R"; g "$R" remote add origin "$R.git"; g "$R" pull -q origin main 2>/dev/null
+SO25="$(cd "$R" && python3 "$KIT_ROOT/bin/kit" guard status 2>&1)"
+has "M25b: init + pull, then kit guard status: PROJECT.toml restored" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "m24-owner"
+lacks "M25b: …nothing moved to trash" "$SO25" "moved to"
+eq "M25b: …the trash is empty" "$(st_trash "$ST25")" "0"
+# (c) once this repository has snapshotted, an owner deletion is an owner deletion again
+rm "$R/PROJECT.toml"; SO25="$(cd "$R" && bash "$LF" snapshot 2>&1)"
+has "M25c: then the owner deletes PROJECT.toml: it moves to trash" "$SO25" "moved to"
+absent "M25c: …and is not put back" "$R/PROJECT.toml"
+# (d) another repository via --no-checkout: set aside, nothing restored, nothing trashed
+printf 'name = "m24-owner"\n' > "$R/PROJECT.toml"; (cd "$R" && bash "$LF" snapshot 2>/dev/null)
+mv "$R" "$R.d"; git clone -q --no-checkout "$O.git" "$R" 2>/dev/null; CO25="$(g "$R" checkout main 2>&1)"
+absent "M25d: another repo via --no-checkout: nothing restored" "$R/PROJECT.toml"
+lacks "M25d: …nothing moved to trash" "$CO25" "moved to"
+has "M25d: …the store is set aside (hint)" "$CO25" "kit guard status"
 git config --file "$W/gitconfig" --unset core.hooksPath
 
 # ---- M15 (review O8): an owner edit to a file migrate wrote, between --apply and --commit

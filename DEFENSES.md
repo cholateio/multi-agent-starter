@@ -296,7 +296,9 @@ claude 啟動時的環境)。
   **同一路徑重新 clone**(v5.0.2,實際回報):store 以**路徑**為鍵(`sha1(toplevel)`),把舊 clone 移走、
   在同一個目錄 `git clone`,clone 自己的 post-checkout 會看到前一個 clone 的 store——舊版把那些「不在
   工作樹」的檔當 owner 刪的搬進 trash。現在 post-checkout 的前一個 HEAD 是 null(新 clone / 新 worktree
-  的第一次 checkout)且這個路徑已有 store 時**一律不 prune、不進 trash**:每次快照把 repo 的**身分**記進
+  的第一次 checkout)且這個路徑已有 store,或 repo 本身比 store 的最後快照還新(HEAD reflog 從 null commit
+  開始、時間不早於快照、不含快照記下的那行或 `.git` 是另一個 inode——`clone --no-checkout` 再 checkout、
+  `git init` + pull 之後的下一個快照點;v5.0.2 review)時**一律不 prune、不進 trash**:每次快照把 repo 的**身分**記進
   `<store>/remote-id`——只看 `origin`(沒有 origin 就看唯一的 remote;好幾個 remote 又沒有 origin → 不記,
   fork 的 upstream 這類非 origin remote 永遠不拿來比);github.com / gitlab.com / bitbucket.org 的 URL
   (scp 式、`ssh://`、`https://`)正規化成小寫 `host/owner/repo`,同一 repo 的 ssh 與 https 算同一個;
@@ -407,9 +409,10 @@ recorded」。雜湊工具本身只用固定絕對路徑(`/usr/bin/sha256sum`、
    存的修改不在裡面(`<store>/prev/` 留前一版);沒有每個 prompt 都快照(成本),也沒有包裝
    `reset` 的指令(git 沒有可掛的 pre-reset hook)。
    超過 8 MiB / 第 2000 個之後的檔不受保護,只有警告(review R3-3)。根治是改寫歷史(design §12 步驟 6)。
-   **同一路徑重新 clone**(v5.0.2):只認「第一次 checkout」(post-checkout 前一個 HEAD 為 null);
-   `git clone --no-checkout` 之後再 checkout、或不經 clone 直接把別的 `.git` 搬進同一路徑,hook 分不出
-   是新 clone,照「誰刪的」規則走(可能進 trash,可從 trash 複製回來)。身分只認 `origin`(或唯一的
+   **同一路徑重新 clone**(v5.0.2):認「第一次 checkout」(post-checkout 前一個 HEAD 為 null)與「repo
+   比 store 的最後快照新」(HEAD reflog 從 null commit 開始);把一個**舊的** `.git`(reflog 早於快照)搬進
+   同一路徑、或 reflog 被清掉的 repo,hook 分不出是另一個 repo,照「誰刪的」規則走(可能進 trash,
+   可從 trash 複製回來,`kit guard status` 會列出)。身分只認 `origin`(或唯一的
    remote),三個 hosted 網域以外逐字比:自架 git server 的 ssh 與 https URL、本機路徑寫法不同
    (`/srv/proj` 與 `/srv/proj/`、相對路徑)、換了 origin 名稱都算「不同」→ store 被保留在 `.aside.*`、
    不自動放回(安全側)。反過來,同一個 hosted repo 的 ssh / https 不分 SSH 帳號:靠不同 SSH 帳號區分

@@ -40,6 +40,8 @@
 # clone lacks is COPIED back (never over an existing path; one line says what); otherwise (another
 # repository, no unambiguous identity, or a store from an older kit with no record) the store is set aside whole as
 # <store>.aside.<timestamp> — nothing restored, nothing trashed — and `kit guard status` lists it.
+# The same rule runs at any hook / snapshot when the repository itself is newer than the store's
+# last snapshot (lf_store_predates_repo: `clone --no-checkout` + checkout, init + pull).
 #
 #   localfiles.sh snapshot [--report]         kit migrate / kit guard status (--report) / session start
 #   localfiles.sh post-commit                 (snapshot)
@@ -144,10 +146,35 @@ lf_busy() {
 # The snapshot mark (<store>/mark): when the last snapshot ran (epoch) and the newest line of
 # HEAD's reflog at that time. Every reflog entry after it is a git operation since then.
 lf_reflog() { git rev-parse --git-path logs/HEAD 2>/dev/null; }
-lf_mark() {
+lf_gitdir_ino() { stat -c %i "$(git rev-parse --absolute-git-dir 2>/dev/null)" 2>/dev/null; }
+lf_mark() {  # line 3 (v5.0.2): the git dir's inode — tells two clones apart within one second
     local log; log="$(lf_reflog)"
-    { date +%s; [[ -n "$log" && -f "$log" ]] && tail -n 1 "$log"; } > "$STORE/mark.kit-tmp" 2>/dev/null \
+    { date +%s; if [[ -n "$log" && -f "$log" ]]; then tail -n 1 "$log"; else echo; fi; lf_gitdir_ino; } > "$STORE/mark.kit-tmp" 2>/dev/null \
         && mv -f "$STORE/mark.kit-tmp" "$STORE/mark" 2>/dev/null
+}
+# lf_store_predates_repo: this repository came into being after the store's last snapshot — HEAD's
+# reflog starts from the null commit (a clone, an init + fetch / pull) no earlier than the mark's
+# time and does not hold the mark's line → the store is an earlier repository's at this path (it
+# catches what the null-previous-HEAD post-checkout cannot: `clone --no-checkout` + checkout,
+# init + pull, which runs no hook — at the next snapshot point). Never true once this repository
+# has snapshotted: the mark then holds one of its reflog lines.
+lf_store_predates_repo() {
+    local log t="" line="" ino="" first born
+    [[ -f "$STORE/mark" ]] || return 1
+    log="$(lf_reflog)"
+    [[ -n "$log" && -f "$log" ]] || return 1
+    { IFS= read -r t; IFS= read -r line; IFS= read -r ino; } < "$STORE/mark"
+    [[ "$t" =~ ^[0-9]+$ ]] || return 1
+    IFS= read -r first < "$log" || return 1
+    [[ "$first" =~ ^0+\  ]] || return 1
+    born="$(printf '%s\n' "${first%%$'\t'*}" | awk '{ print $(NF - 1) }')"
+    [[ "$born" =~ ^[0-9]+$ && $born -ge $t ]] || return 1
+    # the mark's reflog line is in this reflog → this repository's own snapshot, unless the git dir
+    # is another one (a re-clone within the same second writes a byte-identical first line)
+    if [[ -n "$line" ]] && grep -qxF -- "$line" "$log"; then
+        [[ -n "$ino" && "$ino" != "$(lf_gitdir_ino)" ]] || return 1
+    fi
+    return 0
 }
 # lf_touched: the commits a git operation since the last snapshot went through — LF_EXTRA
 # (the hook's previous HEAD / rebased range) + both sides of every HEAD reflog entry after the
@@ -465,6 +492,13 @@ LF_EXTRA=()
 # an abort or a hook-less finish, the next snapshot point via the reflog)
 if [[ "$MODE" != post-rewrite ]] && lf_busy; then
     [[ "${2:-}" == --report ]] && echo "kit: a rebase is in progress — local-only snapshot deferred until it finishes" >&2
+    exit 0
+fi
+# a repository created at this path after the store's last snapshot (v5.0.2 review): the store is
+# an earlier clone's — the fresh-clone rule, whatever brought the new repository here
+if [[ -d "$STORE" ]] && lf_store_predates_repo; then
+    fresh_clone
+    [[ "$MODE" == snapshot && "${2:-}" == --report ]] && trash_note
     exit 0
 fi
 case "$MODE" in
