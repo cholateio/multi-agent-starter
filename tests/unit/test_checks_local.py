@@ -241,7 +241,7 @@ class TestLocalChecks(IsolatedTestCase):
         H = "/ho" "me/"
         for priv in (PRIV, None):
             self.assertEqual(redact(H + "otheruser/x", priv), H + "<user>/x")
-            self.assertEqual(redact("see /mnt/" "c/Users/Bob/Desktop", priv), "see /mnt/c/Users/<user>/Desktop")
+            self.assertEqual(redact("see /mnt/" "c/Users/Bob/Desktop", priv), "see /mnt/" "c/Users/<user>/Desktop")
             self.assertEqual(redact("C:\\" "Users\\Bob\\Documents", priv), "C:\\Users\\<user>\\Documents")
             self.assertEqual(redact("/Users/" "alice/src", priv), "/Users/<user>/src")
             self.assertEqual(redact(H + "carol", priv), H + "<user>")
