@@ -80,7 +80,7 @@ while read -r lref lsha rref rsha; do
     else
         # the tip has no kit.toml: is this still a kit push? (review O5, R3-2, R4-2, R4-3)
         RSHA_GONE=0
-        [[ -n "${rsha:-}" && ! "$rsha" =~ ^0+$ ]] && ! git cat-file -e "${rsha}^{commit}" 2>/dev/null && RSHA_GONE=1
+        [[ -n "${rsha:-}" && ! "$rsha" =~ ^0+$ ]] && ! guard_inspectable "$rsha" && RSHA_GONE=1
         if KT="$(guard_kit_toml_before "$D/revs" "${rsha:-}")"; then REMOVED=1
         else
             # 1) local evidence, no network: local branch tips, advertised objects already here
@@ -91,7 +91,7 @@ while read -r lref lsha rref rsha; do
             HSHA=""
             if [[ $HAS_KIT -eq 0 && $REMOTE_HAS_OK -eq 1 ]]; then
                 HSHA="$(awk -F'\t' '$2 == "HEAD" { print $1; exit }' "$TMPD/ls-remote")"
-                [[ -n "$HSHA" ]] && git cat-file -e "${HSHA}^{commit}" 2>/dev/null && HSHA=""
+                [[ -n "$HSHA" ]] && guard_inspectable "$HSHA" && HSHA=""
             fi
             if [[ $RSHA_GONE -eq 1 || -n "$HSHA" ]]; then
                 SPECS=()
@@ -99,9 +99,9 @@ while read -r lref lsha rref rsha; do
                 [[ -n "$HSHA" ]] && SPECS+=("+HEAD:refs/kit-probe/head")
                 guard_probe "$URL" "${SPECS[@]}"
                 if [[ $RSHA_GONE -eq 1 ]]; then
-                    if [[ "$(guard_probe_rev refs/kit-probe/old)" == "$rsha" ]]; then
-                        if K2="$(guard_probe_kit_toml "$rsha")"; then KT="$K2"; REMOVED=1; fi
-                    else
+                    PRC=2; [[ "$(guard_probe_rev refs/kit-probe/old)" == "$rsha" ]] && { K2="$(guard_probe_kit_toml "$rsha")"; PRC=$?; }
+                    if [[ $PRC -eq 0 ]]; then KT="$K2"; REMOVED=1
+                    elif [[ $PRC -eq 2 ]]; then
                         # R4-2: an old tip that cannot be inspected — whatever the reason (offline,
                         # the hook's own connection cannot authenticate) — fails closed
                         HAS_KIT=1
@@ -109,10 +109,10 @@ while read -r lref lsha rref rsha; do
                     fi
                 fi
                 if [[ -n "$HSHA" && $HAS_KIT -eq 0 && $REMOVED -eq 0 ]]; then
-                    H2="$(guard_probe_rev refs/kit-probe/head)"
-                    if [[ -n "$H2" ]]; then
-                        if K2="$(guard_probe_kit_toml "$H2")"; then KT="$K2"; HAS_KIT=1; fi
-                    else
+                    H2="$(guard_probe_rev refs/kit-probe/head)"; PRC=2
+                    [[ -n "$H2" ]] && { K2="$(guard_probe_kit_toml "$H2")"; PRC=$?; }
+                    if [[ $PRC -eq 0 ]]; then KT="$K2"; HAS_KIT=1
+                    elif [[ $PRC -eq 2 ]]; then
                         HAS_KIT=1; KT=""      # fail closed: R2 applies, and the push needs the user
                         guard_add BLOCK "R2 kit-status-unknown" "$lref" "the pushed tip has no kit.toml and the remote's HEAD could not be fetched to check whether this is a kit repo — git fetch the remote and push again; if intended, the user runs kit guard bypass"
                     fi

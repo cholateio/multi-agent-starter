@@ -1076,6 +1076,18 @@ eq   "H-R4-2: …remote main unchanged" "$(git -C "$K.git" rev-parse main)" "$(g
 J2="$W/j2"; rm -rf "$J2"; git init -q "$J2"; git -C "$J2" remote add origin "$K.git"; echo hi > "$J2/hi.txt"; git -C "$J2" add hi.txt; nc "$J2"
 PO="$(cd "$J2" && PATH="$W/faketo:$GL_PATH" git -c core.hooksPath="$TH" push -q origin main:refs/heads/new-ref 2>&1)"; PC=$?
 eq   "H-R4-2: a NEW ref (zero rsha) with the hook offline uses local signals only (clean non-kit push passes)" "$PC" "0"
+# R5-2: a partial clone (--filter=tree:0) holds the remote's tips as commits WITHOUT trees
+# (lazy fetch broken: origin gone): "commit present" is not "inspectable" — probe or fail closed
+git -C "$K.git" config uploadpack.allowFilter true; PCL="$W/pcl"; rm -rf "$PCL"
+git clone -q --filter=tree:0 --no-checkout "file://$K.git" "$PCL"; git -C "$PCL" config remote.origin.url "$W/no-such-origin"
+pb="$(printf 'status = "x"\n' | git -C "$PCL" hash-object -w --stdin)"; pt="$(printf '100644 blob %s\tPROJECT.toml\n' "$pb" | git -C "$PCL" mktree)"
+git -C "$PCL" update-ref refs/heads/x "$(git -C "$PCL" commit-tree "$pt" -m orphan)"
+PO="$(cd "$PCL" && PATH="$W/faketo:$GL_PATH" git -c core.hooksPath="$TH" push -q -f "$K.git" x:main 2>&1)"; PC=$?
+eq   "R5-2: force-push over a tree-less old tip with the hook offline → blocked" "$PC" "1"
+has  "R5-2: …kit-status-unknown" "$PO" "[R2 kit-status-unknown]"
+PO="$(cd "$PCL" && PATH="$GL_PATH" git -c core.hooksPath="$TH" push -q "$K.git" x:refs/heads/side 2>&1)"; PC=$?
+eq   "R5-2: new ref while the remote HEAD is here only as a tree-less commit → HEAD probed, blocked" "$PC" "1"
+has  "R5-2: …R2 (kit status from the remote HEAD)" "$PO" "[R2 forbidden-path] PROJECT.toml"
 
 # R4-3: classify from local branch tips first; then fetch ONLY the old tip of the pushed ref
 # and the remote HEAD — shallow, blob-less where supported, into a throwaway repo (nothing

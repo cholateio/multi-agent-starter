@@ -163,11 +163,23 @@ guard_probe() {
         fetch -q --no-tags --no-write-fetch-head --no-recurse-submodules --depth=1 --filter=blob:none \
         kitprobe "$@" </dev/null >/dev/null 2>&1
 }
+# guard_inspectable <commit>: its root tree — and kit.toml's blob when the tree lists one —
+# are here, so the local kit.toml lookups are conclusive (review R5-2: a partial clone can
+# hold a commit without its tree); no lazy fetch (git ≥ 2.44), the probe handles the rest
+guard_inspectable() {
+    GIT_NO_LAZY_FETCH=1 git cat-file -e "$1^{tree}" 2>/dev/null || return 1
+    local b; b="$(git rev-parse -q --verify "$1:kit.toml" 2>/dev/null)" || return 0
+    GIT_NO_LAZY_FETCH=1 git cat-file -e "$b" 2>/dev/null
+}
 guard_probe_rev() { [[ -d "${PROBE:-}" ]] && guard_pgit rev-parse -q --verify "$1^{commit}" 2>/dev/null; }
-# guard_probe_kit_toml <commit>: rc 0 when its tree has kit.toml (printed when readable)
+# guard_probe_kit_toml <commit>: rc 0 when its tree has kit.toml (printed when readable),
+# rc 1 when it has none, rc 2 when the tree cannot be read (lazy fetch failed — review R5-2)
 guard_probe_kit_toml() {
-    [[ -n "$(guard_pgit ls-tree "$1" -- kit.toml 2>/dev/null)" ]] || return 1
+    local t
     guard_net_env
+    t="$("${GN_ENV[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR \
+        git -C "$PROBE" ls-tree "$1" -- kit.toml </dev/null 2>/dev/null)" || return 2
+    [[ -n "$t" ]] || return 1
     "${GN_ENV[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR \
         git -C "$PROBE" cat-file blob "$1:kit.toml" </dev/null 2>/dev/null
     return 0
