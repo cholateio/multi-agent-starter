@@ -49,9 +49,12 @@ eq "s1: exit 0" "$CODE" "0"
 has "s1: marketplace add <kit_root>" "$(cat "$W/claude.log")" "plugin marketplace add $KIT_ROOT"
 has "s1: plugin install --scope user" "$(cat "$W/claude.log")" "plugin install kit@multi-agent-kit --scope user"
 S="$M/home/.claude/settings.json"
-for p in 'Bash(git status*)' 'Bash(git diff*)' 'Bash(git log*)' 'Bash(git show*)' 'Bash(ls*)'; do
-  has "s1: settings has $p" "$(jq -r '.permissions.allow[]' "$S" 2>/dev/null)" "$p"
+for p in 'Bash(git status)' 'Bash(git status *)' 'Bash(git diff)' 'Bash(git diff *)' 'Bash(git log)' 'Bash(git log *)' \
+         'Bash(git show)' 'Bash(git show *)' 'Bash(ls)' 'Bash(ls *)'; do
+  eq "s1: settings has exactly $p" "$(jq -r --arg p "$p" '[.permissions.allow[] | select(. == $p)] | length' "$S" 2>/dev/null)" "1"
 done
+# review fix F2: no space before * = prefix match (`git diff*` covers `git difftool --extcmd=…`, `ls*` covers lsof)
+eq "s1: no space-less wildcard in the baseline" "$(jq -r '[.permissions.allow[] | select(test("[^ ]\\*\\)$"))] | length' "$S" 2>/dev/null)" "0"
 lacks "s1: settings has no timeout" "$(cat "$S")" "timeout"
 has "s1: config.toml kit_root" "$(cat "$(CFG)/config.toml")" "kit_root = \"$KIT_ROOT\""
 has "s1: config.toml [audit] exclude" "$(cat "$(CFG)/config.toml")" "exclude = []"
@@ -81,6 +84,15 @@ lacks "s2: drops Bash(timeout *)" "$(cat "$S")" "timeout"
 eq "s2: keeps other keys" "$(jq -r .model "$S")" "x"
 ls "$M/home/.claude/" | grep -q '^settings.json.bak-' && pass "s2: .bak- backup written" || fail "s2: .bak- backup written" "none"
 has "s2: prints a unified diff" "$OUT" '-      "Bash(timeout *)"'
+# a machine that ran the pre-fix v5 setup: the space-less wildcards are narrowed away
+fresh 2b
+mkdir -p "$M/home/.claude"
+printf '{"permissions":{"allow":["Bash(git diff*)","Bash(ls*)","Bash(git status*)","Bash(git log*)","Bash(git show*)","Bash(pnpm *)"]}}\n' | jq . > "$M/home/.claude/settings.json"
+OUT="$(ks)"
+S="$M/home/.claude/settings.json"
+eq "s2b: pre-fix wide wildcards removed" "$(jq -r '[.permissions.allow[] | select(test("[^ ]\\*\\)$"))] | length' "$S")" "0"
+has "s2b: narrowed form present" "$(jq -r '.permissions.allow[]' "$S")" "Bash(git diff *)"
+has "s2b: custom allow kept" "$(jq -r '.permissions.allow[]' "$S")" "Bash(pnpm *)"
 
 # (3) re-run → every step skip
 : > "$W/claude.log"

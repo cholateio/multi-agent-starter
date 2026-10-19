@@ -256,7 +256,9 @@ protect-paths 對 Edit/Write 到 `~/.config/kit`、`<state>/guard`、git config 
 7. 模型威脅邊界同 v4.9:持 Bash 的模型用變數、alias、腳本仍能拼出繞道
    (anti-footgun,不是 anti-evasion);bypass 檔與 audit log 只是摩擦 + 留痕。
 8. 權限基線殘餘(§13 #8):`git log --output=`、`git diff --output=` 可寫檔,
-   被 `Bash(git log*)` / `Bash(git diff*)` 放行——低風險(只寫文字檔),接受。
+   被 `Bash(git log *)` / `Bash(git diff *)` 放行——低風險(只寫文字檔),接受。基線一律
+   「空格 + `*`」:無空格的 `Bash(git diff*)` 是前綴比對,會連 `git difftool --extcmd=` 一起放行
+   (任意執行),`Bash(ls*)` 會放行 lsof(review F2;kit setup 重跑時移除舊的無空格寫法)。
 
 ## 四、誠實條款:這套 harness 的能力極限
 

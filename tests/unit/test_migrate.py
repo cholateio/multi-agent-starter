@@ -132,6 +132,24 @@ class TestStripSettings(IsolatedTestCase):
         self.assertEqual(m["permissions"]["deny"], ["Read(.env)"])
         self.assertEqual(m["model"], "sonnet")   # local wins
 
+    def test_migration_never_widens_permissions(self):
+        """Review fix F2: the v4 → settings.local.json merge only carries the owner's own
+        entries (never the v4 baseline, never a new entry), and the v5 machine-wide
+        baseline has no space-less wildcard (`git diff*` would cover `git difftool`)."""
+        import re
+        from cli import setup_cmd
+        data = json.loads(V4_SETTINGS_JSON)
+        data["permissions"]["allow"].append("Bash(pnpm test)")
+        resid = migrate.strip_kit_settings(data)
+        local = {"permissions": {"allow": ["Bash(npm test)"]}}
+        merged = migrate.merge_settings(local, resid)
+        self.assertEqual(merged["permissions"]["allow"], ["Bash(npm test)", "Bash(pnpm test)"])
+        wide = [b for b in setup_cmd.BASELINE if re.search(r"[^ ]\*\)$", b)]
+        self.assertEqual(wide, [])
+        v4 = set(migrate.V4_BASELINE) | {b.replace(" *)", ")") for b in migrate.V4_BASELINE}
+        for b in setup_cmd.BASELINE:   # nothing beyond v4's read-only set (bare forms included)
+            self.assertIn(b, v4)
+
 
 class TestGitignoreV4Block(IsolatedTestCase):
     def test_remove_v4_tracked_on_purpose_block(self):

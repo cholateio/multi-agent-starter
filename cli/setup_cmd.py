@@ -19,8 +19,13 @@ from cli import doctor, paths, privacy
 
 PLUGIN_ID = "kit@multi-agent-kit"
 MARKETPLACE = "multi-agent-kit"
-BASELINE = ["Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)", "Bash(ls*)"]
-DROP = ["Bash(timeout *)"]
+# read-only baseline, machine-wide. The space before `*` is load-bearing: `Bash(git diff*)`
+# is a PREFIX match that also allows `git difftool --extcmd=<anything>` (arbitrary
+# execution) and `Bash(ls*)` allows lsof/lsblk (review fix F2). Bare + ` *` forms, as v4 shipped.
+BASELINE = ["Bash(git status)", "Bash(git status *)", "Bash(git diff)", "Bash(git diff *)",
+            "Bash(git log)", "Bash(git log *)", "Bash(git show)", "Bash(git show *)", "Bash(ls)", "Bash(ls *)"]
+# dropped on (re-)run: v4's timeout wildcard, and the space-less forms an early v5 setup wrote
+DROP = ["Bash(timeout *)", "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)", "Bash(ls*)"]
 GUARD_HOOKS = ("pre-commit", "pre-push")
 # chain-only shims: with a global core.hooksPath git looks for EVERY hook in the
 # shim dir, so without these the repo-local ones (git-lfs post-checkout, commit-msg
@@ -119,14 +124,14 @@ class Setup:
             return
         new_allow = [a for a in allow if a not in DROP] + [b for b in BASELINE if b not in allow]
         if new_allow == allow and old_text:
-            self.say("skip", step, "baseline present, no Bash(timeout *)")
+            self.say("skip", step, "baseline present, no Bash(timeout *) / space-less wildcards")
             return
         perms["allow"] = new_allow
         new_text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
         diff = "".join(difflib.unified_diff(old_text.splitlines(True), new_text.splitlines(True),
                                             str(path), str(path) + " (kit)"))
         if self.dry:
-            self.would_write(path, "merge permission baseline, drop Bash(timeout *)")
+            self.would_write(path, "merge permission baseline, drop Bash(timeout *) and space-less wildcards")
             print(diff, end="")
             return
         print(diff, end="")
