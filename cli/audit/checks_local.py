@@ -152,15 +152,24 @@ A4_GROUPS = [
     ("docs/decisions/", lambda p: p.startswith("docs/decisions/")),
     ("*.local.toml", lambda p: p.endswith(".local.toml")),
     ("CLAUDE.local.md", lambda p: p.rsplit("/", 1)[-1] == "CLAUDE.local.md"),
-    (".env*", lambda p: p.rsplit("/", 1)[-1].startswith(".env") and p.rsplit("/", 1)[-1] != ".env.example"),
+    (".env*", lambda p: env_forbidden(p.rsplit("/", 1)[-1])),
 ]
+ENV_TEMPLATE_SUFFIXES = ("example", "sample", "template", "dist", "defaults")
+
+
+def env_forbidden(base: str) -> bool:
+    """Same rule as the guard (lib-guard.sh guard_env_class): `.env` and `.env.<name>`
+    unless the LAST suffix marks a template; `.envrc` / `.environment` are not env files."""
+    if base == ".env":
+        return True
+    return base.startswith(".env.") and base.rsplit(".", 1)[-1] not in ENV_TEMPLATE_SUFFIXES
 
 
 def a4(t, ctx, tracked):
     out = []
     files = [p for p in tracked if not p.endswith("/.gitkeep")]
     for label, match in A4_GROUPS:
-        hits = [p for p in files if match(p)]
+        hits = [p for p in files if match(p) and not (label == ".env*" and _allowed_path(p, ctx))]
         if hits:
             out.append(Finding(t.name, "A4", _sev(ctx, "HIGH", "MEDIUM"), hits[0], None,
                                f"{len(hits)} tracked file(s) under {label}",

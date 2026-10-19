@@ -37,8 +37,10 @@ trap 'rm -rf "$TMPD"' EXIT
 : > "$TMPD/names"
 while IFS= read -r -d '' p; do
     printf '%s\n' "$p" >> "$TMPD/names"
-    if g="$(guard_r2_match "$HAS_KIT" "$p")"; then
+    if g="$(guard_r2_match "$HAS_KIT" "$p" "$ALLOW_PATHS")"; then
         guard_add BLOCK "R2 forbidden-path" "$p" "never pushed: $g is local-only (design §7.2)"
+    elif [[ "$(guard_env_class "${p##*/}")" == warn ]]; then
+        guard_add WARN "R2 env-file" "$p" "direnv file tracked — fine for non-secret exports; secrets belong in an ignored .env / .envrc.local"
     fi
 done < <(git -c core.quotePath=false diff --cached --name-only --no-renames --diff-filter=ACMRT -z --no-relative 2>/dev/null)
 

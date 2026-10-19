@@ -195,7 +195,7 @@ claude 啟動時的環境)。
 | # | 規則 | pre-commit(staged diff 的**新增行** + staged 檔名) | pre-push(推送樹 + 推送範圍每個 commit 的新增行、commit / tag 訊息、檔名、ref 名) | 沒有 kit.toml 的 repo |
 |---|---|---|---|---|
 | R1 | gitleaks(內建規則 + `plugin/guard/gitleaks.toml`) | block | block | 照跑 |
-| R2 | 禁推路徑 `.claude/` `.superpowers/` `PROJECT.toml` `docs/LESSONS.md` `docs/plans/` `docs/superpowers/plans/` `docs/decisions/` `*.local.toml` `CLAUDE.local.md` `.env*`(除 `.env.example`) | block(A/C/M/R/T;刪除放行) | block:整棵推送樹(抓**長期 tracked**)+ 範圍內曾新增過(加了又刪也會留在遠端歷史) | 只查 `.env*` |
+| R2 | 禁推路徑 `.claude/` `.superpowers/` `PROJECT.toml` `docs/LESSONS.md` `docs/plans/` `docs/superpowers/plans/` `docs/decisions/` `*.local.toml` `CLAUDE.local.md` `.env` / `.env.<name>`(最後一段是 example/sample/template/dist/defaults 的範本放行;`.envrc` 只 warn;kit.toml `allow_paths` 可豁免單一 .env 檔) | block(A/C/M/R/T;刪除放行) | block:整棵推送樹(抓**長期 tracked**)+ 範圍內曾新增過(加了又刪也會留在遠端歷史);拿掉 kit.toml 的推送仍算 kit repo,且移除本身 block | 只查 `.env*`,且只查 commit / 推送範圍內新增的(不掃整棵樹) |
 | R3 | 本機路徑 `/home/<u>`、`/mnt/c/Users/<u>`、`/Users/<u>`、`C:\Users\<u>`(`<u>` = privacy usernames ∪ 目前 OS user) | block | block | 照跑 |
 | R3b | 其他 `/home/<x>/` | warn | warn | 照跑 |
 | R4 | `tier="always"` 個人字面值 + privacy emails(名稱 `email`) | block | block | 照跑 |

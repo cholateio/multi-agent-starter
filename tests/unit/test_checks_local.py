@@ -141,6 +141,16 @@ class TestLocalChecks(IsolatedTestCase):
         a5 = checks(self.run_local(repo, ctx()), "A5")
         self.assertEqual([(x.path, x.line) for x in a5], [("c.txt", 1)])
 
+    def test_a4_env_files_follow_the_guard(self):
+        """Review F4: .env / .env.<name> are A4, templates and .envrc are not; allow_paths exempts."""
+        files = dict(CLEAN_FILES, **{".env.sample": "K=\n", ".envrc": "export A=1\n", ".env.local.example": "K=\n",
+                                     ".environment": "x\n", "sub/.env.test": "K=v\n"})
+        repo = self.make_repo("proj-b", files)
+        a4 = checks(self.run_local(repo, ctx()), "A4")
+        self.assertEqual([(x.path, x.snippet) for x in a4], [("sub/.env.test", "1 tracked file(s) under .env*")])
+        a4 = checks(self.run_local(repo, ctx(kittoml=KitToml(allow_paths=["sub/.env.test"]))), "A4")
+        self.assertEqual(a4, [])
+
     def test_allow_paths_skip_a5(self):
         repo = self.make_repo("proj-b", dict(CLEAN_FILES, **{"docs/media/x.txt": "/ho" "me/testuser/y\n"}))
         f = self.run_local(repo, ctx(kittoml=KitToml(allow_paths=["docs/media/*"])))

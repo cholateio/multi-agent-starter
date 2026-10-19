@@ -195,10 +195,23 @@ class TestRendered(Rendered):
         subprocess.run(["git", "-C", str(d), "rm", "-qf", ".env"], check=True)
         self.stage(d, ".env.example", "K=\n")
         self.assertEqual(run().returncode, 0, ".env.example is allowed")
-        for name in ("sub/PROJECT.toml", "pkg/CLAUDE.local.md", "a/b/x.local.toml", "docs/superpowers/plans/p.md"):
+        for name in ("sub/PROJECT.toml", "pkg/CLAUDE.local.md", "a/b/x.local.toml", "docs/superpowers/plans/p.md",
+                     ".env.test", ".env.local", "sub/.env.production"):
             self.stage(d, name, "x\n")
             self.assertNotEqual(run().returncode, 0, name)
             subprocess.run(["git", "-C", str(d), "rm", "-qf", name], check=True)
+        # review F4: same allowlist as the local guard (last suffix), .envrc is not an env file
+        for name in (".env.sample", ".env.template", ".env.dist", ".env.defaults", ".env.local.example", ".envrc"):
+            self.stage(d, name, "K=\n")
+            r = run()
+            self.assertEqual(r.returncode, 0, name + r.stdout)
+        # kit.toml [privacy] allow_paths exempts an .env file, like the local guard
+        self.stage(d, ".env.test", "K=v\n")
+        self.assertNotEqual(run().returncode, 0)
+        kt = (d / "kit.toml").read_text() + '\n[privacy]\nallow_paths = [".env.test"]\n'
+        self.stage(d, "kit.toml", kt)
+        r = run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_ci_home_path_is_a_warning_windows_path_fails_and_allow_marker_works(self):
         d = self.init()

@@ -73,13 +73,17 @@ while read -r lref lsha rref rsha; do
 
     # R2: whole pushed tree, then every path added inside the range
     while IFS= read -r -d '' p; do
-        g="$(guard_r2_match "$HAS_KIT" "$p")" && guard_add BLOCK "R2 forbidden-path" "$p" "tracked in the pushed tree — $g is local-only (design §7.2)"
+        g="$(guard_r2_match "$HAS_KIT" "$p" "$ALLOW_PATHS" tree)" && guard_add BLOCK "R2 forbidden-path" "$p" "tracked in the pushed tree — $g is local-only (design §7.2)"
     done < <(git -c core.quotePath=false ls-tree -r -z --name-only --full-tree "$c" 2>/dev/null)
     : > "$D/names"
     while IFS= read -r -d '' p; do
         p="${p#$'\n'}"; [[ -n "$p" ]] || continue
         printf '%s\n' "$p" >> "$D/names"
-        g="$(guard_r2_match "$HAS_KIT" "$p")" && guard_add BLOCK "R2 forbidden-path" "$p" "added inside the pushed range (history keeps it) — $g is local-only"
+        if g="$(guard_r2_match "$HAS_KIT" "$p" "$ALLOW_PATHS" range)"; then
+            guard_add BLOCK "R2 forbidden-path" "$p" "added inside the pushed range (history keeps it) — $g is local-only"
+        elif [[ "$(guard_env_class "${p##*/}")" == warn ]]; then
+            guard_add WARN "R2 env-file" "$p" "direnv file pushed — make sure it exports no secrets"
+        fi
     done < <(git "${LOGFMT[@]}" -z --format= --name-only --no-renames --diff-filter=ACMRT --stdin < "$D/revs" 2>/dev/null)
 
     # R1 + R3–R7 over one stream: added lines (merges: remerge diff), messages, names, ref name

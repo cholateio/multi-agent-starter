@@ -448,7 +448,7 @@ echo "K=v" > "$QN/.env"; git -C "$QN" add -f .env; nc "$QN"; git -C "$QN" rm -q 
 git -C "$QN" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null   # .env reached history before the guard
 printf 'x\n' > "$QN/.env.local"; git -C "$QN" add -f .env.local; nc "$QN"
 psh "$QN" "" origin main
-eq   "C16: no kit.toml → .env* in the pushed tree is R2" "$PC" "1"
+eq   "C16: no kit.toml → .env* added in the pushed range is R2" "$PC" "1"
 
 # ============================================================ D. shim / chaining / bypass
 echo "--- D. shim, chaining, bypass"
@@ -768,6 +768,46 @@ BO="$(cd "$G1" && script -qec "$KIT guard bypass 'retire kit here'" /dev/null 2>
 git -C "$G1" rm -q --cached docs/plans/p.md; nc "$G1"
 psh "$G1" "" origin main
 eq   "G-O5: a user bypass lets an intended kit.toml removal through" "$PC" "0"
+
+# F4: .env* — .env and .env.<name> stay local; templates (last suffix example/sample/
+# template/dist/defaults) are fine; .envrc is a warning; tree-wide only in kit repos
+G4="$W/g4"; newrepo "$G4" public noproj
+for f in .env.sample .env.template .env.dist .env.defaults .env.local.example sub/.env.example .environment; do
+  mkdir -p "$G4/$(dirname "$f")"; echo "K=" > "$G4/$f"; git -C "$G4" add -f "$f"; cmt "$G4"
+  eq "G-F4: $f commits" "$CC" "0"
+done
+for f in .env .env.test .env.development .env.production .env.local .env.sample.local sub/.env.test; do
+  mkdir -p "$G4/$(dirname "$f")"; echo "K=v" > "$G4/$f"; git -C "$G4" add -f "$f"; cmt "$G4"
+  has "G-F4: $f blocked [R2]" "$CO" "[R2 forbidden-path] $f"; git -C "$G4" rm -q --cached "$f"
+done
+echo 'export A=1' > "$G4/.envrc"; git -C "$G4" add -f .envrc; cmt "$G4"
+eq   "G-F4: .envrc commits (direnv)" "$CC" "0"
+has  "G-F4: …with a warning" "$CO" "WARN [R2 env-file] .envrc"
+printf 'kit = 5\nvisibility = "public"\n\n[privacy]\nallow_paths = [".env.test"]\n' > "$G4/kit.toml"
+echo "K=v" > "$G4/.env.test"; git -C "$G4" add -f kit.toml .env.test; cmt "$G4"
+eq   "G-F4: kit.toml allow_paths lets .env.test through" "$CC" "0"
+G5="$W/g5"; pushrepo "$G5" none noproj
+echo "K=v" > "$G5/.env.test"; git -C "$G5" add -f .env.test; nc "$G5"; git -C "$G5" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null
+echo z >> "$G5/README.md"; git -C "$G5" add README.md; nc "$G5"
+psh "$G5" "" origin main
+eq   "G-F4: non-kit repo: a long-tracked .env.test is not re-blocked tree-wide" "$PC" "0"
+echo "K=v" > "$G5/.env.production"; git -C "$G5" add -f .env.production; nc "$G5"
+psh "$G5" "" origin main
+eq   "G-F4: non-kit repo: a NEW .env.production in the range blocks" "$PC" "1"
+has  "G-F4: …as R2" "$PO" "[R2 forbidden-path] .env.production"
+git -C "$G5" reset -q --hard origin/main
+G6="$W/g6"; pushrepo "$G6" public noproj
+echo "K=v" > "$G6/.env.test"; git -C "$G6" add -f .env.test; nc "$G6"; git -C "$G6" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null
+echo z >> "$G6/README.md"; git -C "$G6" add README.md; nc "$G6"
+psh "$G6" "" origin main
+eq   "G-F4: kit repo: a long-tracked .env.test is still blocked tree-wide" "$PC" "1"
+GI="$W/gi"; rm -rf "$GI"; git init -q "$GI"; cp "$KIT_ROOT/plugin/templates/gitignore" "$GI/.gitignore"
+for f in .env .env.local .env.test .env.production; do
+  git -C "$GI" check-ignore -q "$f" && pass "G-F4: template .gitignore ignores $f" || fail "G-F4: template .gitignore ignores $f" "not ignored"
+done
+for f in .env.example .env.sample .env.template .env.dist .env.defaults .env.local.example .envrc; do
+  git -C "$GI" check-ignore -q "$f" && fail "G-F4: template .gitignore keeps $f addable" "ignored" || pass "G-F4: template .gitignore keeps $f addable"
+done
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"

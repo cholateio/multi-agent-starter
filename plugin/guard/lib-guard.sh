@@ -36,11 +36,32 @@ guard_init() {
     unset GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GREP_OPTIONS GREP_COLOR GREP_COLORS
 }
 
+# guard_env_class <basename> → "block" | "warn" | "" (review F4). `.env` and
+# `.env.<name>` hold real values (.env.test / .env.development included — they
+# often do); a template whose LAST suffix is example/sample/template/dist/defaults
+# is fine (.env.local.example too); direnv's `.envrc` is a warning (it may export
+# secrets, but is routinely tracked). Mirrors the kit .gitignore block, CI, audit A4.
+guard_env_class() {
+    case "$1" in
+        .envrc) echo warn ;;
+        .env) echo block ;;
+        .env.*) case "${1##*.}" in example|sample|template|dist|defaults) ;; *) echo block ;; esac ;;
+    esac
+}
+
 # R2 forbidden paths (design §7.2; same groups as kit audit A4). Without
-# kit.toml only the .env* group applies (design: `.env*` 全 repo).
-guard_r2_match() {  # $1 has_kit (0/1)  $2 repo-relative path
-    local p="$2" base="${2##*/}"
-    if [[ "$base" == .env* && "$base" != ".env.example" ]]; then echo ".env*"; return 0; fi
+# kit.toml only the .env* group applies, and only to paths being committed /
+# added in the pushed range — not tree-wide (a non-kit fork tracking .env.test
+# is not re-blocked on every push; review F4). kit.toml [privacy] allow_paths
+# exempts an .env file.
+guard_r2_match() {  # $1 has_kit (0/1)  $2 repo-relative path  [$3 allow_paths csv]  [$4 tree|range]
+    local p="$2" base="${2##*/}" g
+    if [[ "$(guard_env_class "$base")" == block ]]; then
+        [[ "${4:-range}" == tree && "$1" != 1 ]] && return 1
+        local -a ap=(); IFS=',' read -ra ap <<< "${3:-}"
+        for g in "${ap[@]}"; do [[ -n "$g" && "$p" == $g ]] && return 1; done
+        echo ".env*"; return 0
+    fi
     [[ "$1" == 1 ]] || return 1
     case "$p" in
         .claude/*) echo ".claude/" ;;

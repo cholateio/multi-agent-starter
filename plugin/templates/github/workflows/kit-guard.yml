@@ -35,10 +35,22 @@ jobs:
         run: |
           set -euo pipefail
           bad=0
-          forbidden='^(\.claude/|\.superpowers/|docs/LESSONS\.md$|docs/plans/|docs/superpowers/plans/|docs/decisions/)|(^|/)(PROJECT\.toml|CLAUDE\.local\.md)$|\.local\.toml$|(^|/)\.env[^/]*$'
-          if git ls-files | grep -E "$forbidden" | grep -vE '(^|/)\.env\.example$'; then
+          forbidden='^(\.claude/|\.superpowers/|docs/LESSONS\.md$|docs/plans/|docs/superpowers/plans/|docs/decisions/)|(^|/)(PROJECT\.toml|CLAUDE\.local\.md)$|\.local\.toml$'
+          if git ls-files | grep -E "$forbidden"; then
             echo "::error::local-only files are tracked (see the list above)"; bad=1
           fi
+          # .env / .env.<name> (templates ending in example|sample|template|dist|defaults are fine);
+          # kit.toml [privacy] allow_paths exempts one, exactly like the local guard
+          envallow=()
+          if [ -f kit.toml ]; then
+            mapfile -t envallow < <(python3 -c 'import tomllib; print("\n".join(tomllib.load(open("kit.toml", "rb")).get("privacy", {}).get("allow_paths", [])))' 2>/dev/null || true)
+          fi
+          while IFS= read -r p; do
+            ok=0
+            # shellcheck disable=SC2053  # allow_paths entries are globs on purpose
+            for g in "${envallow[@]}"; do [[ -n "$g" && "$p" == $g ]] && ok=1; done
+            if [ "$ok" = 0 ]; then echo "$p"; echo "::error::.env file tracked: $p"; bad=1; fi
+          done < <(git ls-files | grep -E '(^|/)\.env(\.[^/]*)?$' | grep -vE '\.(example|sample|template|dist|defaults)$' || true)
           skip=(':!*.lock' ':!package-lock.json' ':!pnpm-lock.yaml' ':!yarn.lock' ':!Cargo.lock' ':!poetry.lock' ':!go.sum')
           if git grep -nIE '/mnt/[a-z]/Users/' -- . "${skip[@]}" | grep -v 'kit-privacy: allow'; then
             echo "::error::Windows user paths found (see the list above)"; bad=1
