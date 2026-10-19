@@ -452,6 +452,10 @@ shim 要點（實作者注意）：解析 repo 本地 hook 時用 `--git-common-
 `--git-path hooks`——後者尊重 `core.hooksPath`，會指回 shim 自己。repo 本地若設了
 `core.hooksPath`（husky 類）會**蓋掉**全域設定、guard 靜默失效——這是 audit 的一條
 HIGH 檢查（§8），guard 自己無法補救。
+（spike 2026-10-19: GO — 隔離 `GIT_CONFIG_GLOBAL` 下 7/7 PASS：commit/push 皆觸發 shim、
+`--git-common-dir` 鏈到 repo 本地 hook、linked worktree 內 `--git-common-dir` 回傳主 repo 的
+`.git` 絕對路徑且鏈接正確、pre-push stdin 為 `<lref> <lsha> <rref> <rsha>`、shim 開銷中位數 3ms；
+反向對照：shim 若改用 `--git-path hooks` 會 exec 自己形成**無限迴圈（commit 卡死）**，不只是靜默略過）
 
 【D10】用全域 `core.hooksPath` 而非每 repo 安裝 hook：它涵蓋「所有 commit，含手動、含
 未來 clone 的新 repo」，正是 owner 決定 6 的要求；每 repo 安裝會漏掉新 clone。
@@ -662,6 +666,13 @@ then `kit migrate <dir>`」並 `exit 2`；v5.1 刪除。
    commit/push 皆觸發、以 `--git-common-dir` 鏈到 repo 本地 hook、worktree 下仍正確。
    每個 spike 有 go/no-go；no-go 走 §13 的後備設計並回寫本檔。Codex 審查意見在 spike 之後
    折入 plan。
+
+   | spike | 結果 | 採用路徑 |
+   |---|---|---|
+   | 0.1 注入（SessionStart / SubagentStart / validate） | GO：9,401 chars 完整送達、非 kit 目錄零注入；SubagentStart 吃 `additionalContext`；`rules/` 過 `--strict`（需 `author`） | §4.3 兩段 + (c) 第三個 SubagentStart entry；保留 `plugin/rules/` |
+   | 0.1 本地 marketplace | GO：執行期 `CLAUDE_PLUGIN_ROOT` = 來源目錄（`installPath` 雖指向 cache 複本） | D2 本地 marketplace 就地載入；不得以 `installPath` 推 kit_root；owner 在真實 user scope 複核一次 |
+   | 0.2 全域 hooksPath shim | GO：7/7 PASS（含 worktree、pre-push stdin、<50ms） | §7.1 原設計；`--git-common-dir` 為必要（`--git-path` 會無限迴圈） |
+
 1. **kit repo**：在分支完成 v5（plugin/、cli/、tests、模板、匿名化、LICENSE）；smoke 全綠；
    Codex 審；合併；tag v5.0.0。
 2. **本機**：`kit setup`（本地 marketplace、權限基線、hooksPath、工具安裝、privacy.local.toml）
@@ -686,12 +697,12 @@ then `kit migrate <dir>`」並 `exit 2`；v5.1 刪除。
 
 | # | 風險／未驗證 | 影響 | 後備設計 |
 |---|---|---|---|
-| 1 | 注入上限 10,000 chars：文件說有，2.1.303 實測 13.9K 完整送達 | 未來版本若執法，單段 >10K 會被截 | 兩段各 <9.5K，smoke 執法 |
-| 2 | hook 注入的 rules **不進 subagent**（未實測，依文件推斷） | 實作型 subagent 少了 kit-workflow/judgment 常駐文字 | dispatch 模板 inline（既有）+ AGENTS.md 為 memory + 驗證 SubagentStart 注入 |
-| 3 | 本地路徑 marketplace「就地載入」在本機未實測 | 若其實會複製，改原始碼不即時生效 | GitHub marketplace + `kit update`；shim 從 config 解析 kit_root，與 plugin 載入方式無關 |
-| 4 | `claude plugin validate --strict` 對未知目錄 `plugin/rules/` 的態度未知 | 可能 warning | 改名 `context/` 不影響設計 |
+| 1 | 注入上限 10,000 chars：文件說有，2.1.303 實測 13.9K 完整送達 | 未來版本若執法，單段 >10K 會被截 | 兩段各 <9.5K，smoke 執法（spike 2026-10-19: GO — headless `claude -p --plugin-dir` 下單段 9,401 chars 完整送達（transcript attachment 長度 9,401、結尾 sentinel 在 API request 內）；無 `kit.toml` 的空目錄與 `$HOME` 零注入、模型答 NONE） |
+| 2 | hook 注入的 rules **不進 subagent**（未實測，依文件推斷） | 實作型 subagent 少了 kit-workflow/judgment 常駐文字 | dispatch 模板 inline（既有）+ AGENTS.md 為 memory + 驗證 SubagentStart 注入（spike 2026-10-19: GO — 實測 SessionStart 注入在 subagent transcript 0 命中（推斷成立）；`SubagentStart` 的 `additionalContext` 以 system-reminder 送進 subagent → 採 §4.3 (c)，Task 2.2 做第三個 entry） |
+| 3 | 本地路徑 marketplace「就地載入」在本機未實測 | 若其實會複製，改原始碼不即時生效 | GitHub marketplace + `kit update`；shim 從 config 解析 kit_root，與 plugin 載入方式無關（spike 2026-10-19: GO — directory 型 marketplace：`installed_plugins.json` 的 `installPath` 指向 cache 複本，但執行期 `CLAUDE_PLUGIN_ROOT` = 來源目錄；改 rules、hook 腳本、`hooks.json` 皆於下個 session 生效、不需 update。注意 cache 複本會過期，任何程式不得以 `installPath` 當 kit_root。以隔離 `CLAUDE_CONFIG_DIR` 驗證，真實 user scope 待 owner 複核） |
+| 4 | `claude plugin validate --strict` 對未知目錄 `plugin/rules/` 的態度未知 | 可能 warning | 改名 `context/` 不影響設計（spike 2026-10-19: GO — `--strict` 對 `rules/` 無 warning，保留 `rules/`；唯一 warning 是 plugin.json 缺 `author`，--strict 下即失敗 → plugin.json 必含 `author`） |
 | 5 | gitleaks-action 對個人帳號的授權條款 | CI 層步驟一可能失敗 | 釘版二進位 + sha256 |
-| 6 | repo 本地 `core.hooksPath`（husky）蓋掉 guard | 該 repo 零 guard | audit A16 HIGH；pre-push 的 CI 層兜底（public） |
+| 6 | repo 本地 `core.hooksPath`（husky）蓋掉 guard | 該 repo 零 guard | audit A16 HIGH；pre-push 的 CI 層兜底（public）（spike 2026-10-19: 風險成立 — repo 本地 `core.hooksPath=.husky` 時 shim 不執行、無任何訊息；A16 維持） |
 | 7 | `git --no-verify` / 其他機器 / 網頁編輯 | 繞過本機 guard | tool-breaker 擋模型；CI 層；audit 事後 |
 | 8 | 權限基線殘餘：`git log --output=`、`git diff --output=` 可寫檔 | 低（寫文字檔） | 接受；記入 DEFENSES 誠實條款 |
 | 9 | monorepo 子目錄啟動（無 kit.toml 在 cwd） | hooks 靜默 | 不支援，文件化 |
