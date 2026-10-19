@@ -261,7 +261,7 @@ fetch = "uv run python -m app.data.fetch_prices --root data/raw --start $(date -
 [[paid]]
 service = "Longname Service"
 billing = "月費"
-monthly_est = "NT$600/年（≈NT$50/月，user 2026-07-11 確認）"
+monthly_est = "NT$600/年（≈NT$50/月）"
 EOF
 ```
 
@@ -274,7 +274,7 @@ assert_contains "html: full command kept in title" "$HTML" 'title="uv run python
 # 注意:斷言字串一律用單引號,fixture 裡的 $(date …) 是**字面值**,雙引號會被 bash 展開成
 # 今天的日期而永遠對不上。這條斷言本身就在證明 data-cmd 未被截斷(子字串已超過 56 格上限)
 assert_contains "html: copy payload stays complete" "$HTML" 'data-cmd="uv run python -m app.data.fetch_prices --root data/raw --start'
-assert_contains "html: long monthly_est clamped" "$HTML" '<span class="cost-amt" title="NT$600/年（≈NT$50/月，user 2026-07-11 確認）">'
+assert_contains "html: long monthly_est clamped" "$HTML" '<span class="cost-amt" title="NT$600/年（≈NT$50/月）">'
 # 短值不該被加上 title(沒截斷就沒 title,避免整片 hover 噪音)
 assert_contains "html: short cost has no title" "$HTML" '<span class="cost-amt">~$3</span>'
 ```
@@ -350,7 +350,7 @@ WIN=$(wslpath -w ~/.local/share/proj/dashboard.html)
   --window-size=1440,1500 --screenshot="$(wslpath -w /tmp/card-clamp.png)" "$WIN"
 ```
 
-親眼確認：local-b 的 `fetch_prices` 指令縮成一行、proj-b 的 41 字 `monthly_est` 不再換行。
+親眼確認：某專案的長指令 指令縮成一行、某專案的 41 字 `monthly_est` 不再換行。
 
 - [ ] **Step 7: Commit**
 
@@ -372,7 +372,7 @@ git commit -m "feat(proj): 卡片欄位渲染端夾擊——超長指令與月�
 - Consumes: Task 2 的 `longtext-proj` fixture（120 字指令 + 含確認日期的 `monthly_est`），不需新增 fixture。
 - Produces: 兩條新 stderr warning，格式沿用既有 `warn()`（`proj: <name>: …`）。
 
-**RED 收據（kit-evolution 要求）：** 2026-07-24 對機隊 16 個 manifest 實測——`monthly_est` 最長 41 字（已違反現行 40 字上限，但成分規則無執法，`NT$600/年（≈NT$50/月，user 2026-07-11 確認）` 這種夾帶確認日期的值合乎長度卻違反「只放金額與用量」）；`commands` 值長 14-120 字，schema 對指令長度**完全沒有上限**。
+**RED 收據（kit-evolution 要求）：** 2026-07-24 對機隊 16 個 manifest 實測——`monthly_est` 最長 41 字（已違反現行 40 字上限，但成分規則無執法，`NT$600/年（≈NT$50/月）` 這種夾帶確認日期的值合乎長度卻違反「只放金額與用量」）；`commands` 值長 14-120 字，schema 對指令長度**完全沒有上限**。
 
 - [ ] **Step 1: 寫失敗的斷言**
 
@@ -400,8 +400,8 @@ import re
 `MONTHLY_EST_MAX = 40` 之後插入：
 
 ```python
-# 指令長度上限。基準：2026-07-24 機隊量測中位數 24 字,超過 80 的只有一條(local-b 的
-# 120 字 fetch_prices,含兩個 $(date) 展開)——那種長度該包成腳本再收錄,不是貼進 manifest。
+# 指令長度上限。基準：2026-07-24 機隊量測中位數 24 字,超過 80 的只有一條(某專案的
+# 120 字長指令,含兩個 $(date) 展開)——那種長度該包成腳本再收錄,不是貼進 manifest。
 COMMAND_MAX = 80
 # monthly_est 只放金額與用量。確認日期（"user 2026-07-11 確認"）與算法依據是收據,
 # 歸 TOML 註解——規則本來就這樣寫,但只有長度被執法,成分沒有,所以違規值長期存活。
@@ -451,7 +451,7 @@ Expected: `passed N, failed 0`
 - [ ] **Step 7: 確認機隊現況會被點名（GREEN 收據）**
 
 Run: `env PROJ_ROOT="$HOME" bin/proj 2>&1 >/dev/null | sort | uniq -c | sort -rn | head -20`
-Expected: 逐條列出違規的專案與欄位（預期至少命中 `proj-l` / `proj-d` 的 `NT$600/年（… user 2026-07-11 確認）` 與 `local-b` 的 120 字指令）。把實際輸出貼進完成報告——這是規則生效的證據，不是猜測。
+Expected: 逐條列出違規的專案與欄位（預期至少命中 某些專案的 `NT$600/年（…）` 與一條 120 字指令）。把實際輸出貼進完成報告——這是規則生效的證據，不是猜測。
 
 **注意**：這一步只是「點名」，**不要**代替 user 去改那 16 個 `PROJECT.toml`——manifest 是 user-owned，改哪些、怎麼改由 user 決定。
 
