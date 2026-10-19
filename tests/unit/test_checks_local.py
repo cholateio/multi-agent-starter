@@ -226,6 +226,20 @@ class TestLocalChecks(IsolatedTestCase):
         self.assertEqual(redact("path /ho" "me/testuser/x", PRIV), "path /home/<user>/x")
         self.assertIn("***", redact("token ghp_" + "a" * 36, None))
 
+    def test_redact_unconfigured_usernames(self):
+        """Review O4: the user-name segment of a home path is always redacted, configured or not."""
+        H = "/ho" "me/"
+        for priv in (PRIV, None):
+            self.assertEqual(redact(H + "otheruser/x", priv), H + "<user>/x")
+            self.assertEqual(redact("see /mnt/" "c/Users/Bob/Desktop", priv), "see /mnt/c/Users/<user>/Desktop")
+            self.assertEqual(redact("C:\\" "Users\\Bob\\Documents", priv), "C:\\Users\\<user>\\Documents")
+            self.assertEqual(redact("/Users/" "alice/src", priv), "/Users/<user>/src")
+            self.assertEqual(redact(H + "carol", priv), H + "<user>")
+        repo = self.make_repo("proj-b", dict(CLEAN_FILES, **{"n.txt": "log at " + H + "someoneelse/app.log\n"}))
+        a5 = checks(self.run_local(repo, ctx(privacy=None)), "A5")
+        self.assertTrue(a5)
+        self.assertNotIn("someoneelse", " ".join(x.snippet for x in a5))
+
     def test_finding_shape(self):
         f = Finding("r", "A4", "HIGH", ".claude/x", None, "s", "fix")
         self.assertEqual(f.__dict__, {"repo": "r", "check": "A4", "severity": "HIGH", "path": ".claude/x",

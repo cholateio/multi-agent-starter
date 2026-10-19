@@ -32,8 +32,15 @@ def redact(text: str, privacy=None) -> str:
         for u in privacy.usernames:
             out = re.sub(rf"(/home/|/mnt/[a-z]/Users/|[A-Za-z]:\\\\Users\\\\){re.escape(u)}(?=[/\\\\]|$)",
                          r"\1<user>", out, flags=re.IGNORECASE)
+    # every home-path user segment, configured or not (review O4): /home/<x>, /Users/<x>,
+    # /mnt/<d>/Users/<x>, C:\Users\<x> — the report is meant to be shareable
+    out = HOME_SEG_RE.sub(lambda m: m.group(1) + "<user>", out)
     out = TOKEN_RE.sub("***", out)
     return out
+
+
+HOME_SEG_RE = re.compile(r"(/home/|(?:/mnt/[a-z])?/Users/|[A-Za-z]:\\+Users\\+)(?!<user>)[^/\\\s:\"'<>]+",
+                         re.IGNORECASE)
 
 
 def max_severity(findings) -> str | None:
