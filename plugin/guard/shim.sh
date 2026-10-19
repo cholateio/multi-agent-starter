@@ -15,6 +15,10 @@
 #     local-only files (PROJECT.toml, docs/LESSONS.md, plans, .claude/) safe across
 #     checkouts of pre-migration commits ($kit_root/plugin/guard/localfiles.sh; best
 #     effort, never changes the hook's exit status).
+# Runs as `bash -p` (review R5-1): no shell functions imported from the environment (an
+# exported `cat` / `bash` / `git` function would blind or skip the guard) and no $BASH_ENV
+# for everything after this line; "$BASH" is the running bash by absolute path (no lookup).
+case $- in *p*) ;; *) exec "$BASH" -p "${BASH_SOURCE[0]}" "$@" ;; esac
 HOOK="__HOOK__"
 SELF="${BASH_SOURCE[0]}"
 CFG_DIR="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)"
@@ -24,7 +28,7 @@ case "$HOOK" in
     post-checkout|post-merge|post-rewrite|post-commit)
         KIT_ROOT="$(sed -nE '/^[[:space:]]*\[/q; s/^[[:space:]]*kit_root[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CFG" 2>/dev/null | head -n 1)"
         LF="$KIT_ROOT/plugin/guard/localfiles.sh"
-        [[ -n "$KIT_ROOT" && -f "$LF" ]] && bash "$LF" "$HOOK" "$@" </dev/null || true
+        [[ -n "$KIT_ROOT" && -f "$LF" ]] && "$BASH" -p "$LF" "$HOOK" "$@" </dev/null || true
         ;;
     pre-commit|pre-push)
         KIT_ROOT="$(sed -nE '/^[[:space:]]*\[/q; s/^[[:space:]]*kit_root[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CFG" 2>/dev/null | head -n 1)"
@@ -38,9 +42,9 @@ case "$HOOK" in
         export KIT_GUARD_CONFIG_DIR="$CFG_DIR"
         if [[ "$HOOK" == pre-push ]]; then
             INPUT="$(cat; echo .)"; INPUT="${INPUT%.}"     # keep stdin byte-exact for both readers
-            printf '%s' "$INPUT" | bash "$GUARD" "$@" || exit $?
+            printf '%s' "$INPUT" | "$BASH" -p "$GUARD" "$@" || exit $?
         else
-            bash "$GUARD" "$@" || exit $?
+            "$BASH" -p "$GUARD" "$@" || exit $?
         fi
         ;;
 esac

@@ -1041,6 +1041,25 @@ PO="$(cd "$I2" && PATH="$NOGL_PATH" git -c core.hooksPath="$TH" push -q origin m
 eq   "H-R4-1b: the hash-equal binary restored → push scans again (blocked by R1 or passes without real gitleaks)" "$PC" "$([ -n "$GITLEAKS" ] && echo 1 || echo 0)"
 lacks "H-R4-1b: …no R8" "$PO" "R8 gitleaks-missing"
 
+# R5-1: the scanner's hash never goes through a caller-defined command: an exported fake
+# sha256sum / shasum / openssl printing the recorded pin cannot vouch for a replaced stub,
+# and exported cat / bash functions cannot blind the shim (empty stdin / no guard run)
+i2sel; cp "$W/spoof/gitleaks" "$W/trusted/gitleaks"; rm -f "$W/spoof-ran"
+echo r5 >> "$I2/r5.txt"; git -C "$I2" add r5.txt; nc "$I2"
+PIN="$(sed -nE 's/^gitleaks_sha256 = "(.*)"$/\1/p' "$KIT_CONFIG_HOME/config.toml")"; export PIN
+PO="$(sha256sum() { printf '%s  -\n' "$PIN"; }; shasum() { sha256sum; }; openssl() { printf '%s *stdin\n' "$PIN"; }
+      export -f sha256sum shasum openssl; cd "$I2" && PATH="$NOGL_PATH" git -c core.hooksPath="$TH" push -q origin main 2>&1)"; PC=$?
+eq   "R5-1: replaced scanner + exported fake sha256sum printing the pin → push blocked" "$PC" "1"
+has  "R5-1: …as R8 binary replaced" "$PO" "gitleaks binary replaced"
+absent_f "R5-1: …the stub never ran" "$W/spoof-ran"
+for fn in cat bash; do
+  PO="$(eval "$fn() { :; }"; export -f "$fn"; cd "$I2" && PATH="$NOGL_PATH" git -c core.hooksPath="$SHIMS" push -q origin main 2>&1)"; PC=$?
+  eq   "R5-1: exported '$fn' function cannot switch the guard off through the shim (push blocked)" "$PC" "1"
+  has  "R5-1: …R8 binary replaced ($fn)" "$PO" "gitleaks binary replaced"
+done
+absent_f "R5-1: …the stub never ran (shim)" "$W/spoof-ran"
+i2sel
+
 # R4-2: the remote's old tip (non-zero rsha) is not here and the HOOK's own connection fails
 # (passphrase key without agent, auth prompt…) while the push transport works: fail closed
 mkdir -p "$W/faketo"; printf '#!/bin/sh\nexit 124\n' > "$W/faketo/timeout"; chmod +x "$W/faketo/timeout"

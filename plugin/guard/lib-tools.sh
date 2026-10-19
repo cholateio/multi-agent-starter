@@ -4,7 +4,8 @@
 #
 #   kit_cfg_str <config-dir> <key>      → a top-level string from config.toml (before any [table])
 #   kit_tools_dir <config-dir>          → config.toml `tools_dir` (~ expanded, absolute only), else ~/.local/bin
-#   kit_sha256 <file>                   → its sha256 (sha256sum / shasum / openssl), rc 1 when none works
+#   kit_sha256 <file>                   → its sha256 (/usr/bin/sha256sum, /bin/sha256sum, /usr/bin/shasum,
+#                                         /usr/bin/openssl — absolute, never PATH), rc 1 when none works
 #   kit_tool_resolve <name> <config-dir> → sets KIT_TOOL = the first of <tools_dir>/<name> and the
 #                                         absolute `<name>_path` (dashes → _) whose sha256 equals the
 #                                         recorded `<name>_sha256`; else KIT_TOOL="" + rc 1, and
@@ -31,14 +32,20 @@ kit_tools_dir() {
     printf '%s\n' "${d:-${HOME:-/nonexistent}/.local/bin}"
 }
 kit_sha256() {
-    local s
-    if command -v sha256sum >/dev/null 2>&1; then s="$(sha256sum < "$1" 2>/dev/null)"
-    elif command -v shasum >/dev/null 2>&1; then s="$(shasum -a 256 < "$1" 2>/dev/null)"
-    elif command -v openssl >/dev/null 2>&1; then s="$(openssl dgst -sha256 -r < "$1" 2>/dev/null)"
-    fi
-    s="${s%% *}"
-    [[ "$s" =~ ^[0-9a-f]{64}$ ]] || return 1
-    printf '%s\n' "$s"
+    # absolute paths from a fixed list (review R5-1): never PATH, never a shell function —
+    # an exported `sha256sum` function printing the recorded pin would vouch for any stub
+    local s h
+    for h in /usr/bin/sha256sum /bin/sha256sum /usr/bin/shasum /usr/bin/openssl; do
+        [[ -f "$h" && -x "$h" ]] || continue
+        case "$h" in
+            */sha256sum) s="$("$h" < "$1" 2>/dev/null)" ;;
+            */shasum)    s="$("$h" -a 256 < "$1" 2>/dev/null)" ;;
+            */openssl)   s="$("$h" dgst -sha256 -r < "$1" 2>/dev/null)" ;;
+        esac
+        s="${s%% *}"
+        [[ "$s" =~ ^[0-9a-f]{64}$ ]] && { printf '%s\n' "$s"; return 0; }
+    done
+    return 1
 }
 # kit_tool_candidates <name> <config-dir> → the existing executable candidates, in order
 kit_tool_candidates() {
