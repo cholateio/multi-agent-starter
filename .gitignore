@@ -19,6 +19,8 @@ docs/decisions/
 !.env.*.example
 !.env.*.sample
 !.env.*.template
+!.env.*.dist
+!.env.*.defaults
 .DS_Store
 Thumbs.db
 .idea/

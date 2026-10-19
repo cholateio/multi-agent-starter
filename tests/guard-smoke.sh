@@ -832,7 +832,7 @@ GI="$W/gi"; rm -rf "$GI"; git init -q "$GI"; cp "$KIT_ROOT/plugin/templates/giti
 for f in .env .env.local .env.test .env.production; do
   git -C "$GI" check-ignore -q "$f" && pass "G-F4: template .gitignore ignores $f" || fail "G-F4: template .gitignore ignores $f" "not ignored"
 done
-for f in .env.example .env.sample .env.template .env.dist .env.defaults .env.local.example .envrc; do
+for f in .env.example .env.sample .env.template .env.dist .env.defaults .env.local.example .env.local.dist .env.test.defaults .envrc; do
   git -C "$GI" check-ignore -q "$f" && fail "G-F4: template .gitignore keeps $f addable" "ignored" || pass "G-F4: template .gitignore keeps $f addable"
 done
 

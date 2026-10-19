@@ -19,6 +19,8 @@ docs/decisions/
 !.env.*.example
 !.env.*.sample
 !.env.*.template
+!.env.*.dist
+!.env.*.defaults
 .DS_Store
 Thumbs.db
 .idea/
@@ -46,6 +48,8 @@ Thumbs.db
 !.env.*.example
 !.env.*.sample
 !.env.*.template
+!.env.*.dist
+!.env.*.defaults
 
 # Common dependency / build output
 node_modules/
