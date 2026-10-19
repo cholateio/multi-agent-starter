@@ -32,7 +32,7 @@ You need Claude Code installed and signed in. For the `full` review profile also
 
 To install the plugin from GitHub instead of the local checkout, run `claude plugin marketplace add cholateio/multi-agent-starter` and `claude plugin install kit@multi-agent-kit`, or pass `--marketplace github` to `kit setup`.
 
-`kit setup` installs the plugin at user scope, merges a minimal permission baseline into `~/.claude/settings.json`, points git's global `core.hooksPath` at the guard shims, and downloads pinned, checksum-verified `gitleaks` and `osv-scanner` (or records the absolute path of an already-installed copy of the pinned version — the guard never looks them up on `PATH`). `kit setup --uninstall` reverses it.
+`kit setup` installs the plugin at user scope, merges a minimal permission baseline into `~/.claude/settings.json`, points git's global `core.hooksPath` at the guard shims, and downloads pinned, checksum-verified `gitleaks` and `osv-scanner` (or records the absolute path of an already-installed copy whose sha256 equals the pin — never one picked by its version output). The guard never looks them up on `PATH` and re-checks the recorded sha256 before every run: a replaced binary blocks the push. `kit setup --uninstall` reverses it.
 
 ## Use it in a project
 

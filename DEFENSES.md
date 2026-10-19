@@ -201,7 +201,7 @@ claude 啟動時的環境)。
 | R4 | `tier="always"` 個人字面值 + privacy emails(名稱 `email`) | block | block | 照跑 |
 | R5 | `tier="public-only"` 字面值 | block,除非 kit.toml `visibility="private"` | 同左(讀**推送樹**裡的 kit.toml) | 當公開處理(fail-closed)→ block |
 | R6 / R7 | 一般 email / `/tmp/claude-<uid>/` | warn | warn | 照跑 |
-| R8 | gitleaks 找不到(`config.toml` 的 `tools_dir` / `gitleaks_path`;**從不看 PATH**)或崩潰 | warn(大字橫幅) | **block** | 照跑 |
+| R8 | gitleaks 找不到(`config.toml` 的 `tools_dir` / `gitleaks_path`;**從不看 PATH**)、sha256 不等於記錄的 `gitleaks_sha256`(「binary replaced」/ 沒記錄)或崩潰 | warn(大字橫幅) | **block** | 照跑 |
 
 - 推送範圍 = 本地 sha 減去**推送目標實際已有**的 commit(`git ls-remote <url>` +
   舊值);remote-tracking refs **不採信**(`remote set-url`、多個 pushurl 鏡像、
@@ -230,11 +230,16 @@ claude 啟動時的環境)。
 - 審計:每次 block / bypass / 被用掉的 `kit-privacy: allow` 寫 `~/.local/state/kit/guard/audit.jsonl`。
 - 拿掉 kit.toml 不會關掉 R2:commit 時從 HEAD 讀 kit.toml(並 warn),push 時遠端舊 tip / 範圍邊界 /
   範圍內任何 commit 有 kit.toml 就仍算 kit repo,而且「移除 kit.toml」本身 block(只有 user bypass 放行)。
-  推送 tip 沒有 kit.toml 時還會看**任何本地分支 tip** 與推送目標**公告的** `HEAD` / `refs/heads/*` /
-  `refs/tags/*`(review R3-2:orphan 分支、不相干歷史);本地沒有的公告物件先 `git fetch` 進
-  `refs/kit-guard/tmp/<pid>/`(非互動、`KIT_GUARD_FETCH_TIMEOUT` 預設 30 秒、用完即刪 ref),
-  被覆蓋的遠端 tip 有 kit.toml = 移除 → block;公告了卻抓不下來 → **fail closed**
-  `[R2 kit-status-unknown]`(user bypass 放行)。orphan / unborn 分支上的 commit 從本地分支 tip 讀 kit.toml。
+  推送 tip 沒有 kit.toml 時,先看**本地證據**(不連網):任何本地分支 tip、推送目標公告且本地已有的
+  `HEAD` / `refs/heads/*` / `refs/tags/*`(review R3-2:orphan 分支、不相干歷史)。之後才連網,而且
+  **只抓兩樣**(review R4-3):這個 ref 在遠端的舊 tip(本地沒有時)與遠端 `HEAD`(還沒有任何 kit
+  訊號時)——`--depth=1`、伺服器允許就 `--filter=blob:none`(kit.toml 的 blob 需要時才補抓)、
+  非互動、`KIT_GUARD_FETCH_TIMEOUT` 預設 30 秒,抓進 hook 暫存目錄裡的**一次性 bare repo**
+  (alternates 借用本 repo 物件):本 repo 不留 ref、不留物件、不變 shallow;從不抓整個公告命名空間。
+  被覆蓋的遠端舊 tip 有 kit.toml = 移除 → block。**舊 tip(非零 rsha)本地沒有又抓不到**——離線、
+  或 hook 自己的連線認證不過(push 本身的連線過了,例如有密碼的 ssh key 沒 agent)——一律
+  **fail closed** `[R2 kit-status-unknown]`(user bypass 放行;review R4-2);遠端 `HEAD` 列得出卻抓不到
+  也一樣。新 ref(零 rsha)且 ls-remote 失敗 → 只用本地訊號。orphan / unborn 分支上的 commit 從本地分支 tip 讀 kit.toml。
 - 速度(Phase 4 實測):小 diff pre-commit 中位數 52ms 不含 gitleaks、270ms 含(final-review 修正後重測);
   7-commit push 320ms 含 gitleaks;8,000 行 email CSV(8k 個 R6 warn)< 1s;每條規則只列前 50 筆、
   其餘計數成一行,20 萬行 email CSV 約 1.3s(review F8)。push 時 `git ls-remote` 上限 5 秒、
@@ -248,8 +253,10 @@ claude 啟動時的環境)。
   `kit migrate` / `kit guard status` / session start 更新快照。symlink 以 symlink 存、以 symlink 回;
   超過 8 MiB 或第 2000 個之後的檔**不進 store**,列在 `<store>/omitted`,清單變動時、每次
   `kit guard status` 與 `kit migrate` 都印 `NOT protected` 警告(review R3-3);store 根目錄 700。
-  工作樹沒了、HEAD 也不追蹤的 store 檔 = owner 刪的 → 移到 `<store>/trash/`(一代),checkout
-  不會再放回(review N2);還原訊息附 store 那份的時間(review N4)。
+  工作樹沒了、HEAD 也不追蹤的 store 檔 = owner 刪的(或 reset / stash / clean 拿掉的)→ 移到
+  `<store>/trash/<path>.~<時間戳>~`,**每個路徑保留最近 5 代**、內容相同不重複存(review R4-4);
+  checkout 不會再放回(review N2);每個快照呼叫端(post-* hook、`kit migrate`、`kit guard status`、
+  session start 的 context)都用一行說搬了什麼;還原訊息附 store 那份的時間(review N4)。
 
 **Bypass(user-only)**:`kit guard bypass "<reason>"` 只在有 TTY 的終端機執行
 (agent 的非互動 shell 沒有 TTY → 拒絕);寫 `bypass-<repo-id>` 並記一筆
@@ -266,12 +273,21 @@ commit/push、`env -i` / `env -` / `env -u HOME` / `--ignore-environment` / `--u
 目的地;sed/perl/ruby:僅 `-i`;dd `of=`;`--output=`)的運算元是 guard 狀態檔、git-hooks shim、
 git config 檔、`privacy.local.toml`、kit `config.toml` 或 `plugin/guard/`——只讀(`sed -n`、
 `cat … | sed`)與「同一行別處提到」不算(review F1/F6/F7),`plugin/hooks/` 也算 guard 輸入
-(review R3-9)。`PATH=` 不攔:gitleaks / osv-scanner 的單一解析器(guard、session start、doctor、
+(review R3-9);掃描器本身也算:`~/.local/bin/{gitleaks,osv-scanner}`、config.toml 的
+`tools_dir/…` 與記錄的 `*_path`(cp/ln -sf/install/mv/chmod/重導向 → deny;review R4-1)。
+`PATH=` 不攔:gitleaks / osv-scanner 的單一解析器(guard、session start、doctor、
 `kit guard status` 共用)**只讀 config.toml**——`tools_dir/<name>`(預設 `~/.local/bin`),否則
-`kit setup` / `kit doctor --install` 驗過版本後記下的絕對路徑 `gitleaks_path` / `osv_scanner_path`;
-**從不看呼叫端的 PATH**(review R3-1:`PATH=/tmp/x:$PATH git push` 配一支回 0 的假 gitleaks
-曾讓 R1 失效);相對路徑一律忽略;找不到 → R8。protect-paths 對 Edit/Write 到 `~/.config/kit`、
-`<state>/guard`、git config 檔轉 ask。
+記錄的絕對路徑 `gitleaks_path` / `osv_scanner_path`;**從不看呼叫端的 PATH**(review R3-1:
+`PATH=/tmp/x:$PATH git push` 配一支回 0 的假 gitleaks 曾讓 R1 失效);相對路徑一律忽略。
+**信任 = 內容雜湊,不是版本字串也不是位置**(review R4-1):`kit setup` / `kit doctor --install`
+只在 `tools_dir/<name>` 的 sha256 等於釘版值、或 PATH 上某支的 sha256 等於釘版值時才採用
+(印 `8.30.1` 的假 stub 會被點名忽略),否則安裝驗過 sha256 的下載;每條路都把
+`gitleaks_sha256` / `osv_scanner_sha256` 寫進 config.toml。guard 每次執行前重算 sha256
+(22 MB 的 gitleaks:解析 + 雜湊約多 11 ms,pre-commit 中位數 285→296 ms、pre-push 390→404 ms,本機 SHA-NI;不做快取——快取檔本身會變成可偽造的輸入),
+候選裡第一支雜湊相符的才跑;都不符 → R8「binary replaced」,沒記錄 → R8「no gitleaks_sha256
+recorded」。非 linux/x86_64 的 owner 自己裝好後,在 config.toml 手寫 `<tool>_path` 與
+`<tool>_sha256`(doctor 以 WARN 標「sha256 recorded by hand」)。protect-paths 對 Edit/Write 到
+`~/.config/kit`、`<state>/guard`、git config 檔轉 ask。
 
 **已知繞道與殘餘(誠實條款)**:
 1. 人用 `git --no-verify` → guard 擋不了;事後由 `kit audit`(A1–A5)抓內容。
@@ -317,7 +333,8 @@ git config 檔、`privacy.local.toml`、kit `config.toml` 或 `plugin/guard/`—
    編輯器(`sed -i`、原子存檔)在上次快照後、下一次破壞性 checkout 前的修改會遺失(回來的是
    較舊的 store 版本);repo 與 `~/.local/state` 不在同一個檔案系統時只能複製,同一個縫。
    `git reset --hard <舊>`、`git stash`、`git clean` 不觸發 post-checkout——內容在下一次快照時移進
-   `<store>/trash/`,`kit guard status` 會列出來,要自己複製回來(trash 只留一代)。
+   `<store>/trash/`(帶時間戳,每個路徑留最近 5 代;第 6 次以上「消失又出現、內容不同」會丟掉最舊那代),
+   下一個快照點會用一行說明,`kit guard status` 也會列出來,要自己複製回來。
    **刪掉的 plan 復活**(review N2):快照時「工作樹沒了、HEAD 不追蹤」的檔移進 trash、不再放回;
    但刪掉後**沒有任何快照點**(commit、checkout、`kit guard status`、session start)就直接 checkout
    遷移前的 ref 再回來,那份 plan 仍會從 store 回來(未追蹤、已 ignore,不會被推)。
@@ -331,10 +348,17 @@ git config 檔、`privacy.local.toml`、kit `config.toml` 或 `plugin/guard/`—
    remote(或 ls-remote 失敗、改掃完整歷史時),範圍含那個移除 commit → 每次都 `[R2 kit.toml-removed]`
    block,要再 bypass 一次;還留著 kit.toml 的本地分支也讓這個 repo 繼續被當成 kit repo(R2 照套)。
    少見、有 bypass,不另設例外。
-14. **kit 身分判斷的縫**(review R3-2 殘餘):`git ls-remote` 失敗(離線、要密碼)時看不到遠端公告的
-   ref,只剩本地訊號(本地分支 tip、範圍、工作樹 kit.toml)——全新 repo 在離線狀態推不相干歷史
-   到沒抓過的 kit remote 不會被認出(通常推送本身也會失敗);`refs/pull/*` 等 review 命名空間與
-   remote-tracking refs 不當 kit 訊號;為判斷而抓下的遠端物件留在本地物件庫(下次不用再抓)。
+14. **kit 身分判斷的縫**(review R3-2 / R4-2 / R4-3 殘餘):**新 ref**(零 rsha)且 `git ls-remote` 失敗
+   (離線、要密碼)時只剩本地訊號(本地分支 tip、範圍、工作樹 kit.toml)——全新 repo 離線推不相干
+   歷史成為沒抓過的 kit remote 的**新分支**不會被認出(通常推送本身也會失敗);覆蓋既有 ref 的推送
+   則 fail closed。只看遠端 `HEAD`:kit.toml 只存在遠端**非預設分支 / tag** 上、本地又沒有時,不算
+   kit 訊號(review R4-3 的取捨:不再抓整個命名空間);`refs/pull/*` 等 review 命名空間與
+   remote-tracking refs 不當 kit 訊號。反過來的成本:本地沒有遠端舊 tip、又暫時連不上(或 hook 的
+   第二條連線認證不過)時,**覆蓋式推送一個沒有 kit.toml 的 tip** 一律 `[R2 kit-status-unknown]`,
+   非 kit repo 也一樣——`git fetch` 後重推,或 user bypass。
+15. **掃描器雜湊的縫**(review R4-1 殘餘):驗雜湊與執行之間有極短的 TOCTOU 窗(換檔要剛好卡在
+   兩者之間);`kit doctor --install` 會把 `tools_dir` 裡被換掉的檔換回釘版(或改記 PATH 上雜湊相符的
+   那支),所以模型跑它無害;間接寫法(`python3 -c` 改 config.toml 的 `gitleaks_sha256`)同第 7 條。
 
 ## 四、誠實條款:這套 harness 的能力極限
 
