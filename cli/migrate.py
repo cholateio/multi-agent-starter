@@ -116,10 +116,19 @@ def protected_from_v4(text: str) -> tuple[list[str], list[str]]:
             continue
         if s.startswith("#"):
             items.append(s)
-        elif ABS_RE.match(s):
-            rejected.append(s)
-        else:
-            items.append(s)
+            continue
+        # v4 semantics: everything after '#' is a comment (protect-paths: pat="${pat%%#*}");
+        # kit.toml forbids inline comments, so the comment moves to its own line above
+        glob, _, comment = s.partition("#")
+        glob, comment = glob.strip(), comment.strip()
+        if not glob:
+            continue
+        if ABS_RE.match(glob):
+            rejected.append(glob)
+            continue
+        if comment:
+            items.append("# " + comment)
+        items.append(glob)
     return items, rejected
 
 
@@ -325,13 +334,15 @@ class Migration:
     def step_gitignore(self):
         gi = self.p(".gitignore")
         old = gi.read_text(encoding="utf-8") if gi.is_file() else ""
-        new = init_cmd.with_gitignore_block(remove_v4_gitignore_block(old))
+        stripped = remove_v4_gitignore_block(old)
+        new = init_cmd.with_gitignore_block(stripped)
         if new == old:
             self.r("skip", ".gitignore", "kit block present")
             return
         if self.act:
             gi.write_text(new, encoding="utf-8")
-        self.r("would", ".gitignore", "kit v5 block (managed markers); v4 tracked-on-purpose block removed",
+        self.r("would", ".gitignore", "kit v5 block (managed markers)"
+               + ("; v4 tracked-on-purpose block removed" if stripped != old else ""),
                "".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True), ".gitignore", ".gitignore")))
 
     def step_untrack(self):

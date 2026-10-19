@@ -78,6 +78,12 @@ class TestProtected(IsolatedTestCase):
         self.assertEqual(items, ["# legacy", "src/legacy/*", "supabase/migrations/"])
         self.assertEqual(rejected, [])
 
+    def test_trailing_comment_split_like_v4_hook(self):
+        # v4 protect-paths stripped everything after '#' (pat="${pat%%#*}")
+        items, rejected = migrate.protected_from_v4("books/*.pdf           # raw scans, never edit\nsrc/x/#y\n")
+        self.assertEqual(items, ["# raw scans, never edit", "books/*.pdf", "# y", "src/x/"])
+        self.assertEqual(rejected, [])
+
     def test_absolute_paths_rejected(self):
         items, rejected = migrate.protected_from_v4("/home/testuser/notes/\n~/x\nC:\\Users\\t\\y\nok/*\n")
         self.assertEqual(items, ["ok/*"])
