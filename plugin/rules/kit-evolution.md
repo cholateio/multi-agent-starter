@@ -6,7 +6,7 @@
 
 | 目標 | 模型可否自行修改 |
 |------|------------------|
-| kit plugin 檔（`plugin/` 之下，由 protect-paths 以 plugin root 判定）、`~/.config/kit/`、git config（hooksPath） | **不可自行修改**（protect-paths hook 執法，被攔即向 user 請示）。改法：向 user 說明理由，在 kit repo 修改後 /reload-plugins。 |
+| kit plugin 檔（`plugin/` 之下，由 protect-paths 以 plugin root 判定）、`~/.config/kit/`、git config（hooksPath）、`.claude/settings*.json` | **不可自行修改**（protect-paths hook 執法，被攔即向 user 請示）。改法：向 user 說明理由，在 kit repo 修改後 /reload-plugins。 |
 | AGENTS.md 的事實區（stack、file layout） | 可，但必須在回報中明列改了什麼。 |
 | AGENTS.md 的 constraints 區、`kit.toml [protected]` / `[privacy]` | 只能**加嚴**（新增禁區）；放寬或刪除任何一條需要 user 明確同意。 |
 | `docs/LESSONS.md` | 可自由 append（格式見下）。 |

@@ -23,6 +23,9 @@
 #   1b. git config files (.git/config, ~/.gitconfig, $XDG_CONFIG_HOME/git/
 #      config) — ask: they can set core.hooksPath and silently disable the
 #      global commit/push guard (D13; tool-breaker covers the Bash routes).
+#   1c. Claude Code settings files (*/.claude/settings{,.local}.json and the
+#      user-level ones under $CLAUDE_CONFIG_DIR or ~/.claude) — ask: they
+#      carry the kit's off switches (enabledPlugins, disableAllHooks, env).
 #   2. project-declared no-touch zones: kit.toml `protected = [...]`, one
 #      quoted glob per line (lib.sh kit_toml_protected; a malformed array
 #      fails OPEN to "no zones" with a stderr diagnosis — kit doctor flags
@@ -126,6 +129,18 @@ XDG_GIT="${XDG_CONFIG_HOME:-${HOME:-/nonexistent}/.config}/git/config"
 case "$ABS" in
     */.git/config|*/.git/config.worktree|*/.git/worktrees/*/config.worktree|"${HOME:-/nonexistent}/.gitconfig"|"$(norm_path "$XDG_GIT")")
         ask "kit protect-paths: '$ABS' is a git config file — it can set core.hooksPath and silently switch off the commit/push guard. USER: approve ONLY if you explicitly asked for this exact change. Model: do not route around this; a guard bypass is USER-only (kit guard bypass \"<reason>\")."
+        ;;
+esac
+
+# --- 1c. Claude Code settings files (final-review fix, 2026-10-19) ---
+# In v5 these hold the kit's off switches: enabledPlugins, disableAllHooks,
+# env KIT=off / KIT_BREAKER=off / KIT_PROTECT=off / KIT_REVIEW_GATE=off, and
+# permission allow-lists. v4 asked for .claude/settings.json as kit-owned;
+# keep that protection (G3) and extend it to the user-level files.
+CC_DIR="$(norm_path "${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}")"
+case "$ABS" in
+    */.claude/settings.json|*/.claude/settings.local.json|"$CC_DIR/settings.json"|"$CC_DIR/settings.local.json")
+        ask "kit protect-paths: '$ABS' is a Claude Code settings file — it can disable the kit (enabledPlugins, disableAllHooks, env KIT=off) or widen permissions. USER: approve ONLY if you explicitly asked for this exact change; otherwise deny. Unattended sessions: this stays blocked, as intended."
         ;;
 esac
 

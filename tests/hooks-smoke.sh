@@ -1183,8 +1183,18 @@ pp_reason()   { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisi
 # v5: the project's .claude/ holds no kit files any more — nothing there is
 # kit-owned; kit.toml is project-owned (the model ADDS protected entries;
 # loosening is caught by the Stop gate's sensitive-path floor, not here)
+# final-review fix: Claude Code settings carry the kit's off switches
+# (enabledPlugins, disableAllHooks, env KIT=off / KIT_BREAKER=off) -> ask
 run_hook "$PP" "$(pp_json "$R4/.claude/settings.json")"
-assert_eq "h4: project .claude/settings.json not kit-owned in v5" "$OUT" ""
+assert_eq "h4: project .claude/settings.json escalates to ask (kit off-switches)" "$(pp_decision)" "ask"
+run_hook "$PP" "$(pp_json "$R4/.claude/settings.local.json")"
+assert_eq "h4: project .claude/settings.local.json escalates to ask" "$(pp_decision)" "ask"
+run_hook "$PP" "$(pp_json "$FAKE_HOME/.claude/settings.json")"
+assert_eq "h4: user ~/.claude/settings.json escalates to ask" "$(pp_decision)" "ask"
+run_hook "$PP" "$(pp_json "$WORK/ccfg/settings.json")" full CLAUDE_CONFIG_DIR="$WORK/ccfg"
+assert_eq "h4: CLAUDE_CONFIG_DIR settings.json escalates to ask" "$(pp_decision)" "ask"
+run_hook "$PP" "$(pp_json "$R4/.claude/notes.md")"
+assert_eq "h4: other project .claude files stay editable" "$OUT" ""
 run_hook "$PP" "$(pp_json "$R4/kit.toml")"
 assert_eq "h4: kit.toml itself editable (project-owned)" "$OUT" ""
 run_hook "$PP" "$(pp_json "$R4/src/ok.py")"
@@ -1527,6 +1537,28 @@ bgp ""   "log --grep commit -n allowed"                 'git log --grep commit -
 bgp ""   "grep for the flag text (no git) allowed"      'grep -rn -- "--no-verify" docs/'
 bgp ""   "fetch --no-verbose allowed (not --no-verify)"  'git fetch --no-verbose origin'
 bgp ""   "KIT_GUARD= inside a message allowed"          'git commit -m "fix: KIT_GUARD= is ignored"'
+# final-review fixes (fresh-context reviewer, 2026-10-19)
+bgp deny "backslash-newline continuation before --no-verify denied" $'git commit \\\n  --no-verify \\\n  -m "wip"'
+bgp deny "backslash-newline continuation before commit -n denied"  $'git \\\n  commit -n -m wip'
+bgp ""   "isolated test run with HOME= / GIT_CONFIG_GLOBAL= allowed" 'HOME=/tmp/h GIT_CONFIG_GLOBAL=/tmp/g bash tests/run-all.sh'
+bgp ""   "export GIT_CONFIG_GLOBAL then a non-git command allowed"   'export GIT_CONFIG_GLOBAL=/dev/null; pytest -q'
+bgp ""   "HOME= scoped to the test command, then a plain commit allowed" 'HOME=/tmp/h bash tests/run-all.sh && git commit -m wip'
+bgp deny "export GIT_CONFIG_GLOBAL then git commit denied"           'export GIT_CONFIG_GLOBAL=/dev/null; git commit -m x'
+bgp deny "export HOME then git push denied"                          'export HOME=/tmp/x && git push origin main'
+bgp ""   "reading core.hooksPath (--get) allowed"                    'git config --get core.hooksPath'
+bgp ""   "reading core.hooksPath (bare key) allowed"                 'git config --global core.hooksPath'
+bgp ""   "grep for core.hooksPath allowed"                           'grep -rn core.hooksPath docs/'
+bgp ""   "grep for KIT_GUARD= allowed"                               "grep -rn 'KIT_GUARD=' plugin/"
+bgp deny "--unset core.hooksPath denied"                             'git config --global --unset core.hooksPath'
+bgp deny "--remove-section core denied"                              'git config --global --remove-section core'
+bgp deny "git config unset subcommand denied"                        'git config unset --global core.hooksPath'
+bgp deny "GIT_CONFIG_KEY_n=core.hooksPath denied"                    'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x'
+bgp deny "export KIT_GUARD= denied"                                  'export KIT_GUARD=off'
+bgp deny "env KIT_GUARD= denied"                                     'env KIT_GUARD=off git commit -m x'
+bgp ""   "bash test runner + commit message naming -n allowed"       'bash tests/run-all.sh && git commit -m "fix: handle -n flag in parser"'
+bgp ""   "bash test runner + commit message naming core.hooksPath allowed" 'bash tests/guard-smoke.sh && git commit -m "feat(guard): core.hooksPath shim"'
+bgp deny "sh -c with commit -n denied"                               "sh -c 'git commit -n -m x'"
+bgp deny "eval with --no-verify denied"                              'eval "git commit --no-verify -m x"'
 run_hook "$TB" "$(tbv bgpoff 'git commit --no-verify -m x')" full KIT_BREAKER=off
 assert_eq "b-v5: KIT_BREAKER=off (user-only) disables guard-preserve" "$OUT" ""
 

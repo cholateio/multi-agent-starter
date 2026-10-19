@@ -199,21 +199,41 @@ guard_flatten() {  # stdin: raw command → stdout: flattened single line
 }
 GP_SEP='(^|[;&|(`[:space:]])'
 GP_GLOBAL='([[:space:]]+(-[Cc][[:space:]]+[^[:space:];&|]+|--[A-Za-z][A-Za-z-]*(=[^[:space:];&|]*)?|-[A-Za-z]))*'
+GP_CFG="${GP_SEP}git${GP_GLOBAL}[[:space:]]+config[[:space:]]([^;&|]*[[:space:]])?"
+GP_ENVV='(HOME|XDG_CONFIG_HOME|GIT_CONFIG_(GLOBAL|COUNT|PARAMETERS))'
+GP_GITCP="git([[:space:]][^;&|]*)?[[:space:]](commit|push)([[:space:]]|\$)"
 guard_preserve_hit() {  # $1 = flattened text → 0 if it bypasses the guard
-    printf '%s' "$1" | grep -qE "${GP_SEP}git[[:space:]]([^;&|]*[[:space:]])?--no-veri[a-z]*([=[:space:]]|\$)" && return 0
-    printf '%s' "$1" | grep -qE "${GP_SEP}git${GP_GLOBAL}[[:space:]]+commit([[:space:]]+[^;&|]*)?[[:space:]]-[A-Za-z]*n[A-Za-z]*([[:space:]]|\$)" && return 0
-    printf '%s' "$1" | grep -qE '(^|[^A-Za-z0-9_])KIT_GUARD=' && return 0
-    printf '%s' "$1" | grep -qiE 'core\.hookspath' && return 0
-    printf '%s' "$1" | grep -qE '(^|[^A-Za-z0-9_])GIT_CONFIG_(GLOBAL|COUNT|PARAMETERS)=' && return 0
-    printf '%s' "$1" | grep -qE "${GP_SEP}(HOME|XDG_CONFIG_HOME)=[^[:space:]]*[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*git([[:space:]][^;&|]*)?[[:space:]](commit|push)([[:space:]]|\$)" && return 0
+    local t="$1"
+    # --no-verify on any git subcommand (git accepts unique abbreviations)
+    printf '%s' "$t" | grep -qE "${GP_SEP}git[[:space:]]([^;&|]*[[:space:]])?--no-veri[a-z]*([=[:space:]]|\$)" && return 0
+    # git commit -n (= --no-verify), clustered short flags included
+    printf '%s' "$t" | grep -qE "${GP_SEP}git${GP_GLOBAL}[[:space:]]+commit([[:space:]]+[^;&|]*)?[[:space:]]-[A-Za-z]*n[A-Za-z]*([[:space:]]|\$)" && return 0
+    # KIT_GUARD= as an assignment (prefix, export, env) — a grep for it is fine
+    printf '%s' "$t" | grep -qE '(^|[;&|(`])[[:space:]]*((export|env|declare[[:space:]]+-x)[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*KIT_GUARD=' && return 0
+    # core.hooksPath WRITES only (reads like `git config --get` stay allowed):
+    # key followed by a value, --unset/--add/--replace-all/unset/set,
+    # --remove-section/--rename-section core, per-command -c / --config-env,
+    # GIT_CONFIG_KEY_n / GIT_CONFIG_PARAMETERS carrying the key
+    printf '%s' "$t" | grep -qiE "${GP_CFG}core\.hookspath[[:space:]]+[^-;&|[:space:]]" && return 0
+    printf '%s' "$t" | grep -qiE "${GP_CFG}(--unset(-all)?|--replace-all|--add|unset|set)[[:space:]]([^;&|]*[[:space:]])?core\.hookspath" && return 0
+    printf '%s' "$t" | grep -qiE "${GP_CFG}-?-?(remove|rename)-section[[:space:]]+core([[:space:]]|\$)" && return 0
+    printf '%s' "$t" | grep -qiE '(^|[[:space:]])(-c[[:space:]]*|--config-env[=[:space:]])core\.hookspath=' && return 0
+    printf '%s' "$t" | grep -qiE 'GIT_CONFIG_[A-Z0-9_]*=[^[:space:]]*core\.hookspath' && return 0
+    # redirecting the config that carries the global hooksPath, for a commit/push:
+    # prefix assignment on the git command itself ...
+    printf '%s' "$t" | grep -qE "${GP_SEP}${GP_ENVV}=[^[:space:]]*[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*${GP_GITCP}" && return 0
+    # ... or a persistent one (export / bare assignment statement) before a later commit/push
+    printf '%s' "$t" | grep -qE "${GP_SEP}(export[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*)?${GP_ENVV}=[^[:space:];&|]*[[:space:]]*(;|&&|\|\|).*${GP_SEP}${GP_GITCP}" && return 0
     return 1
 }
 if [[ "$TOOL" == "Bash" && -n "$CMD" ]]; then
     GP_HIT=0
-    GP_FLAT=$(printf '%s' "$CMD" | guard_flatten)
+    GP_CMD="${CMD//$'\\\n'/ }"   # bash joins backslash-newline continuations: so do we
+    GP_FLAT=$(printf '%s' "$GP_CMD" | guard_flatten)
     guard_preserve_hit "$GP_FLAT" && GP_HIT=1
-    if [[ $GP_HIT -eq 0 ]] && printf '%s' "$GP_FLAT" | grep -qE "${GP_SEP}(bash|sh|zsh|dash|ksh|eval|xargs)([[:space:]]|\$)"; then
-        guard_preserve_hit "$(printf '%s' "$CMD" | tr '\n' ';' | tr -d "\"'\\\\")" && GP_HIT=1
+    # nested shell code (bash/sh -c, eval, xargs): scan it fully unquoted too
+    if [[ $GP_HIT -eq 0 ]] && printf '%s' "$GP_FLAT" | grep -qE "${GP_SEP}((bash|sh|zsh|dash|ksh)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*c|eval|xargs)([[:space:]]|\$)"; then
+        guard_preserve_hit "$(printf '%s' "$GP_CMD" | tr '\n' ';' | tr -d "\"'\\\\")" && GP_HIT=1
     fi
     if [[ $GP_HIT -eq 1 ]]; then
         log_event "deny" "$HASH" "$N" "guard-preserve"
