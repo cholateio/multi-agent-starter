@@ -34,10 +34,11 @@
 # The store root is mode 700 (review R3-9).
 # A fresh clone (or new worktree) at a path that already has a store (v5.0.2): the store is keyed
 # by PATH, so it is an earlier clone's — its files are not "gone", they were never checked out. On
-# that initial checkout (post-checkout, previous HEAD = null): when the store's recorded remote URLs
-# (<store>/remotes, written at every snapshot) include one of the new clone's, every store file the
+# that initial checkout (post-checkout, previous HEAD = null): when the store's recorded repository
+# identity (<store>/remote-id, written at every snapshot: the `origin` remote — or the only remote —
+# as lf_url_id normalises it, credentials dropped) equals the new clone's, every store file the
 # clone lacks is COPIED back (never over an existing path; one line says what); otherwise (another
-# repository, or a store from an older kit with no record) the store is set aside whole as
+# repository, no unambiguous identity, or a store from an older kit with no record) the store is set aside whole as
 # <store>.aside.<timestamp> — nothing restored, nothing trashed — and `kit guard status` lists it.
 #
 #   localfiles.sh snapshot [--report]         kit migrate / kit guard status (--report) / session start
@@ -158,10 +159,58 @@ lf_git_removed() {
         | paste "$STORE/touched.kit-tmp" - | awk -F'\t' '$NF == "blob" && !seen[$1]++ { print $1 }'
     rm -f "$STORE/touched.kit-tmp"
 }
-# lf_remotes: this repo's remote URLs, normalised (credentials, trailing / and .git dropped), sorted
-lf_remotes() {
-    git config --get-regexp '^remote\..*\.url$' 2>/dev/null | cut -d' ' -f2- \
-        | sed -E 's#^([A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@#\1#; s#/+$##; s#\.git$##; s#/+$##' | awk 'NF' | sort -u
+# lf_url_id <url>: a remote URL as a repository identity, safe to store and compare. A hosted
+# repository (github.com, gitlab.com, bitbucket.org; scp-like, ssh:// or http(s)://) → host/owner/repo
+# lowercase, so ssh and https of one repo match. Anything else (a local path, file://, another host)
+# is kept EXACT — /srv/proj and /srv/proj.git stay two repositories — minus credentials: an http(s)
+# userinfo, another scheme's password, and a query / fragment (tokens ride there too).
+LF_HOSTED_RE='^(github\.com|gitlab\.com|bitbucket\.org)$'
+lf_url_id() {
+    local u="$1" scheme auth user host path
+    if [[ "$u" =~ ^([A-Za-z][A-Za-z0-9+.-]*)://([^/?#]*)([^?#]*) ]]; then
+        scheme="${BASH_REMATCH[1],,}"; auth="${BASH_REMATCH[2]}"; path="${BASH_REMATCH[3]}"
+        user=""; [[ "$auth" == *@* ]] && { user="${auth%@*}"; auth="${auth##*@}"; }
+        host="${auth%%:*}"; host="${host,,}"
+        if [[ "$host" =~ $LF_HOSTED_RE && "$scheme" =~ ^(https?|ssh|git|git\+ssh|ssh\+git)$ ]]; then
+            lf_hosted_id "$host" "$path" && return 0
+        fi
+        case "$scheme" in http|https|ftp|ftps) user="" ;; *) user="${user%%:*}" ;; esac
+        printf '%s://%s%s%s\n' "$scheme" "${user:+$user@}" "$auth" "$path"
+    elif [[ "$u" =~ ^([^@/:]+@)?([^/:]+):(.*)$ ]]; then   # scp-like [user@]host:path
+        host="${BASH_REMATCH[2],,}"; path="${BASH_REMATCH[3]}"
+        [[ "$host" =~ $LF_HOSTED_RE ]] && lf_hosted_id "$host" "$path" && return 0
+        printf '%s\n' "$u"
+    else
+        printf '%s\n' "$u"
+    fi
+}
+lf_hosted_id() {  # $1 host, $2 path → host/owner/repo (lowercase; .git and slashes trimmed)
+    local p="$2"
+    while [[ "$p" == /* ]]; do p="${p#/}"; done
+    while [[ "$p" == */ ]]; do p="${p%/}"; done
+    p="${p%.git}"
+    [[ "$p" =~ ^[^/]+(/[^/]+)+$ ]] || return 1
+    printf '%s/%s\n' "$1" "${p,,}"
+}
+# lf_remote_id: this repo's identity = its `origin` remote (no origin → its only remote; several
+# remotes and no origin → none: a fresh clone is never matched on a non-origin remote such as a
+# fork's upstream)
+lf_remote_id() {
+    local url=""
+    local -a names=()
+    url="$(git config --get remote.origin.url 2>/dev/null)"
+    if [[ -z "$url" ]]; then
+        mapfile -t names < <(git remote 2>/dev/null)
+        [[ ${#names[@]} -eq 1 ]] || return 0
+        url="$(git config --get "remote.${names[0]}.url" 2>/dev/null)"
+    fi
+    [[ -n "$url" ]] && lf_url_id "$url"
+    return 0
+}
+# lf_id_shown <id>: how a recorded identity is named in a message — host/owner/repo for a hosted
+# repository, never the recorded string otherwise
+lf_id_shown() {
+    if [[ "${1%%/*}" =~ $LF_HOSTED_RE ]]; then printf 'another remote (%s)' "$1"; else printf 'a different remote'; fi
 }
 # lf_parent_ok <path>: every parent inside the work tree is a real directory or absent (never write
 # through a symlink or over a file)
@@ -200,8 +249,13 @@ snapshot() {
     if [[ -d "$FILES" ]]; then
         printf '%s\n' "$TOP" > "$STORE/repo" 2>/dev/null; lf_mark
         # which repository this store belongs to (v5.0.2: a fresh clone at the same path checks it)
-        local rem; rem="$(lf_remotes)"
-        [[ -n "$rem" ]] && printf '%s\n' "$rem" > "$STORE/remotes.kit-tmp" 2>/dev/null && mv -f "$STORE/remotes.kit-tmp" "$STORE/remotes" 2>/dev/null
+        local rem; rem="$(lf_remote_id)"
+        rm -f "$STORE/remotes" 2>/dev/null   # a v5.0.2 pre-release record (every remote, lossy)
+        if [[ -n "$rem" ]]; then
+            printf '%s\n' "$rem" > "$STORE/remote-id.kit-tmp" 2>/dev/null && mv -f "$STORE/remote-id.kit-tmp" "$STORE/remote-id" 2>/dev/null
+        else
+            rm -f "$STORE/remote-id" 2>/dev/null   # no unambiguous identity now: a fresh clone gets nothing
+        fi
     fi
     # files the store does NOT protect: never silent (review R3-3)
     local list="" old=""
@@ -291,9 +345,9 @@ prune() {  # store entries gone from the work tree while HEAD does not track the
 fresh_clone() {
     local p rec="" cur t aside
     local -a back=()
-    [[ -f "$STORE/remotes" ]] && rec="$(cat "$STORE/remotes" 2>/dev/null)"
-    cur="$(lf_remotes)"
-    if [[ -n "$rec" && -n "$cur" ]] && printf '%s\n' "$rec" | grep -qxF -f <(printf '%s\n' "$cur"); then
+    [[ -f "$STORE/remote-id" ]] && rec="$(head -n 1 "$STORE/remote-id" 2>/dev/null)"
+    cur="$(lf_remote_id)"
+    if [[ -n "$rec" && "$rec" == "$cur" ]]; then
         # same repository: copy (not link — the old clone keeps its own inode) what the clone lacks
         while IFS= read -r -d '' p; do
             p="${p#"$FILES"/}"
@@ -314,7 +368,7 @@ fresh_clone() {
     t="$(date +%Y%m%dT%H%M%S)"; aside="$STORE.aside.$t"
     while [[ -e "$aside" ]]; do aside="$aside.$$"; done
     if mv "$STORE" "$aside" 2>/dev/null; then
-        echo "kit: this path had a local-only store from an earlier clone ($([[ -n "$rec" ]] && echo "of another remote: $(printf '%s\n' "$rec" | head -n 1)" || echo "remote unknown")) — not applied to this clone and nothing trashed: kept whole at $aside (copy back from its files/ what you want) — see: kit guard status" >&2
+        echo "kit: this path had a local-only store from an earlier clone ($([[ -n "$rec" ]] && echo "of $(lf_id_shown "$rec")" || echo "remote unknown")) — not applied to this clone and nothing trashed: kept whole at $aside (copy back from its files/ what you want) — see: kit guard status" >&2
         snapshot
     else
         echo "kit: this path has a local-only store from an earlier clone that could not be set aside ($STORE) — not applied to this clone; see: kit guard status" >&2

@@ -529,7 +529,7 @@ has "M22c: …which still holds the owner's files" "$(cat "${ASIDE:-/nonexistent
 R="$W/m22d"; make_v4 "$R"; km "$R" --commit >/dev/null 2>&1
 rm -rf "$R.git"; git clone -q --bare "$R" "$R.git" 2>/dev/null; g "$R" remote add origin "$R.git"
 (cd "$R" && bash "$LF" snapshot 2>/dev/null)
-ST22D="$W/state/localfiles/$(printf '%s' "$R" | sha1sum | cut -c1-12)"; rm -f "$ST22D/remotes"
+ST22D="$W/state/localfiles/$(printf '%s' "$R" | sha1sum | cut -c1-12)"; rm -f "$ST22D/remotes" "$ST22D/remote-id"
 mv "$R" "$R.old"
 CO22="$(git clone -q "$R.git" "$R" 2>&1)"; RC=$?
 eq "M22d: re-clone over a store with no recorded remote exit 0" "$RC" "0"
@@ -542,6 +542,70 @@ SO="$(cd "$R" && bash "$LF" snapshot --report 2>&1)"
 lacks "M22d: rsync back + snapshot: nothing moved to trash" "$SO" "moved to"
 eq "M22d: …the trash is still empty" "$(st_trash "$ST22D")" "0"
 exists "M22d: …and the new store protects the copied-back files" "$ST22D/files/PROJECT.toml"
+
+# ---- M23 (v5.0.2 review): the repository identity a fresh clone is matched on = the `origin`
+# remote only (no origin → the single remote; several and no origin → none), hosted URLs
+# normalised to host/owner/repo, anything else exact (credentials, query and fragment dropped)
+stkey() { printf '%s/state/localfiles/%s' "$W" "$(printf '%s' "$1" | sha1sum | cut -c1-12)"; }
+rid() { (cd "$1" && bash "$LF" snapshot 2>/dev/null); cat "$(stkey "$1")/remote-id" 2>/dev/null; }
+# (a) a fork whose clone also lists the upstream as a non-origin remote; then the upstream is
+# cloned at the same path → not the same repository: nothing restored
+U="$W/m23up"; make_v4 "$U"; km "$U" --commit >/dev/null 2>&1
+rm -rf "$U.git" "$W/m23fork.git"; git clone -q --bare "$U" "$U.git" 2>/dev/null; git clone -q --bare "$U" "$W/m23fork.git" 2>/dev/null
+R="$W/m23a"; git clone -q "$W/m23fork.git" "$R" 2>/dev/null; g "$R" remote add upstream "$U.git"
+printf 'name = "fork-private"\n' > "$R/PROJECT.toml"; (cd "$R" && bash "$LF" snapshot 2>/dev/null)
+mv "$R" "$R.old"; CO23="$(git clone -q "$U.git" "$R" 2>&1)"
+absent "M23a: clone of the upstream where its fork was: the fork's PROJECT.toml is NOT restored" "$R/PROJECT.toml"
+lacks "M23a: …nothing restored" "$CO23" "restored"
+has "M23a: …the fork's store is set aside (hint)" "$CO23" "kit guard status"
+# (b) /srv/proj vs /srv/proj.git are two repositories (.git is not stripped from a local path)
+R="$W/m23b"; git clone -q "$O" "$R" 2>/dev/null
+printf 'name = "b-private"\n' > "$R/PROJECT.toml"; (cd "$R" && bash "$LF" snapshot 2>/dev/null)
+mv "$R" "$R.old"; CO23="$(git clone -q "$O.git" "$R" 2>&1)"
+absent "M23b: <path> then <path>.git cloned at one place: nothing restored" "$R/PROJECT.toml"
+lacks "M23b: …no restore line" "$CO23" "restored"
+# (c) ssh and https URLs of one GitHub repo are the same repository (insteadOf → a local bare)
+GH="$W/m23gh.git"; rm -rf "$GH"; git clone -q --bare "$O" "$GH" 2>/dev/null
+git config --file "$W/gitconfig" --add "url.$GH.insteadOf" "git@github.com:owner/repo.git"
+git config --file "$W/gitconfig" --add "url.$GH.insteadOf" "https://github.com/Owner/Repo.git"
+R="$W/m23c"; git clone -q "git@github.com:owner/repo.git" "$R" 2>/dev/null
+printf 'name = "gh-private"\n' > "$R/PROJECT.toml"
+eq "M23c: an scp-like GitHub URL is recorded as host/owner/repo" "$(rid "$R")" "github.com/owner/repo"
+mv "$R" "$R.old"; CO23="$(git clone -q "https://github.com/Owner/Repo.git" "$R" 2>&1)"
+has "M23c: re-clone over https: PROJECT.toml restored" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "gh-private"
+has "M23c: …one restore line" "$CO23" "restored"
+git config --file "$W/gitconfig" --unset-all "url.$GH.insteadOf"
+# (d) normalisation, recorded at snapshot (the same exact local path: M22)
+AT=@   # userinfo built at run time (the guard reads "user@host" as an email address)
+R="$W/m23c"; printf 'name = "gh-private"\n' > "$R/PROJECT.toml"
+for c in "git@github.com:Owner/Repo.git|github.com/owner/repo" \
+         "ssh://git@GitHub.com:22/Owner/Repo.git/|github.com/owner/repo" \
+         "https://x:y${AT}github.com/Owner/Repo/|github.com/owner/repo" \
+         "https://gitlab.com/Grp/Sub/Proj.git|gitlab.com/grp/sub/proj" \
+         "git@bitbucket.org:team/r.git|bitbucket.org/team/r" \
+         "/srv/proj.git|/srv/proj.git" \
+         "file:///srv/proj.git|file:///srv/proj.git" \
+         "ssh://me:pw${AT}git.example.invalid/r.git|ssh://me${AT}git.example.invalid/r.git" \
+         "me${AT}git.example.invalid:r.git|me${AT}git.example.invalid:r.git"; do
+  g "$R" remote set-url origin "${c%%|*}"
+  eq "M23d: ${c%%|*} → ${c#*|}" "$(rid "$R")" "${c#*|}"
+done
+g "$R" remote rename origin up
+eq "M23d: no origin, a single remote: that one" "$(rid "$R")" "me${AT}git.example.invalid:r.git"
+g "$R" remote add other "$O"
+eq "M23d: several remotes, no origin: no identity recorded" "$(rid "$R")" ""
+# (e) credentials, query and fragment never reach the store or a message
+R="$W/m23e"; git clone -q "$O.git" "$R" 2>/dev/null
+g "$R" remote set-url origin "https://u:p${AT}example.invalid/x?token=abc#frag"
+printf 'name = "e-private"\n' > "$R/PROJECT.toml"
+eq "M23e: the recorded remote drops userinfo, query and fragment" "$(rid "$R")" "https://example.invalid/x"
+eq "M23e: …no credential anywhere in the store" "$(grep -rlE 'token=abc|#frag|u:p@' "$(stkey "$R")" 2>/dev/null | grep -v '/files/' | wc -l | tr -d ' ')" "0"
+mv "$R" "$R.old"; CO23="$(git clone -q "$O.git" "$R" 2>&1)"
+GS="$(cd "$R" && python3 "$KIT_ROOT/bin/kit" guard status 2>&1)"
+absent "M23e: another remote: nothing restored" "$R/PROJECT.toml"
+has "M23e: …the message says 'a different remote'" "$CO23" "a different remote"
+lacks "M23e: …and never prints the recorded URL" "$CO23$GS" "example.invalid"
+lacks "M23e: …nor the token" "$CO23$GS" "token"
 git config --file "$W/gitconfig" --unset core.hooksPath
 
 # ---- M15 (review O8): an owner edit to a file migrate wrote, between --apply and --commit

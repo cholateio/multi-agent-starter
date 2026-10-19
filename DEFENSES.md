@@ -296,10 +296,16 @@ claude 啟動時的環境)。
   **同一路徑重新 clone**(v5.0.2,實際回報):store 以**路徑**為鍵(`sha1(toplevel)`),把舊 clone 移走、
   在同一個目錄 `git clone`,clone 自己的 post-checkout 會看到前一個 clone 的 store——舊版把那些「不在
   工作樹」的檔當 owner 刪的搬進 trash。現在 post-checkout 的前一個 HEAD 是 null(新 clone / 新 worktree
-  的第一次 checkout)且這個路徑已有 store 時**一律不 prune、不進 trash**:每次快照都把 repo 的 remote URL
-  (去掉帳密、結尾 `/` 與 `.git`)記進 `<store>/remotes`,新 clone 的 remote 在其中 → store 裡 clone 缺的
+  的第一次 checkout)且這個路徑已有 store 時**一律不 prune、不進 trash**:每次快照把 repo 的**身分**記進
+  `<store>/remote-id`——只看 `origin`(沒有 origin 就看唯一的 remote;好幾個 remote 又沒有 origin → 不記,
+  fork 的 upstream 這類非 origin remote 永遠不拿來比);github.com / gitlab.com / bitbucket.org 的 URL
+  (scp 式、`ssh://`、`https://`)正規化成小寫 `host/owner/repo`,同一 repo 的 ssh 與 https 算同一個;
+  其他(本機路徑、`file://`、別的 host)**逐字**比,只去掉帳密(http(s) 的 userinfo、其他 scheme 的密碼)
+  與 query / fragment(token 也會藏在那)——`/srv/proj` 和 `/srv/proj.git` 是兩個 repo(v5.0.2 review)。
+  身分相同 → store 裡 clone 缺的
   檔**複製**回工作樹(不是 hard link——舊 clone 保有自己的 inode;已存在的路徑、經過 symlink 或檔案的
-  父路徑一律不碰),一行說放回了哪些;remote 不同或不明(v5.0.1 以前的 store 沒有記錄)→ 什麼都不放回,
+  父路徑一律不碰),一行說放回了哪些;身分不同或不明(v5.0.1 以前的 store 沒有記錄)→ 什麼都不放回,
+  訊息只說「a different remote」或 hosted repo 的 `host/owner/repo`,從不印記錄的 URL,
   整個 store 改名成 `<store>.aside.<時間戳>` 保留,印一行提示 `kit guard status`(它會列出這個目錄)。
   之後把同樣的檔 rsync / cp 回來無害:內容相同,下一次快照只是重新 link,不進 `prev/`、不進 trash。
 
@@ -400,8 +406,11 @@ recorded」。雜湊工具本身只用固定絕對路徑(`/usr/bin/sha256sum`、
    超過 8 MiB / 第 2000 個之後的檔不受保護,只有警告(review R3-3)。根治是改寫歷史(design §12 步驟 6)。
    **同一路徑重新 clone**(v5.0.2):只認「第一次 checkout」(post-checkout 前一個 HEAD 為 null);
    `git clone --no-checkout` 之後再 checkout、或不經 clone 直接把別的 `.git` 搬進同一路徑,hook 分不出
-   是新 clone,照「誰刪的」規則走(可能進 trash,可從 trash 複製回來)。remote 比對是字串比對:同一個
-   repo 用 https 與 ssh 兩種 URL clone 算「不同」→ store 被保留在 `.aside.*`、不自動放回(安全側)。
+   是新 clone,照「誰刪的」規則走(可能進 trash,可從 trash 複製回來)。身分只認 `origin`(或唯一的
+   remote),三個 hosted 網域以外逐字比:自架 git server 的 ssh 與 https URL、本機路徑寫法不同
+   (`/srv/proj` 與 `/srv/proj/`、相對路徑)、換了 origin 名稱都算「不同」→ store 被保留在 `.aside.*`、
+   不自動放回(安全側)。反過來,同一個 hosted repo 的 ssh / https 不分 SSH 帳號:靠不同 SSH 帳號區分
+   權限的同名 repo 會被當成同一個(只放回 clone 缺的、被 ignore 的本機檔,不覆蓋任何檔)。
 12. guard-preserve 已知誤擋:`chmod` 算寫入(`chmod -x` 會讓 shim 靜默失效),所以模型照 doctor
    建議跑 `chmod 600 privacy.local.toml` 也會被 deny(交給 user);在 kit repo 自己的開發裡,
    `sed -i plugin/guard/*.sh`、`sed -i plugin/hooks/*.sh` 被 deny(那份就是線上的 guard / hook),改用 Edit(轉 ask)。
