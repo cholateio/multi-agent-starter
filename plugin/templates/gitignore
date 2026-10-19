@@ -1,11 +1,30 @@
-# 通用短版 .gitignore(init.sh 鋪出時會改名為 .gitignore)。
-# stack-specific 的規則(例:*.pyc、.next/、target/)由 scaffolder 或 AI 依專案補上。
+# >>> kit v5 (managed block — edit outside the markers) >>>
+.claude/
+.codex/
+.superpowers/
+CLAUDE.local.md
+PROJECT.toml
+docs/LESSONS.md
+docs/plans/
+docs/superpowers/plans/
+docs/decisions/
+*.local.toml
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+# <<< kit v5 <<<
+
+# Project-owned rules below. Stack-specific entries (e.g. *.pyc, .next/, target/) go here.
 
 # OS junk
 .DS_Store
 Thumbs.db
 
-# Editors(.vscode/ 不 ignore,常有共享設定)
+# Editors
 .idea/
 *.swp
 
@@ -14,7 +33,7 @@ Thumbs.db
 .env.*
 !.env.example
 
-# 常見依賴/build 產物
+# Common dependency / build output
 node_modules/
 dist/
 build/
@@ -23,11 +42,3 @@ __pycache__/
 
 # Logs
 *.log
-
-# Claude Code runtime state. `.claude/` itself IS tracked on purpose:
-# kit-owned files are regenerable via `init.sh --update`, but settings.json
-# (accumulated permission approvals) and protected-paths (project no-touch
-# zones) are project truth that nothing can rebuild. Only machine-local
-# state is excluded.
-.claude/settings.local.json
-.claude/scheduled_tasks.lock

@@ -1,22 +1,47 @@
-# OS
+# >>> kit v5 (managed block — edit outside the markers) >>>
+.claude/
+.codex/
+.superpowers/
+CLAUDE.local.md
+PROJECT.toml
+docs/LESSONS.md
+docs/plans/
+docs/superpowers/plans/
+docs/decisions/
+*.local.toml
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+# <<< kit v5 <<<
+
+# Project-owned rules below. Stack-specific entries (e.g. *.pyc, .next/, target/) go here.
+
+# OS junk
 .DS_Store
 Thumbs.db
 
 # Editors
-.vscode/
 .idea/
 *.swp
 
-# Secrets (paranoid prevention)
+# Secrets
 .env
 .env.*
 !.env.example
 
-# Claude Code temporary files
-/tmp/claude-*
+# Common dependency / build output
+node_modules/
+dist/
+build/
+__pycache__/
+.venv/
 
-# Project-level state
-docs/plans/*.md
-!docs/plans/.gitkeep
-docs/decisions/*.md
-!docs/decisions/.gitkeep
+# Logs
+*.log
+
+# kit repo only
+/tmp/claude-*
