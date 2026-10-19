@@ -240,14 +240,14 @@ class Migration:
     visibility_override: str | None = None
     results: list[Result] = field(default_factory=list)
     _visibility: str | None = None
-    written: set = field(default_factory=set)
+    written: dict = field(default_factory=dict)   # rel path → sha256 of what migrate wrote
 
     def write(self, rel: str, text: str):
         """All tracked-file writes go through here so --commit stages only what migrate wrote."""
         p = self.p(rel)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text, encoding="utf-8")
-        self.written.add(rel)
+        self.written[rel] = _file_sha(p)
 
     def r(self, status, step, detail="", diff="", change=None):
         if change is None:
@@ -487,27 +487,49 @@ def _manifest(root: Path) -> Path:
     return Path(gd) / "kit-migrate-written.json"
 
 
-def _load_written(root: Path) -> set:
+def _file_sha(p: Path) -> str | None:
+    import hashlib
     try:
-        return set(json.loads(_manifest(root).read_text()))
+        return hashlib.sha256(p.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _load_written(root: Path) -> dict:
+    """{path: sha256}. A manifest from an older kit (a bare path list) maps to None:
+    unverifiable, so those paths count as the owner's (review O8)."""
+    try:
+        data = json.loads(_manifest(root).read_text())
     except (OSError, ValueError):
-        return set()
+        return {}
+    if isinstance(data, dict):
+        return {str(k): (v if isinstance(v, str) else None) for k, v in data.items()}
+    if isinstance(data, list):
+        return {str(k): None for k in data}
+    return {}
 
 
-def _save_written(root: Path, written: set):
+def _save_written(root: Path, written: dict):
     if written:
-        _manifest(root).write_text(json.dumps(sorted(written)))
+        _manifest(root).write_text(json.dumps(dict(sorted(written.items()))))
 
 
-def _dirty_outside_managed(root: Path, written: set) -> tuple[list[str], list[str]]:
+def _ours(root: Path, written: dict, path: str) -> bool:
+    """True when `path` still holds exactly what migrate wrote there."""
+    h = written.get(path)
+    return h is not None and _file_sha(root / path) == h
+
+
+def _dirty_outside_managed(root: Path, written: dict) -> tuple[list[str], list[str]]:
     """(dirty paths, staged paths) that are the OWNER's: everything except the local-only
-    untrack set (never committed by migrate) and files an earlier migrate run wrote
-    (recorded in .git/kit-migrate-written.json) — so a resumed run is not 'dirty', but an
-    owner's own AGENTS.md / LICENSE / docs/DEVELOPMENT.md edits are."""
+    untrack set (never committed by migrate) and files an earlier migrate run wrote that
+    still hash to what it wrote (.git/kit-migrate-written.json: path → sha256) — so a
+    resumed run is not 'dirty', but an owner's own AGENTS.md / LICENSE / docs/DEVELOPMENT.md
+    edits are, including an edit to a file migrate wrote (review O8)."""
     dirty, staged = [], []
     for e in gitutil.status_porcelain(root):
         path = e[3:]
-        if path in written or any(path == m or path.startswith(m + "/") for m in UNTRACK):
+        if _ours(root, written, path) or any(path == m or path.startswith(m + "/") for m in UNTRACK):
             continue
         dirty.append(path)
         if e[0] not in (" ", "?"):
@@ -604,18 +626,21 @@ def run(args) -> int:
         try:
             m2.plan()
         except StopForTest as e:
-            _save_written(root, written | m2.written)
+            _save_written(root, {**written, **m2.written})
             _print(m2.results, show_diff=False)
             print(f"(test) stopped after {e}")
             return 3
-        written |= m2.written
+        written.update(m2.written)
         _save_written(root, written)
         _print(m2.results, show_diff=False)
     else:
         _print(m.results, show_diff=False)
 
     if args.commit:
-        add = sorted(w for w in written if (root / w).exists())
+        add = sorted(w for w in written if (root / w).exists() and _ours(root, written, w))
+        for w in sorted(w for w in written if (root / w).exists() and not _ours(root, written, w)):
+            if gitutil.run_git(root, "status", "--porcelain", "--", w, check=False).strip():
+                print(f"needs-review {w} — changed since kit migrate wrote it; not committed (commit it yourself)")
         if add:
             gitutil.run_git(root, "add", "--", *add)
         if subprocess.run(["git", "-C", str(root), "diff", "--cached", "--quiet"]).returncode != 0:

@@ -276,6 +276,27 @@ NKID="$(printf '%s' "$NK" | sha1sum | cut -c1-12)"
 absent "M14: non-kit repo: no localfiles store" "$W/state/localfiles/$NKID"
 git config --file "$W/gitconfig" --unset core.hooksPath
 
+# ---- M15 (review O8): an owner edit to a file migrate wrote, between --apply and --commit
+R="$W/m15"; make_v4 "$R"; km "$R" --apply >/dev/null
+echo "owner tweak after apply" >> "$R/AGENTS.md"
+HEAD0="$(g "$R" rev-parse HEAD)"
+OUT="$(km "$R" --commit)"; CODE=$?
+eq "M15: edited migrate output → refused (exit 1)" "$CODE" "1"
+has "M15: …names the edited file" "$OUT" "AGENTS.md"
+eq "M15: …nothing committed" "$(g "$R" rev-parse HEAD)" "$HEAD0"
+OUT="$(km "$R" --commit --allow-dirty)"; CODE=$?
+eq "M15: --allow-dirty commits the rest (exit 0)" "$CODE" "0"
+eq "M15: …but never the owner-edited AGENTS.md" "$(g "$R" ls-files AGENTS.md)" ""
+has "M15: …and says so" "$OUT" "needs-review AGENTS.md"
+has "M15: owner edit still on disk" "$(cat "$R/AGENTS.md")" "owner tweak after apply"
+has "M15: kit.toml was committed" "$(g "$R" ls-files)" "kit.toml"
+# a manifest from an older kit (path list, no hashes) is not trusted blindly
+R="$W/m16"; make_v4 "$R"; km "$R" --apply >/dev/null
+GD="$(g "$R" rev-parse --absolute-git-dir)"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); json.dump(sorted(d) if isinstance(d, dict) else d, open(sys.argv[1], "w"))' "$GD/kit-migrate-written.json"
+OUT="$(km "$R" --commit)"; CODE=$?
+eq "M16: legacy (hash-less) manifest → stop for review (exit 1)" "$CODE" "1"
+
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1
