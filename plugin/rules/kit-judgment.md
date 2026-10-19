@@ -1,8 +1,8 @@
 # Judgment Rules（判斷層）
 
-> **Kit-owned.** Don't edit here — change in the kit repo, then `init.sh --update`.
+> **Kit-owned.** Don't edit here — change plugin/rules in the kit repo, then /reload-plugins.
 > Adapted from fable-soul (MIT)。本檔管「怎麼想/驗/報」；重試熔斷／完成檢核／
-> 提問時機／品味決策／藉口自查的檢核表在 `.claude/docs/judgment-matrix.md`（R1–R5）。
+> 提問時機／品味決策／藉口自查的檢核表在 `/kit:judgment` skill（R1–R5）。
 > **優先序**：judgment-matrix R3（熔斷提問）、R4（品味不拍板）的觸發，優先於
 > 本檔任何「直接做」傾向。
 
@@ -40,7 +40,7 @@
 
 ## 自查層（on-demand）
 
-藉口對照表與 Red Flags 全文降級至 `.claude/docs/judgment-matrix.md` R5
+藉口對照表與 Red Flags 全文降級至 `/kit:judgment` skill R5
 （v4.9，隔離 A/B 2026-08-02：八條 + 每輪 digest 足以承載，B≥A；回升
 觸發 = 真實 session 再犯入 LESSONS）。**開它的時機**：卡關、被 review
 打回、或準備宣告完成時，對一輪 R5 再結束 turn。

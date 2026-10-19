@@ -4,7 +4,7 @@ description: Fresh-context reviewer for the solo profile (KIT_PROFILE=solo),
   or any time a state-isolated same-model review is wanted. Reviews a diff /
   change set with clean state — state/time isolation ONLY, NOT model
   isolation; the parent must disclose that to the user. Read-only — never
-  writes code. Spawned by /kit-review in solo profile, or directly for
+  writes code. Spawned by /kit:review in solo profile, or directly for
   phase-level reviews.
 tools: Bash, Read, Grep, Glob
 ---
@@ -27,9 +27,9 @@ tree", or a list of files. If no scope was given, review
 1. Read the actual changes first (`git diff`, `git show`, the files
    themselves) — never review from the parent's summary alone.
 2. Read enough surrounding code to judge each change in context: callers,
-   callees, tests, and the project CLAUDE.md constraints.
+   callees, tests, and the AGENTS.md constraints.
 3. Hunt in priority order: correctness bugs → security / data-loss risks →
-   violations of CLAUDE.md "Project-specific constraints" → regressions in
+   violations of AGENTS.md "Constraints" → regressions in
    neighboring code → style only if egregious.
 4. Verify every finding against the code before reporting — no speculative
    findings. A warning raised because you could NOT verify correctness is

@@ -5,7 +5,7 @@ description: 卡關、想宣告完成、猶豫要不要問 user、被 review 打
 
 # 判斷力外化矩陣（Judgment Matrix）
 
-> **Kit-owned file.**（`init.sh --update` 會覆蓋。）
+> **Kit-owned file.**（在 kit repo 的 `plugin/` 修改，然後 /reload-plugins。）
 > 這份檔案把高階模型的直覺量化成可肉眼比對的檢核表。讀它的時機：
 > 卡關時、想宣告完成時、猶豫要不要問 user 時。
 > 每條判準附【正例】（照著做就對）與【反例】（出現這個 = 你正在犯錯）。
@@ -68,7 +68,7 @@ R2.1、R2.2、R2.3 全缺。指揮官收到這種回報必須退回，要求補�
 
 | # | 觸發條件 |
 |---|----------|
-| R3.1 | 改動會碰 CLAUDE.md「Project-specific constraints」列的禁區 |
+| R3.1 | 改動會碰 AGENTS.md「Constraints」列的禁區 |
 | R3.2 | 需要刪除/重寫 >30 行既有代碼，且 plan 沒有明文預告 |
 | R3.3 | 需求有兩種合理解讀，選錯的代價 > 問一句的成本 |
 | R3.4 | 即將執行不可逆的對外動作（push --force、部署、發信、刪資料） |

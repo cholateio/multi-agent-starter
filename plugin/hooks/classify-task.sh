@@ -142,7 +142,7 @@ fi
 # output document would corrupt the hook protocol (codex finding 2026-08-02).
 if [[ "${KIT_REVIEW_GATE:-on}" != "off" && -f "/tmp/claude-kit-defer-${SESSION_ID}" ]]; then
     CTX="${CTX}
-KIT_REVIEW: deferred unreviewed batch on file — settle it (review or /kit-skip-review) before declaring the task done."
+KIT_REVIEW: deferred unreviewed batch on file — settle it (review or /kit:skip-review) before declaring the task done."
 fi
 
 jq -n --arg ctx "$CTX" \

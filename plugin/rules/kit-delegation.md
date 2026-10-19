@@ -1,6 +1,6 @@
 # Model Dispatch & Escalation Rules
 
-> **Kit-owned.** Don't edit here — change in the kit repo, then `init.sh --update`.
+> **Kit-owned.** Don't edit here — change plugin/rules in the kit repo, then /reload-plugins.
 > 前提假設：主對話（指揮官）= 當前可用的最強模型；Sonnet/Haiku = 輕量
 > 執行員。review 與 isolation 規則在 kit-workflow.md，本檔不重複。
 
@@ -32,7 +32,7 @@
    上限、禁大段代碼。
 
 五種任務型態的填空模板（研究/實作/重構/審查/驗收 read-back）：
-invoke `/kit-dispatch` skill。
+invoke `/kit:dispatch` skill。
 
 ## 模型檔位與升降級
 
@@ -67,4 +67,4 @@ invoke `/kit-dispatch` skill。
   獨立 subagent 各評再選優。
 - 收到「已寫入 X」的回報，接受前**必做最低驗證** `ls`／Read 確認檔案存在
   且非空——幻覺回報「已寫入」實際沒落檔是已知失敗模式。
-- 卡關判斷、完成判準、何時問 user：讀 `.claude/docs/judgment-matrix.md`。
+- 卡關判斷、完成判準、何時問 user：讀 `/kit:judgment` skill。

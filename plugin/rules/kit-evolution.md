@@ -1,14 +1,14 @@
 # Harness Self-Update Rules
 
-> **Kit-owned.** Don't edit here — change in the kit repo, then `init.sh --update`.
+> **Kit-owned.** Don't edit here — change plugin/rules in the kit repo, then /reload-plugins.
 
 ## 誰可以改什麼
 
 | 目標 | 模型可否自行修改 |
 |------|------------------|
-| `.claude/rules/`、`hooks/`、`scripts/`、`agents/`、`skills/`、`docs/`、`settings.json`、`kit-version` | **不可自行修改**（protect-paths hook 執法，被攔即向 user 請示）。改法：向 user 說明理由，在 kit repo 修改後 `--update` 鋪回。 |
-| CLAUDE.md 的事實區（stack、file layout） | 可，但必須在回報中明列改了什麼。 |
-| CLAUDE.md 的 constraints 區、`.claude/protected-paths` | 只能**加嚴**（新增禁區）；放寬或刪除任何一條需要 user 明確同意。 |
+| kit plugin 檔（`plugin/` 之下，由 protect-paths 以 plugin root 判定）、`~/.config/kit/`、git config（hooksPath） | **不可自行修改**（protect-paths hook 執法，被攔即向 user 請示）。改法：向 user 說明理由，在 kit repo 修改後 /reload-plugins。 |
+| AGENTS.md 的事實區（stack、file layout） | 可，但必須在回報中明列改了什麼。 |
+| AGENTS.md 的 constraints 區、`kit.toml [protected]` / `[privacy]` | 只能**加嚴**（新增禁區）；放寬或刪除任何一條需要 user 明確同意。 |
 | `docs/LESSONS.md` | 可自由 append（格式見下）。 |
 | 任何工作流 / 架構層級的調整 | 必須先徵得 user 同意，無例外。 |
 
@@ -35,12 +35,12 @@
 1. **降級是預設，消滅是例外**：刪常駐條款的預設形式 = 全文降級到
    on-demand 層（judgment-matrix／verification-signals／dispatch 模板），
    常駐層留一行路由；**真刪僅限 hook 已物理接管的敘述**。
-2. **GREEN-without 收據**：降級前跑隔離成對 A/B（無 .claude 的 headless
+2. **GREEN-without 收據**：降級前跑隔離成對 A/B（不載 kit plugin 的 headless
    session，同場景含/不含該條款），不含版不得退化；無對應 eval 場景
    → 標 `no-eval-coverage`，只降級不真刪。
 3. **回升觸發**：降級條目在真實 session 再犯（LESSONS 條目成立）
    → 升回常駐層；預算不夠就精簡別處騰出。
-4. **總量棘輪**：`.claude/rules/` 是每 session 固定稅，上限由 smoke test
+4. **總量棘輪**：`plugin/rules/`（SessionStart 注入）是每 session 固定稅，上限由 smoke test
    把關；瘦身後 cap 下修至實際值 +5%（不高於舊 cap），超標先精簡再新增。
 
 ## 教訓紀錄格式（docs/LESSONS.md，沒有就建立）

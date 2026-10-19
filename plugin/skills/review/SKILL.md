@@ -8,7 +8,7 @@ description: Run the kit's profile-aware review on the current change set and
   asking for a review.
 ---
 
-# /kit-review — profile-aware review
+# /kit:review — profile-aware review
 
 One skill, one promise: the review that runs matches the active profile, and
 the Stop-hook gate learns about it (evidence marker written) so it won't
@@ -16,9 +16,11 @@ re-block.
 
 ## Steps
 
-1. **Resolve the active profile**: `KIT_PROFILE` env var, default `full`.
-   If hooks are enabled, the session-start KIT_CONTEXT block already
-   announced it, along with this session's exact marker paths.
+1. **Resolve the active profile and session id**: profile = `KIT_PROFILE`
+   env var, else `profile` in `~/.config/kit/config.toml`, default `full`;
+   session id = `$KIT_SESSION_ID` env var, else read it from the marker
+   paths in KIT_CONTEXT. The session-start KIT_CONTEXT block announces the
+   profile and this session's exact marker paths.
 
 2. **Run the review**:
    - **full** → run the codex companion script directly with Bash. Do NOT
@@ -67,7 +69,7 @@ re-block.
 
    If the review verdict is **Blocked**, do NOT write the marker — the gate
    rejects `verdict=blocked` by design. Fix the blocking findings, then
-   re-run /kit-review and record the passing verdict.
+   re-run /kit:review and record the passing verdict.
 
    A bare `touch` does NOT pass the gate (v4.0). NEVER write this line
    without having actually run the review in this session — the marker is
@@ -77,7 +79,7 @@ re-block.
 
    The marker certifies the working-tree state at the moment the turn ends —
    small finding-fixes made between review and turn-end ride along with it.
-   If the fix wave after a review is substantial, re-run /kit-review instead
+   If the fix wave after a review is substantial, re-run /kit:review instead
    of riding the marker.
 
 ## Reviewer unavailable?

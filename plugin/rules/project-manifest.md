@@ -1,6 +1,6 @@
 # Project Manifest 規則
 
-> **Kit-owned.** Don't edit here — change in the kit repo, then `init.sh --update`.
+> **Kit-owned.** Don't edit here — change plugin/rules in the kit repo, then /reload-plugins.
 
 `PROJECT.toml`（專案根目錄）是專案狀態的機器可讀 manifest，user-owned，`proj`
 靠它做跨專案彙總。Session 結束前若本次工作觸發以下任一事件，更新它並把

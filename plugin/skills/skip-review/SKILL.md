@@ -6,11 +6,12 @@ description: Record a skip of the kit's final-review Stop gate for the current
   audited, hook-enforced floor). When in doubt, defer instead of skipping.
 ---
 
-# /kit-skip-review — gate skip (user-approved or model-judged)
+# /kit:skip-review — gate skip (user-approved or model-judged)
 
 The Stop hook (`verify-final-review.sh`) blocks turn-end when business-logic
 changes crossed the review threshold. This skill records a decision to waive
-that review once. The flag path is in KIT_CONTEXT (session start).
+that review once. The flag path is in KIT_CONTEXT (session start);
+`<session_id>` = `$KIT_SESSION_ID` when set, else the id in those paths.
 
 ## Mode 1 — user mode (the user said to skip)
 
@@ -32,7 +33,7 @@ code, a one-off analysis script, scratch work that will never be depended on.
    (auth/payment/migration/security/…), protected-paths, or that are not
    measurable (no baseline / binary) CANNOT be model-skipped — the gate
    rejects the flag, audits the attempt, and re-blocks. Those need
-   /kit-review or the user's word.
+   /kit:review or the user's word.
 2. Write the flag; both fields are mandatory:
    `echo "skipped-by=model reason=<one line: why not review-worthy> scope=<N lines/M files>" > /tmp/claude-skip-review-<session_id>`
 3. The gate honors it ONLY after appending the reason/scope to the session

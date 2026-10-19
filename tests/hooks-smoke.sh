@@ -1151,6 +1151,7 @@ printf 'deferred-by=model reason=x\n' > "$DR_DEFER"
 run_hook "$CT" "{\"session_id\":\"${DR_SID}\",\"prompt\":\"hello\"}"
 DR_CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
 assert_contains "h3: defer reminder present when defer file exists" "$DR_CTX" "deferred unreviewed batch"
+assert_contains "h3: defer reminder names /kit:skip-review (v5)" "$DR_CTX" "/kit:skip-review"
 assert_contains "h3: reminder shares the digest context (merged, not appended)" "$DR_CTX" "KIT_JUDGMENT"
 if printf '%s' "$OUT" | jq -e . >/dev/null 2>&1; then
   pass "h3: defer-reminder output is a single valid JSON doc"

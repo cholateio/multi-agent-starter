@@ -5,7 +5,7 @@ description: 做 UI、設計 schema、同一 bug 連續卡、引入外部服務�
 
 # 驗證信號注入（Verification Signals）
 
-> **Kit-owned file.**（`init.sh --update` 會覆蓋。）
+> **Kit-owned file.**（在 kit repo 的 `plugin/` 修改，然後 /reload-plugins。）
 > 讀它的時機（命中哪節讀哪節，不用整檔背）：要做 UI（S1）、要設計
 > DB schema（S2）、同一個 bug 連續修不好（S3）、要引入外部服務（S4）、
 > 新專案定架構（S5）、要建/改驗證器或 CI（S6）、要宣告完成或交棒
@@ -40,7 +40,7 @@ Inter、卡片格線、emoji 標題）——「AI 味」的來源。模型發明
    （2-3 個方向刻意拉開的候選 + user 挑；無人值守選最保守 +
    `TASTE-DECISION` 標記）。
 3. **設計禁令清單**：明文禁掉統計預設路徑出奇有效——寫進專案
-   CLAUDE.md constraints（例：禁紫色漸層、禁標題 emoji、禁預設
+   AGENTS.md constraints（例：禁紫色漸層、禁標題 emoji、禁預設
    shadcn 長相）。
 4. **輸入能力用能力矩陣，不用螢幕寬度**：觸控／hover 行為的判準是
    `(hover)` × `(pointer)` 四格矩陣，不是 breakpoint——「是不是手機」
@@ -67,7 +67,7 @@ schema 膨脹對模型零成本，對專案是長期稅。
 2. **不對稱性起手式**：`ALTER TABLE ADD` 便宜到不用預留，砍欄位才貴
    ——永遠從最少欄位起手，不為想像中的需求留位。
 3. **review 必問**：「哪些表／欄位目前沒有消費者？」（simplifier 視角，
-   丟給 /kit-review 的 reviewer 一併問）。
+   丟給 /kit:review 的 reviewer 一併問）。
 
 【正例】MVP 的 users 表 5 欄，每欄對得出讀取處。【反例】首版就有
 `soft_deleted_at`、`tenant_id`、`audit_log` 表——沒有任何現存 feature
@@ -245,5 +245,5 @@ localhost healthz 200 與對外 502 可以同時為真（機隊收據 2026-08-02
   **實例化**——訊號怎麼補、補到哪。兩者不衝突；S1/S4 的裁決規則
   就是 R4 的應用。
 - 部署到專案後，建議把命中的條目（尤其 S1.3 設計禁令、S4.4 預設棧、
-  S5.1 分層紀律）具體化成該專案 CLAUDE.md 的 constraints——本檔給
+  S5.1 分層紀律）具體化成該專案 AGENTS.md 的 constraints——本檔給
   的是通用形，constraints 給的是專案的實際值。

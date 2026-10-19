@@ -1,20 +1,21 @@
 # Multi-Agent Workflow Rules
 
-> **Kit-owned.** Don't edit here — change in the kit repo, then `init.sh --update`.
+> **Kit-owned.** Don't edit here — change plugin/rules in the kit repo, then /reload-plugins.
 
 ## Profiles: who reviews is the whole point
 
-The `KIT_PROFILE` env var selects the profile (default `full`). When hooks are
+`KIT_PROFILE` (else `profile` in ~/.config/kit/config.toml) selects the profile
+(default `full`). When hooks are
 enabled, the SessionStart KIT_CONTEXT block announces the active profile,
 reviewer availability, and this session's marker paths — trust it over guessing.
 
 | Profile | "run a review" resolves to |
 |---------|----------------------------|
-| `full`  | cross-model codex review, run via `/kit-review`（adversarial variant for high-stakes work）— the raw `/codex:review` slash command is USER-only（`disable-model-invocation`）. |
+| `full`  | cross-model codex review, run via `/kit:review`（adversarial variant for high-stakes work）— the raw `/codex:review` slash command is USER-only（`disable-model-invocation`）. |
 | `solo`  | fresh-context `solo-reviewer` subagent — state/time isolation ONLY. Always tell the user: "cross-model isolation is OFF". |
 
-Prefer `/kit-review`: it resolves the profile AND writes the marker the Stop
-gate checks. `/kit-skip-review`: user mode on explicit request; model-judged
+Prefer `/kit:review`: it resolves the profile AND writes the marker the Stop
+gate checks. `/kit:skip-review`: user mode on explicit request; model-judged
 mode (v4.9) for non-sensitive batches only — sensitive/protected/unmeasurable
 stay USER-only (the skill and the hook enforce the floor).
 
@@ -36,7 +37,7 @@ A `TASK_CLASSIFICATION` hint appears only for explicit user overrides —
 - Small (trivial / mechanical / docs, or a code change meeting ALL of:
   ≤4 files and roughly ≤50 changed lines — test files count toward neither —
   no new dependency, no schema/migration, no auth/payment/security surface, no
-  public API or behavior-contract change, nothing in the project CLAUDE.md
+  public API or behavior-contract change, nothing in AGENTS.md
   "Project-specific constraints") → just do it, verify yourself (run the tests),
   brief summary. Do NOT invoke superpowers brainstorming / writing-plans / TDD
   for these — this section overrides those auto-triggers (superpowers' own
@@ -74,14 +75,14 @@ commit 用中文。
 ## Reviews that are NOT optional
 
 - **Final review**: before declaring a task complete, settle every unreviewed
-  business-logic batch AND any pending defer — via `/kit-review`, or a judged
-  skip via `/kit-skip-review`. The Stop gate (v4.9) asks for ONE decision each
+  business-logic batch AND any pending defer — via `/kit:review`, or a judged
+  skip via `/kit:skip-review`. The Stop gate (v4.9) asks for ONE decision each
   time the cumulative unreviewed batch crosses the small threshold — review
   now / defer (feature mid-flight; the gate re-asks each threshold-distance) /
   skip (model-judged for non-sensitive batches, audited; mechanics are in the
   hook's block message). Do not run ceremonial reviews
   under the threshold, nor slice work to stay under it. Sensitive paths
-  (auth/payment/migration/protected-paths) are size-blind: no defer, no
+  (auth/payment/migration/protected/kit.toml) are size-blind: no defer, no
   model-skip — review or the user's word only.
 - **Re-review scope**: round 1 covers the whole change set; later rounds scope
   to the fix delta, whatever depends on it (callers of touched functions/types —
@@ -90,12 +91,12 @@ commit 用中文。
   reviewed code breeds rounds (receipt 2026-07-11, evals.md). It narrows what
   gets RE-read, not what gets read: every line keeps
   its round-1 review; a redesign earns a fresh whole-set round; sensitive paths
-  (auth/payment/migration/protected-paths) stay whole-set every round. Run each
+  (auth/payment/migration/protected/kit.toml) stay whole-set every round. Run each
   re-review in a FRESH context fed only the scoped delta + the findings to
   recheck — never resume/replay the original reviewer (receipt 2026-07-23).
 - **Phase-level review** during plan execution is NOT per-task. Fire it only
   at (a) sensitive paths — auth/authz/session, payment, migration/schema,
-  CLAUDE.md constraints (always, size-blind) — and (b) a dependency boundary a
+  AGENTS.md constraints (always, size-blind) — and (b) a dependency boundary a
   later phase builds on. Ordinary phases batch into the Final review; per-task
   review re-covers it anyway (receipt 2026-07-23, evals.md).
 
@@ -106,5 +107,5 @@ commit 用中文。
 - Research suggests a meaningfully better approach than the plan assumed.
 - A phase would modify > 100 lines, or delete/rewrite > 30 existing lines
   the plan did not explicitly forecast (= judgment-matrix R3.2).
-- The change touches the project CLAUDE.md "Project-specific constraints".
+- The change touches AGENTS.md "Constraints".
 - (full) codex unavailable — ask whether to proceed or wait.
