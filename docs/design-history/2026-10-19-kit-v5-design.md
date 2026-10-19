@@ -399,7 +399,7 @@ CLAUDE.md stub（整檔）：
 | `DEVELOPMENT.md` | 吸收舊 README 範本：30 秒重啟、指令表、env vars 表（只列變數名與用途，**不列值**）、部署、「半年後最容易忘的事」、文件地圖。**去掉** AI 接手 prompt 與 kit 更新段。英文預設 |
 | `LICENSE.MIT` / `LICENSE.CC-BY-4.0` | 全文；`kit init` 填年份與 GitHub handle。內容型 repo 選 CC-BY-4.0 |
 | `gitignore` | 統一版，見下 |
-| `PROJECT.toml` | v4 同款（local-only） |
+| `PROJECT.toml.example` | v4 同款；`kit init` 鋪成 local-only 的 `PROJECT.toml`。模板不能叫 `PROJECT.toml`：那是 guard R2 禁推路徑，kit repo 自己會推不出去 |
 | `mise.toml` | v4 同款 |
 | `github/workflows/kit-guard.yml` | §7.6 |
 | GitHub Actions 慣例（寫進 AGENTS.md 範本 Conventions 段） | 頂層 `permissions: contents: read`，job 層按需升權；`uses:` 一律 40 字元 SHA 加 `# vX.Y.Z` 尾註；`kit audit` 執法 |

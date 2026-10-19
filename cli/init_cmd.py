@@ -2,7 +2,7 @@
 
 Lays down the v5 project skeleton, never clobbering an existing file; a fresh
 (non-git) directory gets `git init -b main` + one bootstrap commit. Templates
-that do not exist yet (Phase 5) are reported as `skip (template missing)`.
+that are missing are reported as `skip (template missing)`.
 """
 import datetime
 import shutil
@@ -115,7 +115,7 @@ def run(args) -> int:
         log("done", ".gitignore (kit block inserted)")
     else:
         log("skip", ".gitignore (kit block present)")
-    from_template("PROJECT.toml", "PROJECT.toml")
+    from_template("PROJECT.toml.example", "PROJECT.toml")  # template name is not a guard-forbidden path
     if shutil.which("mise"):
         from_template("mise.toml", "mise.toml")
     if not args.private:
