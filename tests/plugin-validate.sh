@@ -35,8 +35,9 @@ while IFS= read -r cmd; do
 done < <(jq -r '.. | objects | select(.type=="command") | .command' plugin/hooks/hooks.json)
 if [ -z "$BAD" ]; then pass "pv4: hooks.json commands exist and are executable"; else fail "pv4: hooks.json commands" "missing/not executable:$BAD"; fi
 
-# (5) rules total bytes <= 20480
-RB=$(cat plugin/rules/*.md | wc -c | tr -d ' ')
+# (5) rules total bytes <= 20480 (main-session payload; the SubagentStart
+# digest has its own cap in pv8; any other new rules file counts here)
+RB=$(find plugin/rules -maxdepth 1 -name '*.md' ! -name 'subagent-digest.md' -exec cat {} + | wc -c | tr -d ' ')
 if [ "$RB" -le 20480 ]; then pass "pv5: rules total ${RB}B <= 20480B"; else fail "pv5: rules total" "${RB}B > 20480B"; fi
 
 # (6) injection segments <= 9500 chars
@@ -45,6 +46,10 @@ CORE=$(seg kit-workflow kit-delegation)
 JUDG=$(seg kit-judgment kit-evolution project-manifest)
 if [ "$CORE" -le 9500 ]; then pass "pv6: core segment ${CORE} chars <= 9500"; else fail "pv6: core segment" "${CORE} > 9500"; fi
 if [ "$JUDG" -le 9500 ]; then pass "pv6: judgment segment ${JUDG} chars <= 9500"; else fail "pv6: judgment segment" "${JUDG} > 9500"; fi
+
+# (8) SubagentStart digest <= 2000 chars (design §4.3 (c))
+DG=$(wc -m < plugin/rules/subagent-digest.md 2>/dev/null | tr -d ' ')
+if [ -n "$DG" ] && [ "$DG" -gt 0 ] && [ "$DG" -le 2000 ]; then pass "pv8: subagent digest ${DG} chars <= 2000"; else fail "pv8: subagent digest" "${DG:-missing} chars"; fi
 
 # (7) each skill has name: equal to its directory
 for d in plugin/skills/*/; do

@@ -1,6 +1,10 @@
 { "hooks": {
   "SessionStart": [ { "matcher": "startup|resume|clear|compact|fork", "hooks": [
-      { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"", "timeout": 5 } ] } ],
+      { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/inject-rules.sh\" core",     "timeout": 5 },
+      { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/inject-rules.sh\" judgment", "timeout": 5 },
+      { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",         "timeout": 5 } ] } ],
+  "SubagentStart": [ { "hooks": [
+      { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/inject-rules.sh\" subagent", "timeout": 5 } ] } ],
   "UserPromptSubmit":   [ { "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/classify-task.sh\"", "timeout": 5 } ] } ],
   "PreToolUse": [
       { "matcher": "Edit|MultiEdit|Write|NotebookEdit", "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/protect-paths.sh\"", "timeout": 5 } ] },

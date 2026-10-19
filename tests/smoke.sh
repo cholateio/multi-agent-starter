@@ -22,7 +22,9 @@ if [ ! -e /tmp/kit-smoke-never ]; then pass "s0: init.sh stub creates nothing"; 
 
 # budget: plugin/rules is injected into EVERY session — a fixed context tax.
 # Cap 20480 bytes (v4.9 ratchet: cap = min(old cap, ceil100(actual x 1.05)); never raised).
-RULES_BYTES=$(cat "$KIT_ROOT/plugin/rules/"*.md 2>/dev/null | wc -c | tr -d ' ')
+# v5: subagent-digest.md rides SubagentStart only (own <= 2,000-char cap in
+# plugin-validate pv8); every other rules file counts, new ones included.
+RULES_BYTES=$(find "$KIT_ROOT/plugin/rules" -maxdepth 1 -name '*.md' ! -name 'subagent-digest.md' -exec cat {} + 2>/dev/null | wc -c | tr -d ' ')
 RULES_CAP=20480
 if [ "${RULES_BYTES:-0}" -gt 0 ] && [ "${RULES_BYTES:-0}" -le "$RULES_CAP" ]; then
   pass "budget: rules/ total ${RULES_BYTES}B within ${RULES_CAP}B cap"
