@@ -1,0 +1,20 @@
+# ~/.config/kit/privacy.local.toml — LOCAL ONLY. chmod 600. Never commit.
+# Personal literals the git guard (R3–R5) and `kit audit` (A2/A3) look for.
+# Format is a strict TOML subset (a bash/awk parser reads it): one key per line,
+# double-quoted strings, arrays on ONE line, no inline tables.
+#
+# usernames: OS / Windows user names → /home/<u>/, /mnt/c/Users/<u>/, C:\Users\<u> block (R3)
+usernames = []
+# emails: personal addresses (non-noreply) to treat as always-block literals
+emails = []
+
+# One [[literal]] block per value. name: ^[a-z0-9-]{3,40}$, unique — kit.toml
+# [privacy] allow_literals references this NAME, never the value.
+# tier: "always" (block in every repo) | "public-only" (block when visibility=public).
+# value: >= 4 characters, matched as a fixed string, case-insensitive.
+#
+# [[literal]]
+# name  = "owner-cloud-uid"
+# value = "<the literal>"
+# tier  = "always"
+# note  = "cloud auth uid"
