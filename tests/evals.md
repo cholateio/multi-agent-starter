@@ -204,6 +204,19 @@ session 啟動時的指令快照，session 中途新增的 rules 檔到不了 su
 - rules/ no-growth 不變量：基線 19621B → 19615B（門檻句淨增以指標句
   縮短抵銷），常駐稅未升。
 
+## v5 manual evals
+
+真實 headless session（`claude -p --plugin-dir <kit_root>/plugin --model sonnet`），
+fixture 目錄在 scratchpad（不在任何真實專案內）；kit 目錄只放一份 `kit.toml`。
+對應設計 §11「手動／eval」三列。
+
+| # | 場景 | 指令（摘要） | 期望 | 2026-10-19 結果（Claude Code 2.1.303） |
+|---|------|--------------|------|------------------------------------------|
+| a1 | kit 專案（有 `kit.toml`）的常駐 rules | 「List the KIT_RULES block headers in your context, one per line」 | 兩行 `KIT_RULES[core]`、`KIT_RULES[judgment]` | PASS：輸出正是這兩行 |
+| a2 | 非 kit 目錄（無 `kit.toml`）零注入 | 「Say KIT if any KIT_RULES block is in your context, else NONE」 | `NONE` | PASS：`NONE` |
+| b | subagent 可見性（§4.3 (c)） | 主 session 以 Agent 工具派 general-purpose，請它逐字引用啟動 context 中所有 `#` 標題行（prompt 不含 digest 文字） | 引出 `# Kit digest for subagents（SubagentStart 注入…）`；不出現 rules 檔標題 | PASS：subagent 逐字引出 digest 標題（含 prompt 未給的中文後半）；無 `# Workflow Rules`／`# Judgment Rules` 等 SessionStart 注入標題——SessionStart 注入不進 subagent、SubagentStart digest 會進，與 Phase 0 spike 一致 |
+| c | `claude plugin eval` 對 `/kit:judgment`、`/kit:verify-signals` 觸發準確度 | — | 選配 | 未跑（選配；留給發佈前清單） |
+
 ## Rejected（透明紀錄：測了但沒加的規則）
 
 （無——RED 重現不了的候選規則記在這裡，附測試日期與場景。）
