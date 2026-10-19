@@ -114,13 +114,14 @@ make_plain_repo() {
   git_f "$1" commit -q -m "fixture: initial"
 }
 
-# make_repo <dir>: kit-activated fixture repo — README.md + kit.toml in the
-# initial commit (v5: kit.toml is the activation marker)
+# make_repo <dir> [protected-entry ...]: kit-activated fixture repo —
+# README.md + kit.toml in the initial commit (v5: kit.toml is the activation
+# marker and the protected-zone list)
 make_repo() {
   mkdir -p "$1"
   git_f "$1" init -q -b main
   echo "fixture" > "$1/README.md"
-  kit_toml_fixture "$1"
+  kit_toml_fixture "$@"
   git_f "$1" add -A
   git_f "$1" commit -q -m "fixture: initial"
 }
@@ -338,10 +339,11 @@ DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
 REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
 assert_eq "h2b: decision is block" "$DEC" "block"
 assert_contains "h2b: reason names the file" "$REASON" "app.py"
-assert_contains "h2b: reason points at /kit-review" "$REASON" "/kit-review"
+assert_contains "h2b: reason points at /kit:review" "$REASON" "/kit:review"
 # v4.0: the block message must NOT hand out the forgeable shortcut
 assert_not_contains "h2b: no touch incantation in block message" "$REASON" "touch /tmp"
-assert_contains "h2b: skip path routed through the skill" "$REASON" "/kit-skip-review"
+assert_contains "h2b: skip path routed through the skill" "$REASON" "/kit:skip-review"
+assert_not_contains "h2b: no v4 skill names left" "$REASON" "/kit-review"
 if printf '%s\n' "$REASON" | grep -qE '^  - *$'; then
   fail "h2b: no empty entry in file list" "found a bare '  - ' line"
 else
@@ -585,15 +587,48 @@ DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
 assert_eq "h2r: tiny sensitive-named test file still blocks" "$DEC" "block"
 rm -f "$R2/test_auth.py"
 
-# (s) protected path stays size-blind: a 3-line change in a
-# .claude/protected-paths zone must block
-mkdir -p "$R2/.claude" "$R2/src/legacy"
-echo "src/legacy/" > "$R2/.claude/protected-paths"
-py_lines 3 > "$R2/src/legacy/pay.py"
-run_hook "$VF" "$STOP_JSON"
+# (s) protected path stays size-blind (v5: zones come from kit.toml
+# [protected]). Dedicated fixture: the zone list must be in place BEFORE the
+# baseline, or the kit.toml edit itself (a sensitive path) would cause the
+# block. A leftover v4 .claude/protected-paths is committed too and must be
+# ignored (V-v5-2).
+RS="$WORK/h2s-repo"; make_repo "$RS" "src/legacy/"
+mkdir -p "$RS/.claude"; echo "src/other/" > "$RS/.claude/protected-paths"
+git_f "$RS" add -A; git_f "$RS" commit -q -m "fixture: v4 leftover list"
+SIDS="${SID_PREFIX}-h2s"
+STOPS="{\"session_id\":\"${SIDS}\",\"cwd\":\"${RS}\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
+run_hook "$SS" "{\"session_id\":\"${SIDS}\",\"cwd\":\"${RS}\"}"
+mkdir -p "$RS/src/other" "$RS/src/legacy"
+py_lines 3 > "$RS/src/other/pay.py"
+run_hook "$VF" "$STOPS"
+assert_eq "v-v5-2: v4 .claude/protected-paths no longer makes a zone (small change allowed)" "$OUT" ""
+py_lines 3 > "$RS/src/legacy/pay.py"
+run_hook "$VF" "$STOPS"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
-assert_eq "h2s: tiny change on protected path still blocks" "$DEC" "block"
-rm -rf "$R2/src" "$R2/.claude"
+assert_eq "h2s: tiny change on a kit.toml [protected] path still blocks" "$DEC" "block"
+# solo profile can come from ~/.config/kit/config.toml when KIT_PROFILE is unset
+mkdir -p "$FAKE_HOME/.config/kit"; printf 'profile = "solo"\n' > "$FAKE_HOME/.config/kit/config.toml"
+run_hook "$VF" "$STOPS" full KIT_PROFILE=
+assert_contains "v-v5-3: Stop gate takes the profile from config.toml" "$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)" "CROSS-MODEL ISOLATION IS OFF"
+rm -rf "$FAKE_HOME/.config/kit"
+
+# V-v5-1: kit.toml is size-blind sensitive — a 1-line edit (e.g. loosening
+# [protected] or [privacy] allow_literals) needs a review or the USER's word:
+# no small-change auto-allow, no model-judged skip
+RK="$WORK/h2k-repo"; make_repo "$RK" "src/legacy/"
+SIDK="${SID_PREFIX}-h2k"
+STOPK="{\"session_id\":\"${SIDK}\",\"cwd\":\"${RK}\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
+run_hook "$SS" "{\"session_id\":\"${SIDK}\",\"cwd\":\"${RK}\"}"
+sed -i.bak 's#"src/legacy/",##' "$RK/kit.toml"; rm -f "$RK/kit.toml.bak"
+run_hook "$VF" "$STOPK"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+assert_eq "v-v5-1: 1-line kit.toml edit blocks (sensitive, size-blind)" "$DEC" "block"
+printf 'skipped-by=model reason=just-a-config-tweak scope=1lines/1file\n' > "/tmp/claude-skip-review-${SIDK}"
+run_hook "$VF" "$STOPK"
+DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
+REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
+assert_eq "v-v5-1: model-skip on a kit.toml batch is rejected" "$DEC" "block"
+assert_contains "v-v5-1: floor language present" "$REASON" "only the USER can skip"
 
 # (t/u) v4.8 TURN-SCOPED enforcement + escape hatch. Uses a DEDICATED fresh
 # fixture: R2's accumulated history (hundreds of committed "print('line N')"
@@ -700,7 +735,7 @@ rm -f "$BASELINE2U" "$TURNSTART2U"
 #     extension-filtered sensitive scan (SQL blind spot) and pre-filter
 #     head-50 truncation.
 # ===========================================================================
-RG="$WORK/g-repo"; make_repo "$RG"
+RG="$WORK/g-repo"; make_repo "$RG" "vault/"   # g15 zone lives in kit.toml from the start
 SIDG="${SID_PREFIX}-g"
 BASELINEG="/tmp/claude-kit-baseline-${SIDG}"
 CODEX_MG="/tmp/claude-codex-reviewed-${SIDG}"
@@ -718,8 +753,8 @@ run_hook "$VF" "$STOPG"
 DEC="$(printf '%s' "$OUT" | jq -r '.decision // ""' 2>/dev/null)"
 REASON="$(printf '%s' "$OUT" | jq -r '.reason // ""' 2>/dev/null)"
 assert_eq "g1: batch over threshold blocks" "$DEC" "block"
-assert_contains "g1: offers the review path" "$REASON" "/kit-review"
-assert_contains "g1: offers the skip path" "$REASON" "/kit-skip-review"
+assert_contains "g1: offers the review path" "$REASON" "/kit:review"
+assert_contains "g1: offers the skip path" "$REASON" "/kit:skip-review"
 assert_contains "g1: offers the defer path (teach line)" "$REASON" "deferred-by=model"
 
 # g2: a valid defer settles the block; hook stamps measured lines + audits
@@ -826,9 +861,8 @@ valid_marker "$SELF_MG" solo
 run_hook "$VF" "$STOPG"
 assert_eq "g11 cleanup: state certified" "$OUT" ""
 
-# g15: protected-paths hit counts as floor (not only the sensitive regex)
-mkdir -p "$RG/.claude" "$RG/vault"
-printf 'vault/\n' > "$RG/.claude/protected-paths"
+# g15: a kit.toml [protected] hit counts as floor (not only the sensitive regex)
+mkdir -p "$RG/vault"
 py_lines 200 > "$RG/vault/core.py"
 printf 'skipped-by=model reason=throwaway scope=200lines/1file\n' > "$BYPASSG"
 run_hook "$VF" "$STOPG"

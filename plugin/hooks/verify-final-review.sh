@@ -4,9 +4,9 @@
 #
 # Blocks turn-end when the session holds unreviewed business-logic changes.
 # v4.9 decision-point model: when the cumulative batch crosses the small
-# threshold the gate blocks ONCE and demands a decision — review (/kit-review),
+# threshold the gate blocks ONCE and demands a decision — review (/kit:review),
 # defer (mid-flight; quiet until the batch grows another threshold), or skip
-# (/kit-skip-review; model-judged for non-sensitive batches, USER-only for
+# (/kit:skip-review; model-judged for non-sensitive batches, USER-only for
 # sensitive/protected ones). Receipts: per-turn re-block noise 2026-08-02;
 # Claude Code force-allows after 8 consecutive Stop blocks (official docs).
 #
@@ -23,7 +23,7 @@
 #   - Turn-start snapshot (tree hash + HEAD) is written by classify-task.sh
 #     every prompt; the gate only interrupts a turn that actually changed
 #     the tree (obligation persists via the un-advanced baseline).
-#   - Markers are written by /kit-review, bypass flags by /kit-skip-review,
+#   - Markers are written by /kit:review, bypass flags by /kit:skip-review,
 #     defer files by the model (format taught in the block message).
 #   - skiplog JSONL is this gate's own audit trail; model-initiated
 #     settlements take effect only if their audit line was written.
@@ -53,7 +53,6 @@ if [[ "$STOP_ACTIVE" == "true" ]]; then
     exit 0
 fi
 
-PROFILE="${KIT_PROFILE:-full}"
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "default"' 2>/dev/null || echo "default")
 
 PROJECT_DIR=$(echo "$INPUT" | jq -r '.cwd // "."' 2>/dev/null || echo ".")
@@ -61,6 +60,7 @@ PROJECT_DIR=$(echo "$INPUT" | jq -r '.cwd // "."' 2>/dev/null || echo ".")
 CWD="$PROJECT_DIR"
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 PROJ=$(kit_project_root) || exit 0
+PROFILE=$(kit_profile)   # KIT_PROFILE env > ~/.config/kit/config.toml > full
 cd "$PROJECT_DIR" 2>/dev/null || exit 0
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
@@ -155,24 +155,27 @@ CHANGED_FILES=$(printf '%s\n%s\n' "$UNCOMMITTED" "$COMMITTED" | grep -v '^$' | s
 # acceptable, it errs toward review). "oauth"/"sso" listed explicitly:
 # the left-delimiter requirement means "auth" does NOT match inside
 # "oauth.py" (codex review finding, 2026-07-10).
-SENSITIVE_PATH_REGEX='(^|[/_.-])(auth|oauth|sso|login|password|payment|billing|migrat|security|secret|crypto)'
+# v5: kit.toml is size-blind sensitive too — loosening [protected] or
+# [privacy] allow_literals needs a review or the USER's word (kit-evolution:
+# protection lists may only tighten).
+SENSITIVE_PATH_REGEX='(^|[/_.-])(auth|oauth|sso|login|password|payment|billing|migrat|security|secret|crypto)|(^|/)kit\.toml$'
 
-# matches_protected <path>: 0 if the path hits a .claude/protected-paths
-# glob (same semantics as protect-paths.sh: `*` crosses `/`, trailing
-# slash means the subtree). An absent list means "no protected paths"
-# (normal), not a scan failure.
+# matches_protected <path>: 0 if the path hits a kit.toml [protected] glob
+# (same semantics as protect-paths.sh: `*` crosses `/`, trailing slash means
+# the subtree). No list means "no protected paths" (normal), not a scan
+# failure. A malformed array fails open here exactly as in protect-paths —
+# but editing kit.toml is itself a sensitive-path change (regex above), so
+# breaking the list to dodge the floor still lands in front of a review.
+PROTECTED_LIST="$(kit_toml_protected "$PROJ" 2>/dev/null)"
 matches_protected() {
-    local pat list=".claude/protected-paths"
-    [[ -f "$list" ]] || return 1
+    local pat
+    [[ -n "$PROTECTED_LIST" ]] || return 1
     while IFS= read -r pat; do
-        pat="${pat%%#*}"
-        pat="${pat#"${pat%%[![:space:]]*}"}"
-        pat="${pat%"${pat##*[![:space:]]}"}"
         [[ -z "$pat" ]] && continue
         [[ "$pat" == */ ]] && pat="${pat}*"
         # shellcheck disable=SC2053  # unquoted RHS is the point: glob match
         [[ "$1" == $pat ]] && return 0
-    done < "$list"
+    done <<< "$PROTECTED_LIST"
     return 1
 }
 
@@ -318,7 +321,7 @@ fi
 
 # --- decide: review markers -------------------------------------------------
 # A marker counts only with a "reviewed-by=..." evidence line written by
-# /kit-review after the review actually ran (v4.0: a bare touch is discarded;
+# /kit:review after the review actually ran (v4.0: a bare touch is discarded;
 # the block message never prints marker incantations). verdict=blocked does
 # not certify. Markers are audit records — this gate's skiplog plus the tool
 # telemetry (when enabled) make a forged one cross-checkable after the fact.
@@ -434,7 +437,7 @@ FILE_LIST=$(echo -e "$BUSINESS_FILES" | grep -v '^$' | head -10 | sed 's/^/  - /
 STALE_NOTE=""
 if [[ "$INVALID_MARKER" -eq 1 ]]; then
     STALE_NOTE="
-NOTE: a review marker WAS present but did not certify (bare touch, or verdict=blocked). It has been discarded — a blocked review means the blocking findings must be fixed and /kit-review re-run; only a passing evidence marker satisfies this gate.
+NOTE: a review marker WAS present but did not certify (bare touch, or verdict=blocked). It has been discarded — a blocked review means the blocking findings must be fixed and /kit:review re-run; only a passing evidence marker satisfies this gate.
 "
 fi
 if [[ "$INVALID_BYPASS" -eq 1 ]]; then
@@ -443,7 +446,7 @@ NOTE: a skip flag WAS present but carried no user-approval line or was malformed
 "
 elif [[ "$INVALID_BYPASS" -eq 2 ]]; then
     STALE_NOTE="${STALE_NOTE}
-NOTE: a model-judged skip flag was present, but this batch touches sensitive or protected paths, or is not measurable — only the USER can skip it (/kit-skip-review after an explicit user request). The flag has been discarded and the attempt audited.
+NOTE: a model-judged skip flag was present, but this batch touches sensitive or protected paths, or is not measurable — only the USER can skip it (/kit:skip-review after an explicit user request). The flag has been discarded and the attempt audited.
 "
 elif [[ "$INVALID_BYPASS" -eq 3 ]]; then
     STALE_NOTE="${STALE_NOTE}
@@ -468,11 +471,11 @@ fi
 
 SETTLEMENTS=$(cat <<EOF
 Settle this batch with ONE of:
-1. Review now: run /kit-review (it records the evidence marker this gate accepts). Do NOT write the marker without running the review — markers and skips are audit records (skiplog), cross-checked against session telemetry.
+1. Review now: run /kit:review (it records the evidence marker this gate accepts). Do NOT write the marker without running the review — markers and skips are audit records (skiplog), cross-checked against session telemetry.
 2. Defer (feature mid-flight, a review NOW would re-review churn): run
    echo "deferred-by=model reason=<one line: why mid-flight>" > ${DEFER_FILE}
    The gate stays quiet until the batch grows another ${SMALL_MAX_LINES} lines, then asks again. Sensitive batches cannot defer. Settle every defer (review or skip) before declaring the task done.
-3. Skip (you judge this batch not review-worthy: throwaway/experimental code): run /kit-skip-review — model-judged mode is allowed for non-sensitive batches and is audited with your reason; sensitive/protected batches remain USER-only.
+3. Skip (you judge this batch not review-worthy: throwaway/experimental code): run /kit:skip-review — model-judged mode is allowed for non-sensitive batches and is audited with your reason; sensitive/protected batches remain USER-only.
 EOF
 )
 
@@ -480,7 +483,7 @@ if [[ "$PROFILE" == "solo" ]]; then
     REASON=$(cat <<EOF
 Final review check (solo profile): this session holds unreviewed business-logic changes past the small-change threshold.
 ${STALE_NOTE}
-CROSS-MODEL ISOLATION IS OFF in the solo profile — /kit-review runs the fresh-context solo-reviewer (state/time isolation only; say that limitation to the user).
+CROSS-MODEL ISOLATION IS OFF in the solo profile — /kit:review runs the fresh-context solo-reviewer (state/time isolation only; say that limitation to the user).
 
 ${SETTLEMENTS}
 
