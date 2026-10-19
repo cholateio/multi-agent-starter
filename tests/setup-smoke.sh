@@ -17,7 +17,9 @@ cat > "$W/fakebin/claude" <<'FAKE'
 echo "$*" >> "$FAKE_CLAUDE_LOG"
 case "$*" in
   "--version") echo "2.1.303 (Claude Code)" ;;
-  "plugin list --json") if [ -f "$FAKE_STATE/installed" ]; then echo '[{"id":"kit@multi-agent-kit","enabled":true}]'; else echo '[]'; fi ;;
+  "plugin list --json") if [ -f "$FAKE_STATE/disabled" ]; then echo '[{"id":"kit@multi-agent-kit","enabled":false}]'
+                        elif [ -f "$FAKE_STATE/installed" ]; then echo '[{"id":"kit@multi-agent-kit","enabled":true}]'; else echo '[]'; fi ;;
+  "plugin enable "*) rm -f "$FAKE_STATE/disabled" ;;
   "plugin marketplace list --json") if [ -f "$FAKE_STATE/mkt" ]; then echo '[{"name":"multi-agent-kit","source":"directory"}]'; else echo '[]'; fi ;;
   "plugin marketplace add "*) touch "$FAKE_STATE/mkt" ;;
   "plugin install "*) touch "$FAKE_STATE/installed" ;;
@@ -147,6 +149,22 @@ mkdir -p "$W/lonely/git-hooks"; sed 's/__HOOK__/pre-commit/g' "$KIT_ROOT/plugin/
 OUT="$(bash "$W/lonely/git-hooks/pre-commit" 2>&1)"; CODE=$?
 eq "s8: unconfigured shim exits 1" "$CODE" "1"
 has "s8: unconfigured shim says not configured" "$OUT" "KIT GUARD: not configured"
+
+# (9) review O2: an installed-but-disabled plugin is re-enabled
+fresh 9
+touch "$W/state/installed" "$W/state/disabled" "$W/state/mkt"
+OUT="$(ks)"
+has "s9: setup enables a disabled plugin" "$(cat "$W/claude.log")" "plugin enable kit@multi-agent-kit"
+lacks "s9: …without reinstalling it" "$(cat "$W/claude.log")" "plugin install"
+has "s9: …and says so" "$OUT" "enabled"
+
+# (10) review O3/F13: --bin-dir is persisted as tools_dir (the guard, doctor and session start read it)
+fresh 10
+OUT="$(ks --bin-dir "$M/tools")"
+has "s10: config.toml records tools_dir" "$(cat "$(CFG)/config.toml")" "tools_dir = \"$M/tools\""
+OUT="$(ks --bin-dir "$M/tools2")"
+has "s10: a new --bin-dir updates tools_dir" "$(cat "$(CFG)/config.toml")" "tools_dir = \"$M/tools2\""
+eq "s10: …exactly one tools_dir line" "$(grep -c '^tools_dir' "$(CFG)/config.toml")" "1"
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"

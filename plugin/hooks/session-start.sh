@@ -82,7 +82,13 @@ else
     PROTECTED_N="MALFORMED (protect-paths enforces nothing; run: kit doctor)"
 fi
 [[ -n "$(git config --global core.hooksPath 2>/dev/null)" ]] && GUARD_HP="set" || GUARD_HP="UNSET"
-command -v gitleaks >/dev/null 2>&1 && GUARD_GL="ok" || GUARD_GL="MISSING"
+# the guard's own resolver: config.toml tools_dir (default ~/.local/bin), then PATH (review O3/F13)
+source "$PLUGIN_ROOT/guard/lib-tools.sh" 2>/dev/null
+if declare -F kit_tool_path >/dev/null && kit_tool_path gitleaks "${KIT_CONFIG_HOME:-${HOME:-}/.config/kit}" >/dev/null; then
+    GUARD_GL="ok"
+else
+    GUARD_GL="MISSING"
+fi
 
 # Export the session id for /kit:review and /kit:skip-review (the text
 # broadcast below stays as the fallback). CLAUDE_ENV_FILE is sourced by

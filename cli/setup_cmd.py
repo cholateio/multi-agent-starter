@@ -9,6 +9,7 @@ touches settings.json, config.toml or privacy.local.toml.
 import difflib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -46,7 +47,7 @@ class Setup:
         self.kit_root = paths.kit_root()
         self.cfg_dir = paths.config_dir()
         self.hooks_dir = self.cfg_dir / "git-hooks"
-        self.bin_dir = paths.expand(args.bin_dir) if args.bin_dir else paths.home() / ".local" / "bin"
+        self.bin_dir = paths.expand(args.bin_dir) if args.bin_dir else paths.tools_dir()
         self.args = args
 
     # ---- output / execution helpers
@@ -96,14 +97,29 @@ class Setup:
         if not shutil.which("claude"):
             self.warn(step, "claude not on PATH — install Claude Code, then re-run kit setup")
             return
-        if any(p.get("id") == PLUGIN_ID for p in self.claude_json("plugin", "list") if isinstance(p, dict)):
-            self.say("skip", step, f"{PLUGIN_ID} already installed")
+        entry = next((p for p in self.claude_json("plugin", "list") if isinstance(p, dict) and p.get("id") == PLUGIN_ID),
+                     None)
+        if entry is not None:
+            if entry.get("enabled") is True or (entry.get("enabled") is None and self.plugin_enabled_in_settings()):
+                self.say("skip", step, f"{PLUGIN_ID} already installed and enabled")
+                return
+            # installed but disabled: every kit hook is off until it is enabled again (review O2)
+            self.run(["claude", "plugin", "enable", PLUGIN_ID, "--scope", "user"])
+            self.say("done", step, f"{PLUGIN_ID} was installed but disabled — enabled")
             return
         if not any(m.get("name") == MARKETPLACE for m in self.claude_json("plugin", "marketplace", "list")
                    if isinstance(m, dict)):
             self.run(add)
         self.run(inst)
         self.say("done", step, f"{PLUGIN_ID} installed from {src} (user scope)")
+
+    def plugin_enabled_in_settings(self) -> bool:
+        """Same check as kit doctor: enabledPlugins in the user settings.json."""
+        try:
+            data = json.loads((paths.claude_dir() / "settings.json").read_text())
+            return data.get("enabledPlugins", {}).get(PLUGIN_ID) is True
+        except (OSError, ValueError, AttributeError):
+            return False
 
     def step_permissions(self):
         step = "permissions"
@@ -145,7 +161,7 @@ class Setup:
         step = "config.toml"
         path = paths.config_path()
         owner = self.args.github_owner
-        wanted_top = [("kit_root", f'"{self.kit_root}"'), ("profile", '"full"')]
+        wanted_top = [("kit_root", f'"{self.kit_root}"'), ("profile", '"full"'), ("tools_dir", f'"{self.bin_dir}"')]
         if owner:
             wanted_top.append(("github_owner", f'"{owner}"'))
         if not path.is_file():
@@ -185,6 +201,11 @@ class Setup:
                 idx = next(i for i, l in enumerate(lines) if l.strip().startswith("[audit]"))
                 lines[idx + 1:idx + 1] = missing
                 changed = True
+        if self.args.bin_dir and cfg.get("tools_dir") not in (None, str(self.bin_dir)):
+            # an explicit --bin-dir moves tools_dir (the guard, doctor and session start read it)
+            rx = re.compile(r"^\s*tools_dir\s*=")
+            lines = [f'tools_dir = "{self.bin_dir}"\n' if rx.match(l) else l for l in lines]
+            changed = True
         if not changed:
             self.say("skip", step, "all keys present")
             return

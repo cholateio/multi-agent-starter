@@ -105,8 +105,7 @@ def status() -> int:
     from cli.setup_cmd import HOOKS
     missing = [h for h in HOOKS if not os.access(hooks_dir / h, os.X_OK)]
     print("shims: " + (f"missing {', '.join(missing)}" if missing else f"{len(HOOKS)} in {want}"))
-    gl = shutil.which("gitleaks") or (str(paths.home() / ".local/bin/gitleaks")
-                                       if os.access(paths.home() / ".local/bin/gitleaks", os.X_OK) else None)
+    gl = paths.find_tool("gitleaks")   # the guard's resolver: tools_dir, then PATH
     print(f"gitleaks: {gl or 'MISSING — commits warn, pushes are blocked (kit doctor --install)'}")
     pp = paths.privacy_path()
     if pp.is_file():

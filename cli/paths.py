@@ -8,6 +8,8 @@
     claude_dir()  CLAUDE_CONFIG_DIR else ~/.claude
 """
 import os
+import re
+import shutil
 import tomllib
 from pathlib import Path
 
@@ -84,3 +86,42 @@ def expand(p: str) -> Path:
     if p == "~" or p.startswith("~/"):
         return home() / p[2:] if len(p) > 1 else home()
     return Path(p)
+
+
+def tools_dir() -> Path:
+    """Where the pinned tools live: config.toml `tools_dir` (written by kit setup --bin-dir /
+    kit doctor --install --bin-dir), else ~/.local/bin. Same rule as plugin/guard/lib-tools.sh."""
+    try:
+        d = load_config().get("tools_dir")
+    except Exception:  # malformed config: doctor reports it; fall back to the default
+        d = None
+    return expand(d) if isinstance(d, str) and d else home() / ".local" / "bin"
+
+
+def find_tool(name: str) -> str | None:
+    """THE tool resolver (guard, session start, doctor, guard status): tools_dir first, then PATH."""
+    p = tools_dir() / name
+    if p.is_file() and os.access(p, os.X_OK):
+        return str(p)
+    return shutil.which(name)
+
+
+def set_config_value(key: str, value: str) -> None:
+    """Set a top-level string key in config.toml in place (replace the line, or insert it
+    before the first [table]); creates the file when missing."""
+    p = config_path()
+    line = f'{key} = "{value}"\n'
+    lines = p.read_text().splitlines(True) if p.is_file() else []
+    rx = re.compile(rf"^\s*{re.escape(key)}\s*=")
+    first_table = next((i for i, l in enumerate(lines) if l.lstrip().startswith("[")), len(lines))
+    for i, l in enumerate(lines[:first_table]):
+        if rx.match(l):
+            lines[i] = line
+            break
+    else:
+        at = first_table
+        while at > 0 and not lines[at - 1].strip():
+            at -= 1
+        lines[at:at] = [line]
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("".join(lines))

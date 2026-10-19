@@ -854,6 +854,15 @@ MS=$(( ($(date +%s%N) - T0) / 1000000 ))
 has  "G-F8: …and says it falls back to a full-history scan" "$PO" "scanning the full history"
 eq   "G-F8: …clean history still passes" "$PC" "0"
 
+# O3/F13: the guard finds gitleaks in config.toml tools_dir (kit setup --bin-dir), off PATH
+G10="$W/g10"; newrepo "$G10" none noproj; mkdir -p "$W/customtools"; cp -P "$W/glbin/gitleaks" "$W/customtools/gitleaks"
+cp "$KIT_CONFIG_HOME/config.toml" "$W/cfg.bak" 2>/dev/null || : > "$W/cfg.bak"
+printf 'tools_dir = "%s"\n' "$W/customtools" >> "$KIT_CONFIG_HOME/config.toml"
+echo ok > "$G10/ok.txt"; git -C "$G10" add ok.txt; cmt "$G10" "$NOGL_PATH"
+eq   "G-F13: gitleaks in tools_dir (not on PATH) → commit passes" "$CC" "0"
+lacks "G-F13: …and no R8 gitleaks-missing" "$CO" "R8 gitleaks-missing"
+cp "$W/cfg.bak" "$KIT_CONFIG_HOME/config.toml"
+
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1

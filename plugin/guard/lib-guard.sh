@@ -17,6 +17,8 @@
 GUARD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib-privacy.sh
 source "$GUARD_DIR/lib-privacy.sh"
+# shellcheck source=lib-tools.sh
+source "$GUARD_DIR/lib-tools.sh"
 
 GUARD_EMPTY_TREE=""
 guard_init() {
@@ -97,11 +99,8 @@ guard_kit_toml_before() {
     return 1
 }
 
-guard_gitleaks_bin() {  # the pinned install (kit doctor --install) wins over PATH (final review I4)
-    local g
-    [[ -x "${HOME:-/nonexistent}/.local/bin/gitleaks" ]] && { echo "$HOME/.local/bin/gitleaks"; return 0; }
-    g="$(command -v gitleaks 2>/dev/null)" && { echo "$g"; return 0; }
-    return 1
+guard_gitleaks_bin() {  # the pinned install (config.toml tools_dir, default ~/.local/bin) wins over PATH (I4, O3)
+    kit_tool_path gitleaks "$CFG_DIR"
 }
 
 # guard_gitleaks_stream <stream-file> <gitleaksignore-file|"">
@@ -115,7 +114,7 @@ guard_gitleaks_bin() {  # the pinned install (kit doctor --install) wins over PA
 # Return 0 = scanned, 2 = gitleaks missing / crashed (caller applies R8).
 guard_gitleaks_stream() {
     local stream="$1" ign="${2:-}" gl rc td
-    gl="$(guard_gitleaks_bin)" || { GL_STATUS="gitleaks not in PATH"; return 2; }
+    gl="$(guard_gitleaks_bin)" || { GL_STATUS="gitleaks not in $(kit_tools_dir "$CFG_DIR") or PATH"; return 2; }
     td="$(mktemp -d "${TMPDIR:-/tmp}/kit-guard-gl.XXXXXX")" || { GL_STATUS="mktemp failed"; return 2; }
     mkdir -p "$td/noignore"
     awk -v M="$td/meta" -v C="$td/content" '{

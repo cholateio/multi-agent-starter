@@ -4,7 +4,7 @@ import os
 import tarfile
 
 from tests.unit._helpers import IsolatedTestCase
-from cli import doctor
+from cli import doctor, paths
 
 
 def make_tgz(path, member, payload: bytes):
@@ -76,3 +76,70 @@ class TestDoctor(IsolatedTestCase):
         for p in (g, o):
             self.assertRegex(p.sha256, r"^[0-9a-f]{64}$")
             self.assertTrue(p.url.startswith("https://github.com/"))
+
+
+class TestToolsAndPlatform(IsolatedTestCase):
+    def setUp(self):
+        super().setUp()
+        os.environ["KIT_CACHE_HOME"] = str(self.tmp / "cache")
+        self._path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(self.tmp / "emptybin")
+
+    def tearDown(self):
+        os.environ["PATH"] = self._path
+        super().tearDown()
+
+    def fake_tool(self, d, name, version):
+        d.mkdir(parents=True, exist_ok=True)
+        (d / name).write_text(f"#!/bin/sh\necho {version}\n")
+        (d / name).chmod(0o755)
+        return d / name
+
+    def test_install_refuses_unsupported_platform(self):
+        """Review O1: only linux/x86_64 binaries are pinned — refuse elsewhere, never install a dead binary."""
+        called = []
+        orig_plat, orig_inst = doctor.platform_ok, doctor.install_tool
+        doctor.platform_ok = lambda: (False, "darwin/arm64")
+        doctor.install_tool = lambda *a, **k: called.append(a)
+        logs = []
+        try:
+            ok = doctor.install_missing(self.tmp / "bin", log=logs.append)
+        finally:
+            doctor.platform_ok, doctor.install_tool = orig_plat, orig_inst
+        self.assertFalse(ok)
+        self.assertEqual(called, [])
+        self.assertTrue(any("linux/x86_64" in l and "darwin/arm64" in l for l in logs), logs)
+
+    def test_unsupported_platform_with_tools_already_present_is_fine(self):
+        self.fake_tool(self.home / ".local" / "bin", "gitleaks", "8.30.1")
+        self.fake_tool(self.home / ".local" / "bin", "osv-scanner", "2.7.0")
+        orig = doctor.platform_ok
+        doctor.platform_ok = lambda: (False, "darwin/arm64")
+        try:
+            self.assertTrue(doctor.install_missing(paths.tools_dir(), log=lambda m: None))
+        finally:
+            doctor.platform_ok = orig
+
+    def test_tools_dir_resolver(self):
+        """Review O3/F13: one resolver — config.toml tools_dir (default ~/.local/bin), then PATH."""
+        self.assertEqual(paths.tools_dir(), self.home / ".local" / "bin")
+        cfg = paths.config_path()
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('kit_root = "/x"\ntools_dir = "~/tools"\n')
+        self.assertEqual(paths.tools_dir(), self.home / "tools")
+        self.assertIsNone(paths.find_tool("gitleaks"))
+        exe = self.fake_tool(self.home / "tools", "gitleaks", "8.30.1")
+        self.assertEqual(paths.find_tool("gitleaks"), str(exe))
+        self.assertEqual(doctor.tool_version("gitleaks"), "8.30.1")
+
+    def test_set_config_value(self):
+        cfg = paths.config_path()
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('# head\nkit_root = "/x"\n\n[audit]\nroot = "~"\n')
+        paths.set_config_value("tools_dir", "/opt/t")
+        self.assertIn('tools_dir = "/opt/t"', cfg.read_text())
+        paths.set_config_value("tools_dir", "/opt/u")
+        text = cfg.read_text()
+        self.assertEqual(text.count("tools_dir"), 1)
+        self.assertLess(text.index("tools_dir"), text.index("[audit]"))
+        self.assertEqual(paths.load_config()["tools_dir"], "/opt/u")

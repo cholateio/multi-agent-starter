@@ -7,6 +7,7 @@ anything lands in the bin dir (a mismatch deletes the download and aborts).
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import stat
@@ -122,8 +123,14 @@ def check_min_version(v) -> bool:
     return v is not None and tuple(v) >= MIN_CLAUDE
 
 
+def platform_ok() -> tuple[bool, str]:
+    """The pinned downloads are linux x86-64 binaries (review O1)."""
+    plat, mach = sys.platform, platform.machine().lower()
+    return plat.startswith("linux") and mach in ("x86_64", "amd64"), f"{plat}/{mach}"
+
+
 def tool_version(name: str, exe: str | None = None) -> str | None:
-    exe = exe or shutil.which(name)
+    exe = exe or paths.find_tool(name)
     if not exe:
         return None
     try:
@@ -231,7 +238,7 @@ def run_checks() -> Report:
         v = tool_version(name)
         pin = TOOL_PINS[name]
         if v is None:
-            rep.add("WARN", name, f"not on PATH (pinned {pin.version}) — run: kit doctor --install")
+            rep.add("WARN", name, f"not in {paths.tools_dir()} or on PATH (pinned {pin.version}) — run: kit doctor --install")
         elif v != pin.version:
             rep.add("WARN", name, f"version {v or 'unknown'} != pinned {pin.version} — run: kit doctor --install")
         else:
@@ -297,11 +304,17 @@ def run_checks() -> Report:
 def install_missing(bin_dir: Path, log=print) -> bool:
     """Install every pinned tool that is missing or at the wrong version. True = all good."""
     ok = True
+    supported, plat = platform_ok()
     for name, pin in TOOL_PINS.items():
         here = bin_dir / name
         v = tool_version(name, str(here)) if here.exists() else tool_version(name)
         if v == pin.version:
             log(f"[skip] {name} {pin.version} already installed")
+            continue
+        if not supported:
+            ok = False
+            log(f"[FAIL] {name}: kit doctor --install only ships linux/x86_64 binaries (this is {plat}) — install "
+                f"{name} {pin.version} yourself (e.g. your package manager) and put it on PATH or in {bin_dir}")
             continue
         try:
             dest = install_tool(pin, bin_dir)
@@ -318,7 +331,10 @@ def install_missing(bin_dir: Path, log=print) -> bool:
 def run(args) -> int:
     rc = 0
     if args.install:
-        bin_dir = paths.expand(args.bin_dir) if args.bin_dir else paths.home() / ".local" / "bin"
+        bin_dir = paths.expand(args.bin_dir) if args.bin_dir else paths.tools_dir()
+        if args.bin_dir and bin_dir != paths.tools_dir():
+            paths.set_config_value("tools_dir", str(bin_dir))   # the guard and session start read it
+            print(f"note: tools_dir = {bin_dir} recorded in {paths.config_path()}")
         if not install_missing(bin_dir):
             rc = 1
         if str(bin_dir) not in os.environ.get("PATH", "").split(os.pathsep):
