@@ -38,7 +38,7 @@ To install the plugin from GitHub instead of the local checkout, run `claude plu
 
 ```bash
 kit init ~/projects/my-thing              # new project: AGENTS.md, CLAUDE.md, kit.toml, README, LICENSE, .gitignore
-kit init ~/projects/my-thing --private    # private repo: private README, no public-only checks
+kit init ~/projects/my-thing --private    # non-public repository: private README, no public-only checks
 kit migrate ~/projects/old-v4-project     # dry-run; add --apply --commit to migrate a v4 project
 cd ~/projects/my-thing && claude
 ```
