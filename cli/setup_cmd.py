@@ -47,7 +47,7 @@ class Setup:
         self.kit_root = paths.kit_root()
         self.cfg_dir = paths.config_dir()
         self.hooks_dir = self.cfg_dir / "git-hooks"
-        self.bin_dir = paths.expand(args.bin_dir) if args.bin_dir else paths.tools_dir()
+        self.bin_dir = paths.abs_dir(args.bin_dir) if args.bin_dir else paths.tools_dir()
         self.args = args
 
     # ---- output / execution helpers
@@ -189,6 +189,8 @@ class Setup:
             i = 0
             while i < len(lines) and lines[i].lstrip().startswith("#"):
                 i += 1
+            if i > 0 and not lines[i - 1].endswith("\n"):
+                lines[i - 1] += "\n"   # review R3-6 (same guard as paths.set_config_value)
             lines[i:i] = add_top
             changed = True
         audit = cfg.get("audit")

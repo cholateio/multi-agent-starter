@@ -88,6 +88,12 @@ def expand(p: str) -> Path:
     return Path(p)
 
 
+def abs_dir(p: str) -> Path:
+    """A user-given directory (--bin-dir) as an absolute path: `~` against HOME, a relative one
+    against the cwd NOW — it is persisted and read later from other cwds (review R3-5)."""
+    return Path(os.path.abspath(expand(p)))
+
+
 def tools_dir() -> Path:
     """Where the pinned tools live: config.toml `tools_dir` (written by kit setup --bin-dir /
     kit doctor --install --bin-dir), else ~/.local/bin. Same rule as plugin/guard/lib-tools.sh.
@@ -143,6 +149,8 @@ def set_config_value(key: str, value: str) -> None:
         at = first_table
         while at > 0 and not lines[at - 1].strip():
             at -= 1
+        if at > 0 and not lines[at - 1].endswith("\n"):
+            lines[at - 1] += "\n"      # review R3-6: never glue the key onto a last line without newline
         lines[at:at] = [line]
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("".join(lines))

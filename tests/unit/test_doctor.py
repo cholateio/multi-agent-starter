@@ -195,3 +195,41 @@ class TestToolsAndPlatform(IsolatedTestCase):
         finally:
             doctor.install_tool, doctor.platform_ok = orig_inst, orig_plat
         self.assertNotIn("gitleaks_path", paths.load_config())
+
+    def _doctor_install(self, bin_dir, ok=True):
+        import argparse
+        orig_inst, orig_checks = doctor.install_missing, doctor.run_checks
+        doctor.install_missing = lambda d, log=print: ok
+        doctor.run_checks = lambda: doctor.Report()
+        try:
+            return doctor.run(argparse.Namespace(install=True, bin_dir=bin_dir))
+        finally:
+            doctor.install_missing, doctor.run_checks = orig_inst, orig_checks
+
+    def test_set_config_value_without_trailing_newline(self):
+        """Review R3-6: inserting a key after a last line without a newline keeps valid TOML."""
+        cfg = paths.config_path()
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('kit_root = "/x"\nprofile = "full"')
+        paths.set_config_value("tools_dir", "/opt/t")
+        self.assertEqual(paths.load_config(), {"kit_root": "/x", "profile": "full", "tools_dir": "/opt/t"})
+
+    def test_doctor_install_relative_bin_dir_is_persisted_absolute(self):
+        """Review R3-5: the guard reads tools_dir from any cwd — never record a relative one."""
+        cwd = os.getcwd()
+        os.chdir(self.tmp)
+        try:
+            self._doctor_install("tools")
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(paths.load_config().get("tools_dir"), str(self.tmp / "tools"))
+
+    def test_doctor_install_failure_keeps_tools_dir(self):
+        """Review R3-7: a failed install into a new --bin-dir must not move tools_dir away from a working one."""
+        cfg = paths.config_path()
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text(f'tools_dir = "{self.tmp / "old"}"\n')
+        self.assertEqual(self._doctor_install(str(self.tmp / "new"), ok=False), 1)
+        self.assertEqual(paths.load_config().get("tools_dir"), str(self.tmp / "old"))
+        self._doctor_install(str(self.tmp / "new"), ok=True)
+        self.assertEqual(paths.load_config().get("tools_dir"), str(self.tmp / "new"))

@@ -165,6 +165,9 @@ has "s10: config.toml records tools_dir" "$(cat "$(CFG)/config.toml")" "tools_di
 OUT="$(ks --bin-dir "$M/tools2")"
 has "s10: a new --bin-dir updates tools_dir" "$(cat "$(CFG)/config.toml")" "tools_dir = \"$M/tools2\""
 eq "s10: …exactly one tools_dir line" "$(grep -c '^tools_dir' "$(CFG)/config.toml")" "1"
+# (11) review R3-5: a relative --bin-dir is persisted as an absolute path
+mkdir -p "$M/cwd"; OUT="$(cd "$M/cwd" && ks --bin-dir reltools)"
+has "s11: relative --bin-dir recorded absolute" "$(cat "$(CFG)/config.toml")" "tools_dir = \"$M/cwd/reltools\""
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"

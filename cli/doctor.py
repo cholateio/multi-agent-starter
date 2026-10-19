@@ -345,12 +345,16 @@ def install_missing(bin_dir: Path, log=print) -> bool:
 def run(args) -> int:
     rc = 0
     if args.install:
-        bin_dir = paths.expand(args.bin_dir) if args.bin_dir else paths.tools_dir()
-        if args.bin_dir and bin_dir != paths.tools_dir():
-            paths.set_config_value("tools_dir", str(bin_dir))   # the guard and session start read it
-            print(f"note: tools_dir = {bin_dir} recorded in {paths.config_path()}")
+        bin_dir = paths.abs_dir(args.bin_dir) if args.bin_dir else paths.tools_dir()
         if not install_missing(bin_dir):
             rc = 1
+            if args.bin_dir and bin_dir != paths.tools_dir():
+                print(f"note: tools_dir stays {paths.tools_dir()} (the install into {bin_dir} did not complete)")
+        elif args.bin_dir and bin_dir != paths.tools_dir():
+            # only after a successful install (review R3-7): a failed one must not move the
+            # guard away from a working tools_dir
+            paths.set_config_value("tools_dir", str(bin_dir))   # the guard and session start read it
+            print(f"note: tools_dir = {bin_dir} recorded in {paths.config_path()}")
         if str(bin_dir) not in os.environ.get("PATH", "").split(os.pathsep):
             print(f"note: {bin_dir} is not on PATH")
             os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
