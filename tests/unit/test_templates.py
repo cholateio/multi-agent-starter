@@ -280,3 +280,18 @@ class TestRendered(Rendered):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestKitRepoDogfood(unittest.TestCase):
+    """Review F12: the kit repo follows its own layout (owner decision 4 / design §4.1):
+    AGENTS.md carries the project context, CLAUDE.md is the one-line @AGENTS.md stub."""
+
+    def test_claude_md_is_the_template_stub(self):
+        self.assertEqual((KIT_ROOT / "CLAUDE.md").read_text(), (TPL / "CLAUDE.md").read_text())
+
+    def test_agents_md_has_the_template_sections(self):
+        text = (KIT_ROOT / "AGENTS.md").read_text()
+        heads = re.findall(r"^## (.+)$", text, flags=re.M)
+        self.assertEqual(heads, ["Project goal", "Stack", "File layout", "Constraints", "Conventions", "Where to look"])
+        self.assertIn("bash tests/run-all.sh", text)
+        self.assertIn("proj-a", text)          # the public-repo naming rule moved with the content
