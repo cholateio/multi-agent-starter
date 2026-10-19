@@ -1,0 +1,12 @@
+# kit.toml — multi-agent-kit project marker. Kit hooks and git guards activate only when this file exists.
+kit = 5                    # schema major; `kit doctor` validates
+visibility = "{{VISIBILITY}}"      # public | private — selects the guard tier; `kit audit` verifies against GitHub
+license = "{{LICENSE}}"            # MIT | CC-BY-4.0 | none
+readme_lang = "{{LANG}}"           # en (default) | zh-TW — audit language check
+protected = [              # no-touch globs (repo-relative, `*` crosses `/`). PreToolUse hook hard-denies Edit/Write.
+  # one entry per line, no inline comments on entry lines — a bash hook parses this block
+{{PROTECTED}}]
+
+# [privacy]                              # per-repo guard/audit exceptions (diff-visible)
+# allow_paths = ["docs/media/*"]         # skip R3–R7 for these paths (never R1/R2)
+# allow_literals = ["owner-cloud-uid"]   # names from privacy.local.toml [[literal]].name — never values
