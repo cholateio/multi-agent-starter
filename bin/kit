@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""kit — multi-agent-kit v5 machine CLI (Python 3.11+, stdlib only). Entry shim for cli/."""
+import os
+import sys
+
+if sys.version_info < (3, 11):
+    sys.exit("kit: Python 3.11+ required (tomllib)")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+from cli.main import main  # noqa: E402
+
+sys.exit(main(sys.argv[1:]))
