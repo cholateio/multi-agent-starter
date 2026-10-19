@@ -206,6 +206,143 @@ T0=$(date +%s%N); bash -c 'source "$1/lib-privacy.sh"; privacy_load_local "$2"; 
 MS=$(( ($(date +%s%N) - T0) / 1000000 ))
 [ "$MS" -lt 500 ] && pass "A21: 4000-line scan < 500ms (${MS}ms)" || fail "A21: 4000-line scan < 500ms" "${MS}ms"
 
+
+# ============================================================ B. pre-commit
+echo "--- B. pre-commit"
+TH="$W/th"; mkdir -p "$TH"   # test hooks dir: straight to plugin/guard (the real shim is section D)
+for h in pre-commit pre-push; do printf '#!/usr/bin/env bash\nexec bash "%s/%s.sh" "$@"\n' "$GUARD" "$h" > "$TH/$h"; chmod +x "$TH/$h"; done
+# PATH without gitleaks (drop any PATH dir that has one) / with the pinned one first
+NOGL_PATH=""; IFS=: read -ra _pp <<< "$PATH"
+for d in "${_pp[@]}"; do [ -x "$d/gitleaks" ] || NOGL_PATH="${NOGL_PATH:+$NOGL_PATH:}$d"; done
+mkdir -p "$W/glbin"; [ -n "$GITLEAKS" ] && ln -sf "$GITLEAKS" "$W/glbin/gitleaks"
+GL_PATH="$W/glbin:$NOGL_PATH"
+AUDIT="$KIT_STATE_HOME/guard/audit.jsonl"
+
+# newrepo <dir> [visibility|none]: repo with an initial commit made WITHOUT hooks
+# (PROJECT.toml tracked from the start, like a v4 repo); kit.toml unless "none"
+newrepo() {
+  rm -rf "$1"; git init -q "$1"
+  printf 'status = "active"\n' > "$1/PROJECT.toml"; echo "# r" > "$1/README.md"
+  if [ "${2:-public}" != none ]; then printf 'kit = 5\nvisibility = "%s"\nprotected = [\n]\n' "${2:-public}" > "$1/kit.toml"; fi
+  git -C "$1" add -A && git -C "$1" -c core.hooksPath=/dev/null commit -q -m init
+}
+# cmt <repo> [PATH] → CO (combined output), CC (exit code); commits staged changes through the guard
+cmt() {
+  CO="$(cd "$1" && PATH="${2:-$GL_PATH}" git -c core.hooksPath="$TH" commit -q -m t 2>&1)"; CC=$?
+}
+R="$W/rb"
+newrepo "$R"
+mkdir -p "$R/.claude"; echo x > "$R/.claude/x"; git -C "$R" add -f .claude/x
+cmt "$R"
+eq   "B1: staged .claude/x → exit 1" "$CC" "1"
+has  "B1: [R2 forbidden-path]" "$CO" "KIT GUARD BLOCKED [R2 forbidden-path] .claude/x"
+has  "B1: fix line" "$CO" "fix:"
+has  "B1: user-only bypass line" "$CO" 'bypass (user only): kit guard bypass "<reason>"'
+has  "B8: audit.jsonl logs the block" "$(cat "$AUDIT" 2>/dev/null)" '"rule":"R2"'
+has  "B8: audit.jsonl names the hook" "$(cat "$AUDIT" 2>/dev/null)" '"hook":"pre-commit"'
+has  "B8: audit.jsonl action block" "$(cat "$AUDIT" 2>/dev/null)" '"action":"block"'
+jq -e . "$AUDIT" >/dev/null 2>&1 && pass "B8: audit.jsonl is valid JSON lines" || fail "B8: audit.jsonl is valid JSON lines" "$(head -c 300 "$AUDIT" 2>/dev/null)"
+git -C "$R" rm -q --cached .claude/x
+for f in docs/plans/p.md docs/superpowers/plans/p.md docs/decisions/d.md docs/LESSONS.md a/b.local.toml CLAUDE.local.md .superpowers/s sub/.env.local sub/PROJECT.toml; do
+  mkdir -p "$R/$(dirname "$f")"; echo x > "$R/$f"; git -C "$R" add -f "$f"; cmt "$R"
+  has "B1: $f blocked [R2]" "$CO" "[R2 forbidden-path] $f"; git -C "$R" rm -q --cached "$f"
+done
+echo x > "$R/.env.example"; git -C "$R" add -f .env.example; cmt "$R"
+eq   "B1: .env.example passes" "$CC" "0"
+
+git -C "$R" rm -q --cached PROJECT.toml; cmt "$R"
+eq   "B2: git rm --cached PROJECT.toml (deletion) passes" "$CC" "0"
+
+printf 'ok\npath = "/home/testuser/x"\n' > "$R/c.txt"; git -C "$R" add c.txt; cmt "$R"
+eq   "B3: /home/testuser/ → exit 1" "$CC" "1"
+has  "B3: [R3 local-path] with path:line" "$CO" "KIT GUARD BLOCKED [R3 local-path] c.txt:2 —"
+lacks "B3: block output never prints the user name" "$CO" "testuser"
+git -C "$R" reset -q c.txt; rm -f "$R/c.txt"
+
+printf 'name: proj-a-secret-name\n' > "$R/d.txt"; git -C "$R" add d.txt; cmt "$R"
+has  "B12: public-only literal blocked in a public repo" "$CO" "[R5 public-only-literal]"
+git -C "$R" reset -q d.txt; rm -f "$R/d.txt"
+
+if [ -n "$GITLEAKS" ]; then
+  printf 'aws_key = "%s"\n' "$FAKE_AWS" > "$R/k.txt"; git -C "$R" add k.txt; cmt "$R"
+  eq  "B4: fake AWS key → exit 1" "$CC" "1"
+  has "B4: [R1 secret]" "$CO" "KIT GUARD BLOCKED [R1 secret] k.txt:1"
+  lacks "B4: secret not printed" "$CO" "$FAKE_AWS"
+else skip "B4: R1 gitleaks" "no gitleaks"; printf 'aws_key = "%s"\n' "$FAKE_AWS" > "$R/k.txt"; git -C "$R" add k.txt; fi
+cmt "$R" "$NOGL_PATH"
+eq   "B5: no gitleaks → pre-commit still passes (R8 warn)" "$CC" "0"
+has  "B5: banner says kit doctor --install" "$CO" "kit doctor --install"
+has  "B5: banner is R8" "$CO" "[R8 gitleaks-missing]"
+mkdir -p "$W/crashgl"; printf '#!/bin/sh\nexit 2\n' > "$W/crashgl/gitleaks"; chmod +x "$W/crashgl/gitleaks"
+printf 'more\n' >> "$R/k.txt"; git -C "$R" add k.txt; cmt "$R" "$W/crashgl:$NOGL_PATH"
+eq   "B14: gitleaks crash (exit 2) → treated as missing: pre-commit passes" "$CC" "0"
+has  "B14: crash reported" "$CO" "[R8 gitleaks-missing]"
+
+printf 'hello\n' > "$R/clean.txt"; git -C "$R" add clean.txt
+T0=$(date +%s%N); cmt "$R"; MS=$(( ($(date +%s%N) - T0) / 1000000 ))
+eq   "B6: clean commit passes" "$CC" "0"
+[ "$MS" -lt 1000 ] && pass "B6: clean commit < 1s incl. gitleaks (${MS}ms)" || fail "B6: clean commit < 1s" "${MS}ms"
+
+printf 'bin\0ary 11111111-2222-3333-4444-555555555555\n' > "$R/blob.bin"; git -C "$R" add blob.bin; cmt "$R"
+eq   "B7: binary file (NUL) content not scanned" "$CC" "0"
+printf '*.txt binary\n' > "$R/.gitattributes"; printf 'x /home/testuser/y\n' > "$R/hid.txt"; git -C "$R" add .gitattributes hid.txt; cmt "$R"
+has  "B10: .gitattributes 'binary' cannot hide text from the guard" "$CO" "[R3 local-path] hid.txt:1"
+git -C "$R" reset -q hid.txt; rm -f "$R/hid.txt"; git -C "$R" add .gitattributes; cmt "$R"
+
+printf 'WORKDIR /home/node/app\n' > "$R/Dockerfile"; git -C "$R" add Dockerfile; cmt "$R"
+eq   "B16: /home/node warns but passes" "$CC" "0"
+has  "B16: warn line format" "$CO" "KIT GUARD WARN [R3b other-home-path] Dockerfile:1"
+
+printf 'echo /home/testuser/old\n' > "$R/old.sh"; git -C "$R" add old.sh; git -C "$R" -c core.hooksPath=/dev/null commit -q -m "pre-guard"
+git -C "$R" mv old.sh renamed.sh; cmt "$R"
+eq   "B17: pure rename of pre-existing content is not re-flagged (only added lines)" "$CC" "0"
+printf 'echo /home/testuser/new\n' >> "$R/renamed.sh"; cmt "$R"
+cmt "$R"; (cd "$R" && PATH="$GL_PATH" git -c core.hooksPath="$TH" commit -q -a -m t >"$W/o" 2>&1); CC=$?; CO="$(cat "$W/o")"
+eq   "B15: git commit -a (temporary index) still guarded" "$CC" "1"
+has  "B15: the added line is reported" "$CO" "[R3 local-path] renamed.sh:2"
+git -C "$R" checkout -q -- renamed.sh
+
+printf 'kit = 5\nvisibility = "public"\n\n[privacy]\nallow_literals = ["t-uid"]\n' > "$R/kit.toml"
+printf 'uid 11111111-2222-3333-4444-555555555555\n' > "$R/u.txt"; git -C "$R" add kit.toml u.txt; cmt "$R"
+eq   "B13: allow_literals by name (staged kit.toml) → passes" "$CC" "0"
+has  "B13: stderr notes the exception" "$CO" "literal t-uid allowed by kit.toml"
+printf 'kit = 5\nvisibility = "public"\n\n[privacy]\nallow_literals = ["11111111-2222-3333-4444-555555555555"]\n' > "$R/kit.toml"
+printf 'uid2 11111111-2222-3333-4444-555555555555\n' >> "$R/u.txt"; git -C "$R" add kit.toml u.txt; cmt "$R"
+eq   "B13: allow_literals by value → blocked" "$CC" "1"
+lacks "B13: value never echoed" "$CO" "11111111"
+git -C "$R" reset -q --hard
+
+N="$W/nokit"; newrepo "$N" none
+printf 'x\n' > "$N/PROJECT.toml.new"; mv "$N/PROJECT.toml.new" "$N/PROJECT.toml"; mkdir -p "$N/docs/plans"; echo p > "$N/docs/plans/p.md"
+git -C "$N" add PROJECT.toml docs/plans/p.md; cmt "$N"
+eq   "B9: no kit.toml → PROJECT.toml / docs/plans pass (R2 is .env* only)" "$CC" "0"
+echo "K=v" > "$N/.env"; git -C "$N" add -f .env; cmt "$N"
+eq   "B9: no kit.toml → .env still blocked" "$CC" "1"
+has  "B9: .env is R2" "$CO" "[R2 forbidden-path] .env"
+git -C "$N" rm -q --cached .env
+printf 'p /home/testuser/x\n' > "$N/n.txt"; git -C "$N" add n.txt; cmt "$N"
+has  "B9: no kit.toml → R3 still runs" "$CO" "[R3 local-path]"
+git -C "$N" reset -q n.txt
+printf 'name proj-a-secret-name\n' > "$N/n.txt"; git -C "$N" add n.txt; cmt "$N"
+has  "B9: no kit.toml → R5 fail-closed (treated as public)" "$CO" "[R5 public-only-literal]"
+git -C "$N" reset -q n.txt
+printf 'uid 11111111-2222-3333-4444-555555555555\n' > "$N/n.txt"; git -C "$N" add n.txt; cmt "$N"
+has  "B9: no kit.toml → R4 still runs" "$CO" "[R4 personal-literal]"
+git -C "$N" reset -q n.txt
+if [ -n "$GITLEAKS" ]; then
+  printf 'aws_key = "%s"\n' "$FAKE_AWS" > "$N/k.txt"; git -C "$N" add k.txt; cmt "$N"
+  has "B9: no kit.toml → R1 still runs" "$CO" "[R1 secret]"; git -C "$N" reset -q k.txt
+fi
+P="$W/priv"; newrepo "$P" private
+printf 'name proj-a-secret-name\n' > "$P/n.txt"; git -C "$P" add n.txt; cmt "$P"
+eq   "B12: public-only literal passes in a private repo" "$CC" "0"
+printf 'uid 11111111-2222-3333-4444-555555555555\n' > "$P/m.txt"; git -C "$P" add m.txt; cmt "$P"
+has  "B12: always literal blocked in a private repo" "$CO" "[R4 personal-literal]"
+git -C "$P" reset -q m.txt
+mv "$PRIV" "$PRIV.off"; printf 'uid 11111111-2222-3333-4444-555555555555\n' > "$P/m.txt"; git -C "$P" add m.txt; cmt "$P"
+eq   "B18: privacy.local.toml missing → R4/R5 skipped (passes)" "$CC" "0"
+has  "B18: …with a warning" "$CO" "privacy.local.toml"
+mv "$PRIV.off" "$PRIV"; git -C "$P" reset -q m.txt
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1
