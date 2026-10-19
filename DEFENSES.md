@@ -207,6 +207,11 @@ claude 啟動時的環境)。
   舊值);remote-tracking refs **不採信**(`remote set-url`、多個 pushurl 鏡像、
   直接推 URL 時它們描述的是別的 repo);ls-remote 失敗就掃推送 ref 的完整歷史。
   merge 的衝突解法用 remerge diff 掃。ref 刪除永遠放行。
+  **遠端已前進、本地沒 fetch**(v5.0.1):push 傳進來的舊值(非零 rsha)本地沒有——別人或排程
+  workflow 在上次 fetch 之後推過——那個 ref **不掃**,只出一行 `[R0 fetch-first]` block:
+  `git fetch` 後 rebase / merge 再推;刻意覆蓋(force push)也先 fetch,guard 才算得出範圍。
+  以前這裡會退回掃整段歷史,把遠端早就有的舊 `.claude/`、PROJECT.toml、本機路徑全部當成「這次
+  新增」再報一次。這個 block **不吃 bypass**(已 arm 的 bypass 不消耗、留著):放行就等於送出沒掃過的內容。
 - 每個 git 呼叫都明確釘住輸出格式(`--no-color`、前綴、`--root`、`--text`、
   `--format`…),呼叫端的 config(`-c color.ui=always`、`log.showRoot=false`、
   `diff.noprefix`…)改不了 guard 讀到的內容;R1 的 gitleaks 跑在 guard 自己產生的
@@ -239,9 +244,10 @@ claude 啟動時的環境)。
   「本地有」= 讀得到 commit 的根 tree(tree 列出 kit.toml 時連同它的 blob,不觸發 lazy fetch);
   partial clone 裡只有 commit 沒有 tree 的舊 tip / `HEAD` 照「本地沒有」走上述抓取,抓了仍讀不到
   tree → fail closed(review R5-2)。
-  被覆蓋的遠端舊 tip 有 kit.toml = 移除 → block。**舊 tip(非零 rsha)本地沒有又抓不到**——離線、
-  或 hook 自己的連線認證不過(push 本身的連線過了,例如有密碼的 ssh key 沒 agent)——一律
-  **fail closed** `[R2 kit-status-unknown]`(user bypass 放行;review R4-2);遠端 `HEAD` 列得出卻抓不到
+  被覆蓋的遠端舊 tip 有 kit.toml = 移除 → block。**舊 tip(非零 rsha)本地沒有**一律先
+  `[R0 fetch-first]`(v5.0.1,見上);舊 tip 在本地但**讀不到 tree**(partial clone)又抓不到——離線、
+  或 hook 自己的連線認證不過(push 本身的連線過了,例如有密碼的 ssh key 沒 agent)——
+  **fail closed** `[R2 kit-status-unknown]`(user bypass 放行;review R4-2 / R5-2);遠端 `HEAD` 列得出卻抓不到
   也一樣。新 ref(零 rsha)且 ls-remote 失敗 → 只用本地訊號。orphan / unborn 分支上的 commit 從本地分支 tip 讀 kit.toml。
 - 速度(Phase 4 實測):小 diff pre-commit 中位數 52ms 不含 gitleaks、270ms 含(final-review 修正後重測);
   7-commit push 320ms 含 gitleaks;8,000 行 email CSV(8k 個 R6 warn)< 1s;每條規則只列前 50 筆、
@@ -253,7 +259,16 @@ claude 啟動時的環境)。
   `~/.local/state/kit/localfiles/<repo-id>/files/`(git 換檔是 unlink + 新建,store 那份保留內容,
   包含上次快照後的就地修改);post-checkout / post-merge / post-rewrite shim 把被刪的放回(沒有
   store 時用前一個 commit 的 blob,只限 owner 內容、不含 `.claude/` 的 v4 kit 檔),post-commit /
-  `kit migrate` / `kit guard status` / session start 更新快照。symlink 以 symlink 存、以 symlink 回;
+  pre-rebase / `kit migrate` / `kit guard status` / session start 更新快照。
+  **誰刪的**(v5.0.1):store 裡有、工作樹沒了、HEAD 不追蹤的檔,若上次快照之後的 git 操作經過
+  追蹤它的 commit——HEAD reflog 在快照標記(`<store>/mark`)之後的每筆紀錄的兩端(單純的
+  commit / amend 不算),加上 hook 自己的前一個 HEAD 與 rebase 的 `ORIG_HEAD..HEAD`——就是 git
+  刪的 → 從 store 放回(owner 內容優先於 git 途中寫出的舊追蹤版);否則才算 owner 刪的 → trash。
+  所以 rebase / `pull --rebase` 把遷移 commit 重放到遷移前的歷史上(git 先 checkout 舊 base 蓋掉、
+  再套遷移 commit 刪掉)、cherry-pick / merge 遷移 commit、沒有 hook 的 `reset --hard` 來回,都會
+  放回;rebase 進行中(`rebase-merge` / `rebase-apply` 存在)每個 pick 的 post-checkout / post-commit
+  不動作,由結尾的 post-rewrite 收尾;pre-rebase 先快照,rebase 前最後一刻用 rename 存的修改也在。
+  (pre-merge-commit / pre-applypatch 不用:git 跑它們時工作樹已經改完。)symlink 以 symlink 存、以 symlink 回;
   超過 8 MiB 或第 2000 個之後的檔**不進 store**,列在 `<store>/omitted`,清單變動時、每次
   `kit guard status` 與 `kit migrate` 都印 `NOT protected` 警告(review R3-3);store 根目錄 700。
   工作樹沒了、HEAD 也不追蹤的 store 檔 = owner 刪的(或 reset / stash / clean 拿掉的)→ 移到
@@ -339,12 +354,15 @@ recorded」。雜湊工具本身只用固定絕對路徑(`/usr/bin/sha256sum`、
 11. **本機專屬檔案保護的縫**(review F3 殘餘):hard link 只保住「就地」修改;用 rename 存檔的
    編輯器(`sed -i`、原子存檔)在上次快照後、下一次破壞性 checkout 前的修改會遺失(回來的是
    較舊的 store 版本);repo 與 `~/.local/state` 不在同一個檔案系統時只能複製,同一個縫。
-   `git reset --hard <舊>`、`git stash`、`git clean` 不觸發 post-checkout——內容在下一次快照時移進
+   `git reset --hard <舊>` 不觸發 hook,但會留在 HEAD reflog:下一次快照時從 store 放回(v5.0.1);
+   reflog 關掉(`core.logAllRefUpdates=false`)時退回舊行為。`git stash`、`git clean` 不留 reflog——內容在
+   下一次快照時移進
    `<store>/trash/`(帶時間戳,每個路徑留最近 5 代;第 6 次以上「消失又出現、內容不同」會丟掉最舊那代),
    下一個快照點會用一行說明,`kit guard status` 也會列出來,要自己複製回來。
    **刪掉的 plan 復活**(review N2):快照時「工作樹沒了、HEAD 不追蹤」的檔移進 trash、不再放回;
-   但刪掉後**沒有任何快照點**(commit、checkout、`kit guard status`、session start)就直接 checkout
-   遷移前的 ref 再回來,那份 plan 仍會從 store 回來(未追蹤、已 ignore,不會被推)。
+   但刪掉後**沒有任何快照點**(commit、checkout、`kit guard status`、session start)就做了一次經過
+   「仍追蹤它的 commit」的 git 操作(checkout 遷移前的 ref 再回來、rebase / reset 穿過遷移前的歷史),
+   那份 plan 仍會從 store 回來(未追蹤、已 ignore,不會被推)——v5.0.1 起「git 刪的放回」優先。
    **rename 存檔的縫**(review N4):還原訊息會印 store 那份的時間(`as of …`),比那更晚、用 rename
    存的修改不在裡面(`<store>/prev/` 留前一版);沒有每個 prompt 都快照(成本)。
    超過 8 MiB / 第 2000 個之後的檔不受保護,只有警告(review R3-3)。根治是改寫歷史(design §12 步驟 6)。
@@ -360,9 +378,9 @@ recorded」。雜湊工具本身只用固定絕對路徑(`/usr/bin/sha256sum`、
    歷史成為沒抓過的 kit remote 的**新分支**不會被認出(通常推送本身也會失敗);覆蓋既有 ref 的推送
    則 fail closed。只看遠端 `HEAD`:kit.toml 只存在遠端**非預設分支 / tag** 上、本地又沒有時,不算
    kit 訊號(review R4-3 的取捨:不再抓整個命名空間;R5 複審維持——有上限的公告 tip 掃描留待日後);`refs/pull/*` 等 review 命名空間與
-   remote-tracking refs 不當 kit 訊號。反過來的成本:本地沒有遠端舊 tip、又暫時連不上(或 hook 的
-   第二條連線認證不過)時,**覆蓋式推送一個沒有 kit.toml 的 tip** 一律 `[R2 kit-status-unknown]`,
-   非 kit repo 也一樣——`git fetch` 後重推,或 user bypass。
+   remote-tracking refs 不當 kit 訊號。反過來的成本:本地沒有遠端舊 tip 時,**任何**覆蓋它的推送
+   (含 force push、orphan gh-pages、非 kit repo)一律 `[R0 fetch-first]`、不吃 bypass(v5.0.1)——
+   先 `git fetch` 再推;舊 tip 在本地但讀不到 tree、又抓不到時是 `[R2 kit-status-unknown]`(user bypass 放行)。
 15. **掃描器雜湊的縫**(review R4-1 殘餘):驗雜湊與執行之間有極短的 TOCTOU 窗(換檔要剛好卡在
    兩者之間);`kit doctor --install` 會把 `tools_dir` 裡被換掉的檔換回釘版(或改記 PATH 上雜湊相符的
    那支),所以模型跑它無害;間接寫法(`python3 -c` 改 config.toml 的 `gitleaks_sha256`)同第 7 條。
