@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tests/hooks-smoke.sh - behavioral tests for the kit's .claude/hooks/*.sh
+# tests/hooks-smoke.sh - behavioral tests for the kit's plugin/hooks/*.sh
 #
 # Same style as tests/smoke.sh: bash-only, PASS/FAIL per assertion, summary
 # line, exit 1 on any failure. Differences: the hooks under test REQUIRE jq
@@ -12,7 +12,7 @@
 set -uo pipefail
 
 KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOOKS="$KIT_ROOT/.claude/hooks"
+HOOKS="$KIT_ROOT/plugin/hooks"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "SKIP hooks-smoke: jq not installed (kit hooks are no-ops without jq)"
@@ -65,7 +65,7 @@ run_hook() {
   shift 3 2>/dev/null || shift $#
   OUT="$(printf '%s' "$json" | GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$GIT_ID_CFG" \
         HOME="$FAKE_HOME" env KIT_PROFILE="$profile" KIT_PROTECT=on KIT_BREAKER=on \
-        KIT_REVIEW_GATE=on CLAUDE_PROJECT_DIR= "$@" bash "$hook" 2>"$WORK/last-stderr")"
+        KIT_REVIEW_GATE=on CLAUDE_PROJECT_DIR= CLAUDE_PLUGIN_ROOT="$KIT_ROOT/plugin" "$@" bash "$hook" 2>"$WORK/last-stderr")"
   CODE=$?
   ERR="$(cat "$WORK/last-stderr" 2>/dev/null)"
 }
@@ -109,14 +109,14 @@ for h in session-start.sh classify-task.sh verify-final-review.sh protect-paths.
   if [ -x "$HOOKS/$h" ]; then pass "h0: exec bit on $h"; else fail "h0: exec bit on $h" "not executable"; fi
 done
 
-# Hooks ship ENABLED (v3.5+): settings must hold the kit events DIRECTLY
+# Hooks ship ENABLED (v3.5+): plugin/hooks/hooks.json must hold the kit events DIRECTLY
 # under "hooks" — a leftover disabled-key or an extra nesting level would
 # silently disable everything. v4.0 adds PreToolUse + PostToolUseFailure.
 if jq -e '.hooks | has("SessionStart") and has("UserPromptSubmit") and has("Stop") and has("PreToolUse") and has("PostToolUseFailure")' \
-     "$KIT_ROOT/.claude/settings.json" >/dev/null 2>&1; then
-  pass "h0: settings ships kit hooks enabled with event keys directly"
+     "$KIT_ROOT/plugin/hooks/hooks.json" >/dev/null 2>&1; then
+  pass "h0: hooks.json ships kit hooks enabled with event keys directly"
 else
-  fail "h0: settings ships kit hooks enabled with event keys directly" "hooks key missing or missing an event"
+  fail "h0: hooks.json ships kit hooks enabled with event keys directly" "hooks key missing or missing an event"
 fi
 
 # ===========================================================================
