@@ -17,6 +17,9 @@
 # (mirror) or for a URL that is not a named remote they describe a different
 # repository. When ls-remote fails, the whole history of the pushed refs is
 # scanned (slower, never weaker). Deleting a remote ref is never blocked.
+# A non-zero old value (rsha) that is NOT here — the remote moved on since the last fetch —
+# is one BLOCK [R0 fetch-first], no scan of that ref, no bypass (v5.0.1): the range would
+# otherwise be the whole history and re-report everything the remote has had for years.
 # kit.toml (visibility, allow_*) is read from the pushed tree — what the remote gets.
 # A tip WITHOUT kit.toml whose remote old tip / range boundary / range history had one
 # is still a kit push, and the removal is a BLOCK (user bypass only). A tip without
@@ -70,9 +73,19 @@ while read -r lref lsha rref rsha; do
         guard_add BLOCK "R0 guard-error" "$lref" "pushed object is not a commit — the guard cannot scan it"
         continue
     fi
+    # the remote's current tip of this ref is not here (v5.0.1): someone — or a scheduled
+    # workflow — pushed since the last fetch. Without it nothing marks the already-published
+    # history as "the remote has it", the range would fall back to the whole history and
+    # re-report every old finding. Block with the real reason instead — never scan less and
+    # let it through: not even a user bypass lets this push go out unscanned.
+    if [[ -n "${rsha:-}" && ! "$rsha" =~ ^0+$ ]] && ! GIT_NO_LAZY_FETCH=1 git cat-file -e "${rsha}^{commit}" 2>/dev/null; then
+        G_NOBYPASS=1
+        guard_add BLOCK "R0 fetch-first" "${rref#refs/heads/}" "the remote's ${rref#refs/heads/} is at ${rsha:0:12}, a commit this clone does not have (pushed since your last fetch — by someone else or a workflow), so the guard cannot tell what this push adds: git fetch ${REMOTE:-<remote>}, rebase or merge onto it, push again; for an intended overwrite (force push) fetch first too, so the guard can compute the range"
+        continue
+    fi
     scanned=1; n=$((n + 1)); D="$TMPD/r$n"; mkdir -p "$D"
     { printf '%s\n' "$c"; cat "$TMPD/remote-has"
-      if [[ -n "${rsha:-}" && ! "$rsha" =~ ^0+$ ]] && git cat-file -e "${rsha}^{commit}" 2>/dev/null; then printf '^%s\n' "$rsha"; fi
+      if [[ -n "${rsha:-}" && ! "$rsha" =~ ^0+$ ]]; then printf '^%s\n' "$rsha"; fi
     } > "$D/revs"
 
     HAS_KIT=0; KT=""; REMOVED=0

@@ -951,6 +951,10 @@ mkdir -p "$H3/.claude"; echo '{}' > "$H3/.claude/settings.local.json"; printf 's
 git -C "$H3" add -f .claude PROJECT.toml; nc "$H3" unrelated
 psh "$H3" "" -f origin main
 eq   "H-R3-2b: force-push of kit-less history over an UNFETCHED kit remote tip → blocked" "$PC" "1"
+has  "H-R3-2b: …fetch first (v5.0.1: the old tip is not here)" "$PO" "BLOCKED [R0 fetch-first] main"
+git -C "$H3" fetch -q origin
+psh "$H3" "" -f origin main
+eq   "H-R3-2b: …fetched, the same force-push → blocked" "$PC" "1"
 has  "H-R3-2b: …as a kit.toml removal" "$PO" "BLOCKED [R2 kit.toml-removed]"
 has  "H-R3-2b: …and R2 runs" "$PO" "[R2 forbidden-path] .claude/settings.local.json"
 eq   "H-R3-2b: …remote main unchanged" "$(git -C "$H2.git" rev-parse main)" "$(git -C "$H2" rev-parse main)"
@@ -967,7 +971,7 @@ git config --file "$GIT_CONFIG_GLOBAL" uploadpack.packObjectsHook false
 psh "$H5" "" -f origin main
 git config --file "$GIT_CONFIG_GLOBAL" --unset uploadpack.packObjectsHook
 eq   "H-R3-2c: an advertised remote tip that cannot be inspected → blocked (fail closed)" "$PC" "1"
-has  "H-R3-2c: …says why" "$PO" "[R2 kit-status-unknown]"
+has  "H-R3-2c: …says why (v5.0.1: fetch first)" "$PO" "[R0 fetch-first]"
 eq   "H-R3-2c: …remote unchanged" "$(git -C "$H4.git" rev-parse main)" "$(git -C "$H4" rev-parse main)"
 # legit pushes that must still pass
 H6="$W/h6"; pushrepo "$H6" none noproj; git -C "$H6" -c core.hooksPath=/dev/null push -q origin main:refs/heads/other 2>/dev/null
@@ -976,7 +980,11 @@ psh "$H7" "" origin main:refs/heads/fresh
 eq   "H-R3-2: a non-kit repo pushing next to unfetched NON-kit remote branches passes" "$PC" "0"
 eq   "H-R3-2: …no temporary refs left behind" "$(git -C "$H7" for-each-ref refs/kit-guard/)" ""
 psh "$H7" "" -f origin main
-eq   "H-R3-2: force-push in a repo that never had kit.toml passes" "$PC" "0"
+eq   "H-R3-2: force-push over an unfetched remote tip → fetch first (v5.0.1)" "$PC" "1"
+has  "H-R3-2: …says so" "$PO" "BLOCKED [R0 fetch-first] main"
+git -C "$H7" fetch -q origin
+psh "$H7" "" -f origin main
+eq   "H-R3-2: force-push in a repo that never had kit.toml passes (after the fetch)" "$PC" "0"
 echo more >> "$H2/README.md"; git -C "$H2" add README.md; nc "$H2"; git -C "$H2" checkout -q -b feat2
 psh "$H2" "" origin feat2
 eq   "H-R3-2: new branch in a kit repo passes" "$PC" "0"
@@ -1071,7 +1079,7 @@ git -C "$J" add -f .claude PROJECT.toml; nc "$J" unrelated
 glsel "$GL_PATH"
 PO="$(cd "$J" && PATH="$W/faketo:$GL_PATH" git -c core.hooksPath="$TH" push -q -f origin main 2>&1)"; PC=$?
 eq   "H-R4-2: force-push over an unfetched remote tip while the hook cannot reach the remote → blocked" "$PC" "1"
-has  "H-R4-2: …kit-status-unknown" "$PO" "[R2 kit-status-unknown]"
+has  "H-R4-2: …fetch first (v5.0.1: an old tip that is not here always blocks)" "$PO" "[R0 fetch-first]"
 eq   "H-R4-2: …remote main unchanged" "$(git -C "$K.git" rev-parse main)" "$(git -C "$K" rev-parse main)"
 J2="$W/j2"; rm -rf "$J2"; git init -q "$J2"; git -C "$J2" remote add origin "$K.git"; echo hi > "$J2/hi.txt"; git -C "$J2" add hi.txt; nc "$J2"
 PO="$(cd "$J2" && PATH="$W/faketo:$GL_PATH" git -c core.hooksPath="$TH" push -q origin main:refs/heads/new-ref 2>&1)"; PC=$?
@@ -1116,18 +1124,57 @@ eq   "H-R4-3a: new orphan branch of a kit repo (remote has 41 unfetched branches
 eq   "H-R4-3a: …kit status from the local main: nothing fetched" "${WANTS:-0}" "0"
 eq   "H-R4-3a: …no remote branch objects landed here" "$(nolocal)" "0"
 mpush "$MC" -f origin site:gh-pages
-eq   "H-R4-3b: orphan force-push over the remote's unfetched gh-pages passes" "$PC" "0"
-eq   "H-R4-3b: …only the old gh-pages tip was fetched" "$WANTS" "1"
-has  "H-R4-3b: …shallow (depth 1)" "$(cat "$W/tr" 2>/dev/null)" "fetch> deepen 1"
-has  "H-R4-3b: …blob-less where the server allows it" "$(cat "$W/tr" 2>/dev/null)" "fetch> filter blob:none"
+eq   "H-R4-3b: orphan force-push over the remote's unfetched gh-pages → fetch first (v5.0.1)" "$PC" "1"
+has  "H-R4-3b: …says so" "$PO" "BLOCKED [R0 fetch-first] gh-pages"
+eq   "H-R4-3b: …the hook fetched nothing" "${WANTS:-0}" "0"
 eq   "H-R4-3b: …no remote branch objects landed here" "$(nolocal)" "0"
-eq   "H-R4-3b: …and this repo did not become shallow" "$(git -C "$MC" rev-parse --is-shallow-repository)" "false"
 eq   "H-R4-3b: …no temporary refs left" "$(git -C "$MC" for-each-ref refs/kit-guard/ refs/kit-probe/)" ""
+git -C "$MC" fetch -q origin gh-pages
+mpush "$MC" -f origin site:gh-pages
+eq   "H-R4-3b: …after fetching gh-pages the orphan force-push passes" "$PC" "0"
+eq   "H-R4-3b: …still no other remote branch objects here" "$(nolocal)" "0"
 MN="$W/mn"; rm -rf "$MN"; git init -q "$MN"; git -C "$MN" remote add origin "$M.git"; printf 'status = "x"\n' > "$MN/PROJECT.toml"; git -C "$MN" add PROJECT.toml; nc "$MN"
 mpush "$MN" origin main:refs/heads/side
 eq   "H-R4-3c: a non-kit repo pushing PROJECT.toml to a kit remote (unfetched HEAD) → blocked" "$PC" "1"
 has  "H-R4-3c: …R2 (kit status from the remote HEAD)" "$PO" "[R2 forbidden-path] PROJECT.toml"
 eq   "H-R4-3c: …only the remote HEAD was fetched" "$WANTS" "1"
+has  "H-R4-3c: …shallow (depth 1)" "$(cat "$W/tr" 2>/dev/null)" "fetch> deepen 1"
+has  "H-R4-3c: …blob-less where the server allows it" "$(cat "$W/tr" 2>/dev/null)" "fetch> filter blob:none"
+eq   "H-R4-3c: …and this repo did not become shallow" "$(git -C "$MN" rev-parse --is-shallow-repository)" "false"
+eq   "H-R4-3c: …no temporary refs left" "$(git -C "$MN" for-each-ref refs/kit-guard/ refs/kit-probe/)" ""
+
+# ============================================================ J. v5.0.1 fixes
+echo "--- J. v5.0.1 fixes"
+# J1: the remote moved on (a scheduled workflow's empty commit) and this clone has not fetched
+# it: the pushed range must NOT fall back to the whole history (every old .claude/ /
+# PROJECT.toml / local-path line re-reported) — one clear "fetch first" block instead
+P1="$W/jp1"; rm -rf "$P1" "$P1.git"; git init -q "$P1"
+mkdir -p "$P1/.claude"; echo x > "$P1/.claude/x"; printf 'status = "x"\n' > "$P1/PROJECT.toml"; echo "# r" > "$P1/README.md"
+printf 'notes in %s/testuser/notes\n' "$HP" > "$P1/notes.md"
+git -C "$P1" add -f -A; nc "$P1" "pre-migration"
+git -C "$P1" rm -q -r --cached .claude PROJECT.toml; printf '.claude/\nPROJECT.toml\n' > "$P1/.gitignore"
+printf 'kit = 5\nvisibility = "private"\nprotected = [\n]\n' > "$P1/kit.toml"; git -C "$P1" add .gitignore kit.toml; nc "$P1" migrate
+git init -q --bare "$P1.git"; git -C "$P1" remote add origin "$P1.git"; git -C "$P1" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null
+git -C "$P1" fetch -q origin
+E1="$(git -C "$P1.git" commit-tree -p main -m "daily heartbeat" "main^{tree}")"; git -C "$P1.git" update-ref refs/heads/main "$E1"
+echo clean > "$P1/new.txt"; git -C "$P1" add new.txt; nc "$P1" "local work"
+BO="$(cd "$P1" && script -qec "$KIT guard bypass 'try to skip the fetch'" /dev/null 2>&1)"
+psh "$P1" "" origin main
+eq   "J1: push while the remote has an unfetched commit → blocked" "$PC" "1"
+has  "J1: …with one clear fetch-first reason" "$PO" "BLOCKED [R0 fetch-first] main"
+has  "J1: …that says what to do" "$PO" "git fetch origin"
+eq   "J1: …exactly one block line" "$(printf '%s\n' "$PO" | grep -c 'KIT GUARD BLOCKED')" "1"
+lacks "J1: …no R2 lines about long-published history" "$PO" "R2 forbidden-path"
+lacks "J1: …no R3 lines about old commits" "$PO" "R3 local-path"
+lacks "J1: …the user bypass does not let an unscanned push through" "$PO" "bypass consumed"
+eq   "J1: …and is not burned by it" "$(ls "$KIT_STATE_HOME"/guard/bypass-* 2>/dev/null | wc -l | tr -d ' ')" "1"
+rm -f "$KIT_STATE_HOME"/guard/bypass-*
+eq   "J1: …remote main unchanged" "$(git -C "$P1.git" rev-parse main)" "$E1"
+git -C "$P1" fetch -q origin; git -C "$P1" rebase -q origin/main >/dev/null 2>&1
+psh "$P1" "" origin main
+eq   "J1: after git fetch + rebase the push passes" "$PC" "0"
+lacks "J1: …without old-history findings" "$PO" "BLOCKED"
+eq   "J1: …remote has the rebased work" "$(git -C "$P1.git" rev-parse main)" "$(git -C "$P1" rev-parse main)"
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"

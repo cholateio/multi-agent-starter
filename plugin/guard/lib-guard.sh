@@ -32,7 +32,7 @@ guard_init() {
     STATE_DIR="${KIT_STATE_HOME:-${HOME:-/nonexistent}/.local/state/kit}"
     PRIV_FILE="$CFG_DIR/privacy.local.toml"
     GUARD_EMPTY_TREE="$(git hash-object -t tree /dev/null 2>/dev/null)"
-    G_FIND=(); G_WARNED_PRIV=0
+    G_FIND=(); G_WARNED_PRIV=0; G_NOBYPASS=0
     # caller env that could reshape what the guard reads (final review C2):
     # git's own output is pinned by explicit flags on every git call below
     unset GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GREP_OPTIONS GREP_COLOR GREP_COLORS
@@ -343,7 +343,9 @@ guard_finish() {
         nm=$((nm + 1)); [[ $nm -le 200 ]] && guard_audit "${tag%% *}" "$where" "allow-marker"
     done
     [[ $nb -eq 0 ]] && return 0
-    if guard_bypass_consume; then
+    # G_NOBYPASS (pre-push R0 fetch-first): part of the push was never scanned — a bypass
+    # would send it out unscanned, so it is neither consumed nor applied (it stays armed)
+    if [[ ${G_NOBYPASS:-0} -ne 1 ]] && guard_bypass_consume; then
         echo "KIT GUARD: bypass consumed — ${BYPASS_REASON} ($nb block(s) let through, logged)" >&2
         for f in "${G_FIND[@]}"; do
             IFS=$'\x1f' read -r act tag where why <<< "$f"
@@ -353,7 +355,11 @@ guard_finish() {
     fi
     local r
     for r in R1 R2 R3 R4 R5 R8; do [[ -n "${rules[$r]:-}" ]] && guard_fix_line "$r" >&2; done
-    echo "bypass (user only): kit guard bypass \"<reason>\"   (run it yourself in a terminal; single-use, 10 min, audited)" >&2
+    if [[ ${G_NOBYPASS:-0} -eq 1 ]]; then
+        echo "bypass: not possible for this push — part of it could not be scanned (git fetch first); an armed bypass stays armed" >&2
+    else
+        echo "bypass (user only): kit guard bypass \"<reason>\"   (run it yourself in a terminal; single-use, 10 min, audited)" >&2
+    fi
     local n=0
     for f in "${G_FIND[@]}"; do
         IFS=$'\x1f' read -r act tag where why <<< "$f"
