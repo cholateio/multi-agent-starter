@@ -1,0 +1,12 @@
+{
+  "name": "multi-agent-kit",
+  "owner": { "name": "multi-agent-kit" },
+  "plugins": [
+    {
+      "name": "kit",
+      "source": "./plugin",
+      "description": "multi-agent kit: workflow rules, Stop-gate review, protect-paths, tool breaker",
+      "version": "5.0.0"
+    }
+  ]
+}

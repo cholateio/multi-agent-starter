@@ -1,0 +1,7 @@
+# kit.toml — multi-agent-kit project marker. Kit hooks and git guards activate only when this file exists.
+kit = 5
+visibility = "public"
+license = "MIT"
+readme_lang = "en"
+protected = [
+]
