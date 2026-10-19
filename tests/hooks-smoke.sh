@@ -1561,6 +1561,51 @@ bgp deny "sh -c with commit -n denied"                               "sh -c 'git
 bgp deny "eval with --no-verify denied"                              'eval "git commit --no-verify -m x"'
 run_hook "$TB" "$(tbv bgpoff 'git commit --no-verify -m x')" full KIT_BREAKER=off
 assert_eq "b-v5: KIT_BREAKER=off (user-only) disables guard-preserve" "$OUT" ""
+# Phase 3 orchestrator ruling R-guard-scope: absolute-path / wrapped git
+bgp deny "absolute-path /usr/bin/git commit --no-verify denied"      '/usr/bin/git commit --no-verify -m x'
+bgp deny "absolute-path git commit -n denied"                        '/usr/bin/git commit -n -m x'
+bgp deny "absolute-path git config core.hooksPath denied"            '/usr/bin/git config --global core.hooksPath /x'
+bgp deny "HOME= before absolute-path git push denied"                'HOME=/tmp/x /usr/bin/git push origin main'
+bgp deny "export GIT_CONFIG_GLOBAL then absolute-path commit denied" 'export GIT_CONFIG_GLOBAL=/dev/null; /usr/bin/git commit -m x'
+bgp deny "command git commit --no-verify denied"                     'command git commit --no-verify -m x'
+bgp deny "env git push --no-verify denied"                           'env git push --no-verify origin main'
+bgp deny "env -i git commit -n denied"                               'env -i git commit -n -m x'
+bgp deny "backslash-escaped \\git commit --no-verify denied"          '\git commit --no-verify -m x'
+bgp ""   "absolute-path git log -n allowed"                          '/usr/bin/git log -n 3'
+bgp ""   "ls of the git binary allowed"                              'ls -l /usr/bin/git'
+
+# ===========================================================================
+# B-scope - guard-preserve runs in EVERY directory (orchestrator ruling
+# R-guard-scope, Phase 3): the global git guard covers all repos, so the
+# model-side bypass denial cannot stop at the kit.toml gate. Everything else
+# in tool-breaker (breaker, pipe-guard, telemetry) stays gated.
+# User-only switches KIT=off / KIT_BREAKER=off still silence it.
+# ===========================================================================
+BS_NOKIT="$WORK/bs-nokit"; make_plain_repo "$BS_NOKIT"
+BS_NOGIT="$WORK/bs-nogit"; mkdir -p "$BS_NOGIT"
+BS_V4="$WORK/bs-v4"; make_repo "$BS_V4"; mkdir -p "$BS_V4/.claude"; echo "v4.10.0" > "$BS_V4/.claude/kit-version"
+bsj() {  # $1 = sid suffix  $2 = cwd  $3 = command
+  jq -cn --arg sid "${SID_PREFIX}-$1" --arg cwd "$2" --arg cmd "$3" \
+    '{session_id:$sid, cwd:$cwd, hook_event_name:"PreToolUse", tool_name:"Bash", tool_input:{command:$cmd}}'
+}
+run_hook "$TB" "$(bsj bs1 "$BS_NOKIT" 'git commit --no-verify -m x')"
+assert_eq "b-scope: --no-verify denied in a non-kit repo" "$(tb_decision)" "deny"
+assert_contains "b-scope: non-kit deny routes to kit guard bypass" "$(bgp_reason)" 'kit guard bypass'
+if [ ! -e "$(VLOG_SID bs1)" ]; then pass "b-scope: no telemetry written outside kit projects"; else fail "b-scope: no telemetry written outside kit projects" "log exists"; fi
+run_hook "$TB" "$(bsj bs2 "$BS_NOGIT" '/usr/bin/git push --no-verify origin main')"
+assert_eq "b-scope: absolute-path --no-verify denied in a non-git dir" "$(tb_decision)" "deny"
+run_hook "$TB" "$(bsj bs3 "$BS_V4" 'git config --global core.hooksPath /dev/null')"
+assert_eq "b-scope: hooksPath write denied in a v4-layout repo (gate yields)" "$(tb_decision)" "deny"
+run_hook "$TB" "$(bsj bs4 "$BS_NOKIT" 'git commit -m "wip"')"
+assert_eq "b-scope: plain commit silent in a non-kit repo" "$OUT" ""
+run_hook "$TB" "$(bsj bs5 "$BS_NOKIT" 'pytest -q | tail && git commit -m x')"
+assert_eq "b-scope: pipe-guard stays gated (silent outside kit projects)" "$OUT" ""
+for i in 1 2 3; do run_hook "$TB" "$(bsj bs6 "$BS_NOKIT" 'ls')"; done
+assert_eq "b-scope: breaker stays gated (3rd identical call silent outside kit)" "$OUT" ""
+run_hook "$TB" "$(bsj bs7 "$BS_NOKIT" 'git commit --no-verify -m x')" full KIT=off
+assert_eq "b-scope: KIT=off (user-only) silences guard-preserve outside kit too" "$OUT" ""
+run_hook "$TB" "$(jq -cn --arg cwd "$BS_NOKIT" '{session_id:"x",cwd:$cwd,hook_event_name:"PostToolUseFailure",tool_name:"Bash",tool_input:{command:"git commit --no-verify"}}')"
+assert_eq "b-scope: PostToolUseFailure outside kit stays silent" "$OUT" ""
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"
