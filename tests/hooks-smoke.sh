@@ -25,9 +25,16 @@ fi
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/kit-hooks-smoke.XXXXXX")"
 # unique per-run session-id prefix so /tmp marker files can't collide with
-# real sessions or a parallel test run
+# real sessions or a parallel test run. Every session id is "${SID_PREFIX}-<suffix>", and
+# the cleanup glob keeps that dash: "hooksmoke-123*" would also delete the markers of a
+# concurrent run whose pid starts with 123 (pid_max can be 5 digits: 123 vs 12345)
 SID_PREFIX="hooksmoke-$$"
-cleanup() { rm -rf "$WORK" /tmp/claude-*-"${SID_PREFIX}"* 2>/dev/null; }
+cleanup() { rm -rf "$WORK" /tmp/claude-*-"${SID_PREFIX}"-* 2>/dev/null; }
+# hermetic: nothing from the caller's shell (an isolated-HOME experiment, a Claude Code
+# session) may point the hooks at shared state — KIT_STATE_HOME / XDG / CLAUDE_* / GIT_*
+unset KIT_STATE_HOME KIT_CONFIG_HOME KIT_CACHE_HOME KIT_DATA_HOME KIT_GUARD_CONFIG_DIR KIT_SESSION_ID \
+      KIT_PROFILE XDG_CONFIG_HOME CLAUDE_CONFIG_DIR CLAUDE_ENV_FILE CLAUDE_PROJECT_DIR \
+      GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM

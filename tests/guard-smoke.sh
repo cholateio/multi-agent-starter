@@ -626,6 +626,11 @@ e2e() { env https_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 \
           GIT_CONFIG_GLOBAL="$EM/gitconfig" XDG_CONFIG_HOME="$EM/home/.config" PATH="$EM/fakebin:$GL_PATH" "$@"; }
 SETUP_OUT="$(e2e python3 "$KIT_ROOT/bin/kit" setup --bin-dir "$EM/home/.local/bin" 2>&1)"
 eq   "E0: kit setup sets the global hooksPath" "$(GIT_CONFIG_GLOBAL="$EM/gitconfig" git config --global core.hooksPath)" "$EM/home/.config/kit/git-hooks"
+if [ -z "$GITLEAKS" ]; then   # no real gitleaks: record the clean stand-in the way setup records the pin (tests never download)
+  mkdir -p "$EM/home/.local/bin"; cp "$W/glbin/gitleaks" "$EM/home/.local/bin/gitleaks"
+  { printf 'gitleaks_sha256 = "%s"\n' "$(sha256sum < "$W/glbin/gitleaks" | cut -d' ' -f1)"; cat "$EM/home/.config/kit/config.toml"; } > "$EM/c.new"
+  mv "$EM/c.new" "$EM/home/.config/kit/config.toml"
+fi
 cp "$PRIV" "$EM/home/.config/kit/privacy.local.toml"; chmod 600 "$EM/home/.config/kit/privacy.local.toml"
 ER="$W/e2e-repo"; rm -rf "$ER" "$ER.git"; git init -q --bare "$ER.git"; git init -q "$ER"; git -C "$ER" remote add origin "$ER.git"
 printf 'kit = 5\nvisibility = "public"\n' > "$ER/kit.toml"; echo "# e2e" > "$ER/README.md"; git -C "$ER" add -A
