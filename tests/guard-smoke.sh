@@ -867,7 +867,7 @@ seq 1 200000 | sed 's/.*/user&@corp-mail.test,row &/' > "$G8/big.csv"; git -C "$
 T0=$(date +%s%N); cmt "$G8"; MS=$(( ($(date +%s%N) - T0) / 1000000 ))
 eq   "G-F8: 200k-line email CSV commits (warn only)" "$CC" "0"
 [ "$MS" -lt 6000 ] && pass "G-F8: …in < 6s (${MS}ms)" || fail "G-F8: 200k R6 hits < 6s" "${MS}ms"
-has  "G-F8: …the rest is counted, not listed" "$CO" "more line(s)"
+has  "G-F8: …the rest is counted, not listed" "$CO" "… and 199995 more R6 email warning(s)"
 printf 'p '"$HP"'/testuser/a\n%.0s' $(seq 1 120) > "$G8/many.txt"; git -C "$G8" add many.txt; cmt "$G8"
 eq   "G-F8: capped block-level rule still blocks" "$CC" "1"
 git -C "$G8" reset -q many.txt; git -C "$G8" reset -q big.csv
@@ -1236,6 +1236,37 @@ FC="$(printf '%s\n' "$PO" | grep -o 'git fetch [^ ]* [^ ,;]*' | head -n 1)"
 psh "$P4" "" origin side
 eq   "J3: following the printed command, rebase onto FETCH_HEAD, push again → passes" "$PC" "0"
 eq   "J3: …the remote side has the rebased work" "$(git -C "$P3.git" rev-parse side)" "$(git -C "$P4" rev-parse side)"
+
+# ---- W1 (v5.0.2): WARN output is capped per rule (a history rewrite pushing intentional
+# fixtures printed ~66 R3b lines and buried the real signal); BLOCKs are all printed as before
+GW="$W/gw"; newrepo "$GW" public noproj
+for i in $(seq 1 50); do printf 'p '"$HP"'/fixture%s/x\n' "$i"; done > "$GW/w.txt"; git -C "$GW" add w.txt; cmt "$GW"
+eq   "W1: 50 R3b warnings only → commit passes" "$CC" "0"
+NW="$(printf '%s\n' "$CO" | grep -c 'KIT GUARD WARN \[R3b other-home-path\]')"
+[ "$NW" -le 5 ] && pass "W1: …at most 5 R3b lines printed ($NW)" || fail "W1: at most 5 R3b lines printed" "$NW"
+has  "W1: …the rest is counted" "$CO" "… and 45 more R3b other-home-path warning(s)"
+for i in $(seq 1 120); do printf 'q '"$HP"'/fixt%s/y\n' "$i"; done > "$GW/w2.txt"
+for i in $(seq 1 8); do printf 'b%s '"$HP"'/testuser/x\n' "$i"; done > "$GW/b.txt"; git -C "$GW" add w2.txt b.txt; cmt "$GW"
+eq   "W1: 8 R3 blocks + 120 R3b warnings → exit 1 (unchanged)" "$CC" "1"
+eq   "W1: …all 8 blocks printed" "$(printf '%s\n' "$CO" | grep -c 'KIT GUARD BLOCKED \[R3 local-path\]')" "8"
+NW="$(printf '%s\n' "$CO" | grep -c 'KIT GUARD WARN \[R3b other-home-path\]')"
+[ "$NW" -le 5 ] && pass "W1: …at most 5 R3b lines printed ($NW)" || fail "W1: at most 5 R3b lines with blocks" "$NW"
+has  "W1: …the count includes the scanner's own over-cap summary (120 staged)" "$CO" "… and 115 more R3b other-home-path warning(s)"
+git -C "$GW" reset -q b.txt; rm -f "$GW/b.txt"
+NA0="$(grep -c '"action":"allow-marker"' "$AUDIT" 2>/dev/null)"
+for i in $(seq 1 12); do printf 'm '"$HP"'/fx%s/z # kit-privacy: allow\n' "$i"; done > "$GW/m.txt"; git -C "$GW" add m.txt; cmt "$GW"
+eq   "W1: allow-marker warnings only → commit passes" "$CC" "0"
+NW="$(printf '%s\n' "$CO" | grep -c 'KIT GUARD WARN \[R3b allow-marker\]')"
+[ "$NW" -le 5 ] && pass "W1: …at most 5 allow-marker lines printed ($NW)" || fail "W1: allow-marker lines capped" "$NW"
+has  "W1: …the rest is counted" "$CO" "… and 7 more R3b allow-marker warning(s)"
+eq   "W1: …every consumed marker is still logged to audit.jsonl" "$(( $(grep -c '"action":"allow-marker"' "$AUDIT") - NA0 ))" "12"
+# the same through pre-push (the field case): one push of the fixture history
+rm -rf "$GW.git"; git init -q --bare "$GW.git"; git -C "$GW" remote add origin "$GW.git"
+psh "$GW" "" origin main
+eq   "W1: push of the fixture history passes (warnings only)" "$PC" "0"
+NW="$(printf '%s\n' "$PO" | grep -c 'KIT GUARD WARN \[R3b other-home-path\]')"
+[ "$NW" -le 5 ] && pass "W1: …push prints at most 5 R3b lines ($NW)" || fail "W1: push R3b lines capped" "$NW"
+has  "W1: …and counts the rest" "$PO" "more R3b other-home-path warning(s)"
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"

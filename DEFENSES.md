@@ -260,7 +260,10 @@ claude 啟動時的環境)。
   也一樣。新 ref(零 rsha)且 ls-remote 失敗 → 只用本地訊號。orphan / unborn 分支上的 commit 從本地分支 tip 讀 kit.toml。
 - 速度(Phase 4 實測):小 diff pre-commit 中位數 52ms 不含 gitleaks、270ms 含(final-review 修正後重測);
   7-commit push 320ms 含 gitleaks;8,000 行 email CSV(8k 個 R6 warn)< 1s;每條規則只列前 50 筆、
-  其餘計數成一行,20 萬行 email CSV 約 1.3s(review F8)。push 時 `git ls-remote` 上限 5 秒、
+  其餘計數成一行,20 萬行 email CSV 約 1.3s(review F8)。**輸出**(v5.0.2):WARN 每個規則標籤
+  (`R3b other-home-path`、`R3b allow-marker`…)只印前 5 行,其餘(含掃描器自己的「+N more」)併成一行
+  `… and N more <rule> warning(s)`——改寫歷史整段 force push 時,刻意的測試 fixture 不再用幾十行 R3b 淹掉
+  真正的訊號;BLOCK 照舊全列(總上限 40 行不變),結束碼、被用掉的 allow 標記寫 audit.jsonl 都不變。push 時 `git ls-remote` 上限 5 秒、
   失敗再重試一次 15 秒(最壞多等約 20 秒;`KIT_GUARD_LS_REMOTE_TIMEOUT` /
   `KIT_GUARD_LS_REMOTE_RETRY_TIMEOUT` 可調)、ssh BatchMode、不跳密碼提示;仍失敗就說原因,處理見上。
 - **本機專屬檔案(review F3)**:migrate 後 PROJECT.toml / LESSONS / plans / `.claude/` 已不追蹤,

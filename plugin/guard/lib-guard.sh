@@ -318,9 +318,14 @@ guard_fix_line() {  # $1 rule id → one fix line
 
 # guard_finish: print findings (capped), apply bypass, log, exit status
 GUARD_SHOW_MAX=40
+# WARN lines printed per rule tag ("R3b other-home-path", "R3b allow-marker", …); the rest of
+# that tag is counted in one "… and N more <tag> warning(s)" line (v5.0.2: a history rewrite
+# pushing intentional fixtures buried its BLOCKs under dozens of R3b lines). BLOCKs: no per-rule cap
+GUARD_WARN_PER_RULE=5
 guard_finish() {
     local f act tag where why nb=0 shown=0 total=${#G_FIND[@]}
-    local -A rules=()
+    local -A rules=() wshown=() wmore=()
+    local -a worder=()
     for f in "${G_FIND[@]}"; do
         IFS=$'\x1f' read -r act tag where why <<< "$f"
         [[ "$act" == BLOCK ]] && { nb=$((nb + 1)); rules[${tag%% *}]=1; }
@@ -328,6 +333,16 @@ guard_finish() {
     local hidden=0
     for f in "${G_FIND[@]}"; do
         IFS=$'\x1f' read -r act tag where why <<< "$f"
+        if [[ "$act" != BLOCK ]]; then
+            # the scanner's own "(+N more line(s))" summary and every line past the per-rule cap
+            # are counted, not printed
+            if [[ "$where" =~ ^\(\+([0-9]+)\ more ]] || [[ ${wshown[$tag]:-0} -ge $GUARD_WARN_PER_RULE ]]; then
+                [[ -n "${wmore[$tag]:-}" ]] || { wmore[$tag]=0; worder+=("$tag"); }
+                wmore[$tag]=$(( ${wmore[$tag]} + ${BASH_REMATCH[1]:-1} ))
+                continue
+            fi
+            wshown[$tag]=$(( ${wshown[$tag]:-0} + 1 ))
+        fi
         # "(+N more line(s))" summaries of the per-rule cap are always shown
         if [[ $shown -ge $GUARD_SHOW_MAX && "$where" != "(+"* ]]; then hidden=$((hidden + 1)); continue; fi
         shown=$((shown + 1))
@@ -335,6 +350,9 @@ guard_finish() {
         else echo "KIT GUARD WARN [$tag] $where — $why" >&2; fi
     done
     [[ $hidden -gt 0 ]] && echo "KIT GUARD: … and $hidden more finding(s)" >&2
+    for tag in "${worder[@]}"; do
+        echo "KIT GUARD WARN: … and ${wmore[$tag]} more $tag warning(s) (first $GUARD_WARN_PER_RULE shown)" >&2
+    done
     # consumed inline allow markers are never silent (review O9): one audit line each
     local nm=0
     for f in "${G_FIND[@]}"; do
