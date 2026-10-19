@@ -201,7 +201,7 @@ claude 啟動時的環境)。
 | R4 | `tier="always"` 個人字面值 + privacy emails(名稱 `email`) | block | block | 照跑 |
 | R5 | `tier="public-only"` 字面值 | block,除非 kit.toml `visibility="private"` | 同左(讀**推送樹**裡的 kit.toml) | 當公開處理(fail-closed)→ block |
 | R6 / R7 | 一般 email / `/tmp/claude-<uid>/` | warn | warn | 照跑 |
-| R8 | gitleaks 不在 PATH 或崩潰 | warn(大字橫幅) | **block** | 照跑 |
+| R8 | gitleaks 找不到(`config.toml` 的 `tools_dir` / `gitleaks_path`;**從不看 PATH**)或崩潰 | warn(大字橫幅) | **block** | 照跑 |
 
 - 推送範圍 = 本地 sha 減去**推送目標實際已有**的 commit(`git ls-remote <url>` +
   舊值);remote-tracking refs **不採信**(`remote set-url`、多個 pushurl 鏡像、
@@ -230,6 +230,11 @@ claude 啟動時的環境)。
 - 審計:每次 block / bypass / 被用掉的 `kit-privacy: allow` 寫 `~/.local/state/kit/guard/audit.jsonl`。
 - 拿掉 kit.toml 不會關掉 R2:commit 時從 HEAD 讀 kit.toml(並 warn),push 時遠端舊 tip / 範圍邊界 /
   範圍內任何 commit 有 kit.toml 就仍算 kit repo,而且「移除 kit.toml」本身 block(只有 user bypass 放行)。
+  推送 tip 沒有 kit.toml 時還會看**任何本地分支 tip** 與推送目標**公告的** `HEAD` / `refs/heads/*` /
+  `refs/tags/*`(review R3-2:orphan 分支、不相干歷史);本地沒有的公告物件先 `git fetch` 進
+  `refs/kit-guard/tmp/<pid>/`(非互動、`KIT_GUARD_FETCH_TIMEOUT` 預設 30 秒、用完即刪 ref),
+  被覆蓋的遠端 tip 有 kit.toml = 移除 → block;公告了卻抓不下來 → **fail closed**
+  `[R2 kit-status-unknown]`(user bypass 放行)。orphan / unborn 分支上的 commit 從本地分支 tip 讀 kit.toml。
 - 速度(Phase 4 實測):小 diff pre-commit 中位數 52ms 不含 gitleaks、270ms 含(final-review 修正後重測);
   7-commit push 320ms 含 gitleaks;8,000 行 email CSV(8k 個 R6 warn)< 1s;每條規則只列前 50 筆、
   其餘計數成一行,20 萬行 email CSV 約 1.3s(review F8)。push 時 `git ls-remote` 上限 5 秒、
@@ -240,7 +245,11 @@ claude 啟動時的環境)。
   `~/.local/state/kit/localfiles/<repo-id>/files/`(git 換檔是 unlink + 新建,store 那份保留內容,
   包含上次快照後的就地修改);post-checkout / post-merge / post-rewrite shim 把被刪的放回(沒有
   store 時用前一個 commit 的 blob,只限 owner 內容、不含 `.claude/` 的 v4 kit 檔),post-commit /
-  `kit migrate` / `kit guard status` / session start 更新快照。
+  `kit migrate` / `kit guard status` / session start 更新快照。symlink 以 symlink 存、以 symlink 回;
+  超過 8 MiB 或第 2000 個之後的檔**不進 store**,列在 `<store>/omitted`,清單變動時、每次
+  `kit guard status` 與 `kit migrate` 都印 `NOT protected` 警告(review R3-3);store 根目錄 700。
+  工作樹沒了、HEAD 也不追蹤的 store 檔 = owner 刪的 → 移到 `<store>/trash/`(一代),checkout
+  不會再放回(review N2);還原訊息附 store 那份的時間(review N4)。
 
 **Bypass(user-only)**:`kit guard bypass "<reason>"` 只在有 TTY 的終端機執行
 (agent 的非互動 shell 沒有 TTY → 拒絕);寫 `bypass-<repo-id>` 並記一筆
@@ -256,9 +265,12 @@ commit/push、`env -i` / `env -` / `env -u HOME` / `--ignore-environment` / `--u
 重導向目標、或寫入型指令(rm/mv/touch/truncate/chmod/tee:任一運算元;cp/ln/install/rsync:
 目的地;sed/perl/ruby:僅 `-i`;dd `of=`;`--output=`)的運算元是 guard 狀態檔、git-hooks shim、
 git config 檔、`privacy.local.toml`、kit `config.toml` 或 `plugin/guard/`——只讀(`sed -n`、
-`cat … | sed`)與「同一行別處提到」不算(review F1/F6/F7)。`PATH=` 不再攔:gitleaks 走
-`config.toml tools_dir`(預設 `~/.local/bin`)優先於 PATH 的單一解析器(guard、session start、
-doctor、`kit guard status` 共用)。protect-paths 對 Edit/Write 到 `~/.config/kit`、
+`cat … | sed`)與「同一行別處提到」不算(review F1/F6/F7),`plugin/hooks/` 也算 guard 輸入
+(review R3-9)。`PATH=` 不攔:gitleaks / osv-scanner 的單一解析器(guard、session start、doctor、
+`kit guard status` 共用)**只讀 config.toml**——`tools_dir/<name>`(預設 `~/.local/bin`),否則
+`kit setup` / `kit doctor --install` 驗過版本後記下的絕對路徑 `gitleaks_path` / `osv_scanner_path`;
+**從不看呼叫端的 PATH**(review R3-1:`PATH=/tmp/x:$PATH git push` 配一支回 0 的假 gitleaks
+曾讓 R1 失效);相對路徑一律忽略;找不到 → R8。protect-paths 對 Edit/Write 到 `~/.config/kit`、
 `<state>/guard`、git config 檔轉 ask。
 
 **已知繞道與殘餘(誠實條款)**:
@@ -288,6 +300,10 @@ doctor、`kit guard status` 共用)。protect-paths 對 Edit/Write 到 `~/.confi
      `cd ~/.config/kit && sed -i … config.toml`(相對檔名)、編輯器等仍能改
      `privacy.local.toml`、`config.toml`、`plugin/guard/*.sh`、git config。
    - 行尾 `kit-privacy: allow` 模型可以自己寫,但只豁免 warn 級規則,且每次都 WARN + audit。
+   - **PATH 上的冒牌 `git` / `bash` / coreutils**(review R3-1 殘餘):gitleaks 已不從 PATH 解析,
+     但 `PATH=/tmp/x:$PATH git push` 裡的 `git` 本身、shim 的 `#!/usr/bin/env bash`、guard 用的
+     awk/sed/grep 仍從 PATH 找——冒牌 `git` 可以自己呼叫真的 `git push --no-verify`,與「把
+     `--no-verify` 寫進腳本檔再執行」同一類(要先寫一支可執行的冒牌檔),不另設防。
 8. 權限基線殘餘(§13 #8):`git log --output=`、`git diff --output=` 可寫檔,
    被 `Bash(git log *)` / `Bash(git diff *)` 放行——低風險(只寫文字檔),接受。基線一律
    「空格 + `*`」:無空格的 `Bash(git diff*)` 是前綴比對,會連 `git difftool --extcmd=` 一起放行
@@ -300,12 +316,25 @@ doctor、`kit guard status` 共用)。protect-paths 對 Edit/Write 到 `~/.confi
 11. **本機專屬檔案保護的縫**(review F3 殘餘):hard link 只保住「就地」修改;用 rename 存檔的
    編輯器(`sed -i`、原子存檔)在上次快照後、下一次破壞性 checkout 前的修改會遺失(回來的是
    較舊的 store 版本);repo 與 `~/.local/state` 不在同一個檔案系統時只能複製,同一個縫。
-   `git reset --hard <舊>`、`git stash`、`git clean` 不觸發 post-checkout——內容留在 store,
-   `kit guard status` 會列出「工作樹缺、store 有」的檔案,要自己複製回來。回到舊 ref 再回來時,
-   遷移後被 owner 刪掉的 plan 可能重新出現(未追蹤、已 ignore)。根治是改寫歷史(design §12 步驟 6)。
+   `git reset --hard <舊>`、`git stash`、`git clean` 不觸發 post-checkout——內容在下一次快照時移進
+   `<store>/trash/`,`kit guard status` 會列出來,要自己複製回來(trash 只留一代)。
+   **刪掉的 plan 復活**(review N2):快照時「工作樹沒了、HEAD 不追蹤」的檔移進 trash、不再放回;
+   但刪掉後**沒有任何快照點**(commit、checkout、`kit guard status`、session start)就直接 checkout
+   遷移前的 ref 再回來,那份 plan 仍會從 store 回來(未追蹤、已 ignore,不會被推)。
+   **rename 存檔的縫**(review N4):還原訊息會印 store 那份的時間(`as of …`),比那更晚、用 rename
+   存的修改不在裡面(`<store>/prev/` 留前一版);沒有每個 prompt 都快照(成本)。
+   超過 8 MiB / 第 2000 個之後的檔不受保護,只有警告(review R3-3)。根治是改寫歷史(design §12 步驟 6)。
 12. guard-preserve 已知誤擋:`chmod` 算寫入(`chmod -x` 會讓 shim 靜默失效),所以模型照 doctor
    建議跑 `chmod 600 privacy.local.toml` 也會被 deny(交給 user);在 kit repo 自己的開發裡,
-   `sed -i plugin/guard/*.sh` 被 deny(那份就是線上的 guard),改用 Edit(轉 ask)。
+   `sed -i plugin/guard/*.sh`、`sed -i plugin/hooks/*.sh` 被 deny(那份就是線上的 guard / hook),改用 Edit(轉 ask)。
+13. **合法移除 kit.toml 之後**(review N3):user bypass 放行的那次移除留在歷史裡;之後推到**新的**
+   remote(或 ls-remote 失敗、改掃完整歷史時),範圍含那個移除 commit → 每次都 `[R2 kit.toml-removed]`
+   block,要再 bypass 一次;還留著 kit.toml 的本地分支也讓這個 repo 繼續被當成 kit repo(R2 照套)。
+   少見、有 bypass,不另設例外。
+14. **kit 身分判斷的縫**(review R3-2 殘餘):`git ls-remote` 失敗(離線、要密碼)時看不到遠端公告的
+   ref,只剩本地訊號(本地分支 tip、範圍、工作樹 kit.toml)——全新 repo 在離線狀態推不相干歷史
+   到沒抓過的 kit remote 不會被認出(通常推送本身也會失敗);`refs/pull/*` 等 review 命名空間與
+   remote-tracking refs 不當 kit 訊號;為判斷而抓下的遠端物件留在本地物件庫(下次不用再抓)。
 
 ## 四、誠實條款:這套 harness 的能力極限
 
