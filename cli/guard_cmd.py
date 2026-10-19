@@ -105,8 +105,11 @@ def status() -> int:
     from cli.setup_cmd import HOOKS
     missing = [h for h in HOOKS if not os.access(hooks_dir / h, os.X_OK)]
     print("shims: " + (f"missing {', '.join(missing)}" if missing else f"{len(HOOKS)} in {want}"))
-    gl = paths.find_tool("gitleaks")   # the guard's resolver: tools_dir, then a recorded gitleaks_path (never PATH)
-    print(f"gitleaks: {gl or 'MISSING — commits warn, pushes are blocked (kit doctor --install)'}")
+    # the guard's resolver: tools_dir, then a recorded gitleaks_path (never PATH), sha256-checked (R4-1)
+    gl, state = paths.tool_state("gitleaks")
+    why = {"replaced": f"REPLACED — {gl} is not the recorded gitleaks_sha256",
+           "unrecorded": f"UNVERIFIED — {gl} has no gitleaks_sha256 recorded"}.get(state, "MISSING")
+    print(f"gitleaks: {gl if state == 'ok' else why + ' — commits warn, pushes are blocked (kit doctor --install)'}")
     pp = paths.privacy_path()
     if pp.is_file():
         mode = stat.S_IMODE(pp.stat().st_mode)

@@ -152,9 +152,24 @@ guard_fetch_advertised() {
     return 0
 }
 
-guard_gitleaks_bin() {  # config.toml tools_dir (default ~/.local/bin) or recorded gitleaks_path — never PATH (I4, O3, R3-1)
-    kit_tool_path gitleaks "$CFG_DIR"
+# guard_gitleaks_resolve: GL_BIN = config.toml tools_dir/gitleaks (default ~/.local/bin) or the
+# recorded gitleaks_path — never PATH (I4, O3, R3-1) — whose sha256 equals the recorded
+# gitleaks_sha256 (R4-1); else rc 1 and GL_STATUS says why. Hashed once per hook run.
+guard_gitleaks_resolve() {
+    if [[ -z "${GL_RESOLVED:-}" ]]; then
+        GL_RESOLVED=1 GL_BIN=""
+        if kit_tool_resolve gitleaks "$CFG_DIR"; then GL_BIN="$KIT_TOOL"
+        else
+            case "$KIT_TOOL_WHY" in
+                replaced) GL_WHY="gitleaks binary replaced — its sha256 is not the gitleaks_sha256 recorded in config.toml by kit setup / kit doctor --install; restore it with kit doctor --install" ;;
+                unrecorded) GL_WHY="gitleaks found but no gitleaks_sha256 recorded in config.toml — the guard runs only a hash-verified gitleaks; run kit doctor --install" ;;
+                *) GL_WHY="gitleaks not in $(kit_tools_dir "$CFG_DIR") and no gitleaks_path recorded in config.toml (the guard never uses PATH)" ;;
+            esac
+        fi
+    fi
+    [[ -n "$GL_BIN" ]] || { GL_STATUS="$GL_WHY"; return 1; }
 }
+guard_gitleaks_bin() { guard_gitleaks_resolve && printf '%s\n' "$GL_BIN"; }
 
 # guard_gitleaks_stream <stream-file> <gitleaksignore-file|"">
 # R1 over the guard's OWN hardened added-line stream via `gitleaks stdin`
@@ -167,7 +182,8 @@ guard_gitleaks_bin() {  # config.toml tools_dir (default ~/.local/bin) or record
 # Return 0 = scanned, 2 = gitleaks missing / crashed (caller applies R8).
 guard_gitleaks_stream() {
     local stream="$1" ign="${2:-}" gl rc td
-    gl="$(guard_gitleaks_bin)" || { GL_STATUS="gitleaks not in $(kit_tools_dir "$CFG_DIR") and no gitleaks_path recorded in config.toml (the guard never uses PATH)"; return 2; }
+    guard_gitleaks_resolve || return 2
+    gl="$GL_BIN"
     td="$(mktemp -d "${TMPDIR:-/tmp}/kit-guard-gl.XXXXXX")" || { GL_STATUS="mktemp failed"; return 2; }
     mkdir -p "$td/noignore"
     awk -v M="$td/meta" -v C="$td/content" '{

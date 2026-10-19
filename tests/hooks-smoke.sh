@@ -333,15 +333,23 @@ run_hook "$SS" "{\"session_id\":\"${SID_PREFIX}-s5d\",\"cwd\":\"${R1}\"}" full G
 ss_ctx; assert_contains "s-v5-2: guard line sees the global hooksPath" "$CTX" "- Guard: hooksPath=set gitleaks="
 # review R3-1: a gitleaks that is only on PATH is NOT the guard's (PATH is caller-controlled)
 assert_contains "s-v5-2: PATH-only gitleaks is not used (R3-1)" "$CTX" "gitleaks=MISSING"
-mkdir -p "$WORK/kc13b"; printf 'gitleaks_path = "%s"\n' "$WORK/fakebin/gitleaks" > "$WORK/kc13b/config.toml"
+FAKEGL_SHA="$(sha256sum < "$WORK/fakebin/gitleaks" | cut -d' ' -f1)"
+mkdir -p "$WORK/kc13b"; printf 'gitleaks_path = "%s"\ngitleaks_sha256 = "%s"\n' "$WORK/fakebin/gitleaks" "$FAKEGL_SHA" > "$WORK/kc13b/config.toml"
 run_hook "$SS" "{\"session_id\":\"${SID_PREFIX}-s5d1\",\"cwd\":\"${R1}\"}" full GIT_CONFIG_GLOBAL="$WORK/gitcfg-hooks" KIT_CONFIG_HOME="$WORK/kc13b"
 ss_ctx; assert_contains "s-v5-2: a recorded absolute gitleaks_path is used (R3-1)" "$CTX" "- Guard: hooksPath=set gitleaks=ok"
 # review O3/F13: gitleaks in config.toml tools_dir (off PATH) is found like the guard finds it
 NOGLP=""; IFS=: read -ra _pp <<< "$PATH"; for d in "${_pp[@]}"; do [ -x "$d/gitleaks" ] || NOGLP="${NOGLP:+$NOGLP:}$d"; done
 mkdir -p "$WORK/kc13" "$WORK/tooldir13"; cp "$WORK/fakebin/gitleaks" "$WORK/tooldir13/gitleaks"
-printf 'tools_dir = "%s"\n' "$WORK/tooldir13" > "$WORK/kc13/config.toml"
+printf 'tools_dir = "%s"\ngitleaks_sha256 = "%s"\n' "$WORK/tooldir13" "$FAKEGL_SHA" > "$WORK/kc13/config.toml"
 run_hook "$SS" "{\"session_id\":\"${SID_PREFIX}-s5d2\",\"cwd\":\"${R1}\"}" full GIT_CONFIG_GLOBAL="$WORK/gitcfg-hooks" PATH="$NOGLP" KIT_CONFIG_HOME="$WORK/kc13"
 ss_ctx; assert_contains "s-v5-2: gitleaks found via tools_dir" "$CTX" "gitleaks=ok"
+# review R4-1: only a binary whose sha256 equals the recorded gitleaks_sha256 counts
+printf '#!/bin/sh\nexit 0\n# replaced\n' > "$WORK/tooldir13/gitleaks"
+run_hook "$SS" "{\"session_id\":\"${SID_PREFIX}-s5d4\",\"cwd\":\"${R1}\"}" full GIT_CONFIG_GLOBAL="$WORK/gitcfg-hooks" PATH="$NOGLP" KIT_CONFIG_HOME="$WORK/kc13"
+ss_ctx; assert_contains "s-v5-2: a replaced tools_dir gitleaks is reported REPLACED (R4-1)" "$CTX" "gitleaks=REPLACED"
+printf 'tools_dir = "%s"\n' "$WORK/tooldir13" > "$WORK/kc13/config.toml"
+run_hook "$SS" "{\"session_id\":\"${SID_PREFIX}-s5d5\",\"cwd\":\"${R1}\"}" full GIT_CONFIG_GLOBAL="$WORK/gitcfg-hooks" PATH="$NOGLP" KIT_CONFIG_HOME="$WORK/kc13"
+ss_ctx; assert_contains "s-v5-2: no gitleaks_sha256 recorded → UNVERIFIED (R4-1)" "$CTX" "gitleaks=UNVERIFIED"
 run_hook "$SS" "{\"session_id\":\"${SID_PREFIX}-s5d3\",\"cwd\":\"${R1}\"}" full GIT_CONFIG_GLOBAL="$WORK/gitcfg-hooks" PATH="$NOGLP"
 ss_ctx; assert_contains "s-v5-2: …MISSING without it" "$CTX" "gitleaks=MISSING"
 : > "$WORK/envfile"
@@ -1622,6 +1630,25 @@ bgp ""   "PATH= before git push allowed (the guard never resolves gitleaks from 
 bgp deny "sed -i on plugin/hooks/lib.sh denied"                       "sed -i 's/foo/bar/' plugin/hooks/lib.sh"
 bgp deny "redirect into plugin/hooks/tool-breaker.sh denied"          'echo "exit 0" > plugin/hooks/tool-breaker.sh'
 bgp ""   "reading plugin/hooks/lib.sh allowed"                        'sed -n 1,20p plugin/hooks/lib.sh'
+# review R4-1 (Fable N7): the scanner binaries the guard runs are guard inputs too —
+# ~/.local/bin/{gitleaks,osv-scanner}, config.toml tools_dir/… and recorded *_path
+bgp deny "cp a stub onto ~/.local/bin/gitleaks denied"                'cp /tmp/fake/gitleaks ~/.local/bin/gitleaks'
+bgp deny "redirect into ~/.local/bin/gitleaks denied"                 "printf '#!/bin/sh\\nexit 0\\n' > ~/.local/bin/gitleaks"
+bgp deny "install -m755 onto \$HOME/.local/bin/gitleaks denied"      'install -m755 fake $HOME/.local/bin/gitleaks'
+bgp deny "ln -sf /bin/true over ~/.local/bin/gitleaks denied"         'ln -sf /bin/true ~/.local/bin/gitleaks'
+bgp deny "chmod -x ~/.local/bin/gitleaks denied"                      'chmod -x ~/.local/bin/gitleaks'
+bgp deny "mv onto ~/.local/bin/osv-scanner denied"                    'mv /tmp/x ~/.local/bin/osv-scanner'
+bgp ""   "running ~/.local/bin/gitleaks allowed"                      '~/.local/bin/gitleaks version'
+bgp ""   "copying ~/.local/bin/gitleaks elsewhere allowed"            'cp ~/.local/bin/gitleaks /tmp/gl-copy'
+bgp ""   "sha256sum of ~/.local/bin/gitleaks allowed"                 'sha256sum ~/.local/bin/gitleaks'
+mkdir -p "$FAKE_HOME/.config/kit"
+printf 'tools_dir = "/opt/kit-tools"\ngitleaks_path = "%s/scan/gl"\n' "$FAKE_HOME" > "$FAKE_HOME/.config/kit/config.toml"
+bgp deny "cp onto config.toml tools_dir/gitleaks denied"              'cp fake /opt/kit-tools/gitleaks'
+bgp deny "ln -sf onto config.toml tools_dir/osv-scanner denied"       'ln -sf /bin/true /opt/kit-tools/osv-scanner'
+bgp deny "cp onto the recorded gitleaks_path (as ~/…) denied"         'cp fake ~/scan/gl'
+bgp deny "install onto the recorded gitleaks_path (absolute) denied"  "install fake $FAKE_HOME/scan/gl"
+bgp ""   "writing a sibling of the recorded path allowed"             'cp fake ~/scan/glow'
+rm -rf "$FAKE_HOME/.config/kit"
 bgp deny "removing a kit git-hooks shim denied"                       'rm ~/.config/kit/git-hooks/pre-commit'
 bgp deny "moving a kit git-hooks shim denied"                         'mv ~/.config/kit/git-hooks/pre-push /tmp/x'
 bgp deny "sed -i on ~/.gitconfig denied"                              "sed -i 's/hooksPath/x/' ~/.gitconfig"

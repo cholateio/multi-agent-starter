@@ -39,6 +39,11 @@ class ToolPin:
     member: str | None               # file inside the archive
     member_sha256: str | None = None  # of the extracted binary (cross-check)
 
+    @property
+    def binary_sha256(self) -> str:
+        """sha256 of the installed binary — what config.toml <name>_sha256 records (review R4-1)."""
+        return self.member_sha256 if self.archive == "tar.gz" else self.sha256
+
 
 TOOL_PINS: dict[str, ToolPin] = {
     # sha256 from gitleaks_8.30.1_checksums.txt, fetched 2026-10-19; member_sha256 = the
@@ -62,11 +67,7 @@ class PinMismatch(Exception):
 
 
 def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    return paths.sha256_file(path)
 
 
 def _download(url: str, dest: Path) -> None:
@@ -233,10 +234,20 @@ def run_checks() -> Report:
         rep.add("FAIL", "repo hooksPath", f"this repo sets core.hooksPath = {local_hp}: the global kit guard does NOT "
                 "run here — git config --local --unset core.hooksPath (chain your hooks from .git/hooks)")
 
-    # tools
+    # tools — the guard runs only a binary whose sha256 equals the recorded <name>_sha256 (R4-1)
     for name in ("gitleaks", "osv-scanner"):
-        v = tool_version(name)
         pin = TOOL_PINS[name]
+        exe, state = paths.tool_state(name)
+        if state == "replaced":
+            rep.add("FAIL", name, f"{exe}: sha256 is not the {paths.tool_sha_key(name)} recorded in "
+                    f"{paths.config_path()} — the binary was replaced; the guard treats it as missing "
+                    "(pushes blocked) — run: kit doctor --install")
+            continue
+        if state == "unrecorded":
+            rep.add("WARN", name, f"{exe} found but no {paths.tool_sha_key(name)} recorded — the guard runs "
+                    "only a hash-verified binary — run: kit doctor --install")
+            continue
+        v = tool_version(name)
         if v is None:
             onpath = shutil.which(name)
             if onpath:
@@ -245,10 +256,10 @@ def run_checks() -> Report:
             else:
                 rep.add("WARN", name, f"not in {paths.tools_dir()} and no {paths.tool_key(name)} recorded "
                         f"(pinned {pin.version}) — run: kit doctor --install")
-        elif v != pin.version:
-            rep.add("WARN", name, f"version {v or 'unknown'} != pinned {pin.version} — run: kit doctor --install")
+        elif paths.load_config().get(paths.tool_sha_key(name)) != pin.binary_sha256:
+            rep.add("WARN", name, f"{v} — sha256 recorded by hand, not the pinned {pin.version} build")
         else:
-            rep.add("OK", name, v)
+            rep.add("OK", name, f"{v} (sha256 verified)")
     for name, why in (("gh", "audit GitHub checks"), ("jq", "kit hooks are inert without jq")):
         rep.add("OK" if shutil.which(name) else "WARN", name,
                 "on PATH" if shutil.which(name) else f"not on PATH ({why})")
@@ -307,32 +318,66 @@ def run_checks() -> Report:
     return rep
 
 
+def _pinned_on_path(name: str, want: str, log=print) -> str | None:
+    """The first <name> on PATH whose sha256 equals the pin — never one picked by its
+    version output (review R4-1: a stub that prints the pinned version is not the pin).
+    Every other <name> met on the way is named (ignored)."""
+    seen = set()
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        if not d:
+            continue
+        c = Path(os.path.abspath(d)) / name
+        if c in seen:
+            continue
+        seen.add(c)
+        try:
+            if not (c.is_file() and os.access(c, os.X_OK)):
+                continue
+            if _sha256(c) == want:
+                return str(c)
+        except OSError:
+            continue
+        log(f"[note] {c} is not the pinned {name} build (sha256 differs) — ignored, not recorded")
+    return None
+
+
 def install_missing(bin_dir: Path, log=print) -> bool:
-    """Install every pinned tool that is missing or at the wrong version. True = all good."""
+    """Make every pinned tool present AND hash-recorded. True = all good.
+
+    Trust is content, never a version string (review R4-1): bin_dir/<name> counts only when
+    its sha256 equals the pin; else a PATH binary with exactly the pinned sha256 is recorded
+    as <name>_path; else the sha256-verified download is installed. Every route records
+    <name>_sha256 = the pin, which the guard checks before each run."""
     ok = True
     supported, plat = platform_ok()
     for name, pin in TOOL_PINS.items():
+        want = pin.binary_sha256
         here = bin_dir / name
-        v = tool_version(name, str(here)) if here.exists() else tool_version(name)
-        if v == pin.version:
-            log(f"[skip] {name} {pin.version} already installed")
+        try:
+            here_ok = here.is_file() and os.access(here, os.X_OK) and _sha256(here) == want
+        except OSError:
+            here_ok = False
+        if here_ok:
+            paths.set_config_value(paths.tool_sha_key(name), want)
+            log(f"[skip] {name} {pin.version} already installed at {here} (sha256 verified)")
             continue
-        # the pinned version already on PATH: record its absolute path (the guard never
-        # searches PATH at hook time — review R3-1) instead of downloading a second copy
-        onpath = shutil.which(name)
-        if onpath and tool_version(name, os.path.abspath(onpath)) == pin.version:
-            paths.set_config_value(paths.tool_key(name), os.path.abspath(onpath))
-            log(f"[skip] {name} {pin.version} found at {os.path.abspath(onpath)} — recorded as "
+        onpath = _pinned_on_path(name, want, log)
+        if onpath:
+            paths.set_config_value(paths.tool_key(name), onpath)
+            paths.set_config_value(paths.tool_sha_key(name), want)
+            log(f"[skip] {name} {pin.version} found at {onpath} (sha256 = the pin) — recorded as "
                 f"{paths.tool_key(name)} in {paths.config_path()}")
             continue
         if not supported:
             ok = False
             log(f"[FAIL] {name}: kit doctor --install only ships linux/x86_64 binaries (this is {plat}) — install "
-                f"{name} {pin.version} yourself (e.g. your package manager) and put it on PATH or in {bin_dir}")
+                f"{name} {pin.version} yourself, then record it by hand in {paths.config_path()}: "
+                f'{paths.tool_key(name)} = "<absolute path>" and {paths.tool_sha_key(name)} = "<its sha256>"')
             continue
         try:
             dest = install_tool(pin, bin_dir)
-            log(f"[done] {name} {pin.version} → {dest} (sha256 verified)")
+            paths.set_config_value(paths.tool_sha_key(name), want)
+            log(f"[done] {name} {pin.version} → {dest} (sha256 verified, recorded)")
         except PinMismatch as e:
             ok = False
             log(f"[FAIL] {e}")

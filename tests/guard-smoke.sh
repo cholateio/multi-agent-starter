@@ -228,6 +228,8 @@ for h in pre-commit pre-push; do printf '#!/usr/bin/env bash\nexec bash "%s/%s.s
 NOGL_PATH=""; IFS=: read -ra _pp <<< "$PATH"
 for d in "${_pp[@]}"; do [ -x "$d/gitleaks" ] || NOGL_PATH="${NOGL_PATH:+$NOGL_PATH:}$d"; done
 mkdir -p "$W/glbin"
+# the pinned osv-scanner next to it, so kit setup in section E records it instead of downloading
+[ -n "${KIT_TOOLS:-}" ] && [ -x "${KIT_TOOLS}/osv-scanner" ] && ln -sf "$KIT_TOOLS/osv-scanner" "$W/glbin/osv-scanner"
 if [ -n "$GITLEAKS" ]; then ln -sf "$GITLEAKS" "$W/glbin/gitleaks"
 else printf '#!/bin/sh\nexit 0\n' > "$W/glbin/gitleaks"; chmod +x "$W/glbin/gitleaks"; fi   # no real gitleaks: a clean stand-in (R1 assertions SKIP)
 GL_PATH="$W/glbin:$NOGL_PATH"
@@ -243,7 +245,12 @@ glsel() {
     "$GL_PATH") sel="$W/glbin" ;; "$NOGL_PATH") sel="$W/nogl" ;; "$W/crashgl:$NOGL_PATH") sel="$W/crashgl" ;;
   esac
   mkdir -p "$(dirname "$cfg")"; touch "$cfg"
-  { [ -n "$sel" ] && printf 'tools_dir = "%s"\n' "$sel"; grep -v '^tools_dir' "$cfg"; } > "$cfg.new"; mv "$cfg.new" "$cfg"
+  # …and, like kit setup / doctor --install, the binary's sha256 (review R4-1: the guard runs
+  # only a gitleaks whose sha256 equals config.toml gitleaks_sha256): the selected one, else glbin's
+  local shaf="$W/glbin/gitleaks"; [ -n "$sel" ] && [ -x "$sel/gitleaks" ] && shaf="$sel/gitleaks"
+  local sha; sha="$(sha256sum < "$shaf" | cut -d' ' -f1)"
+  { [ -n "$sel" ] && printf 'tools_dir = "%s"\n' "$sel"; printf 'gitleaks_sha256 = "%s"\n' "$sha"
+    grep -v -e '^tools_dir' -e '^gitleaks_sha256' "$cfg"; } > "$cfg.new"; mv "$cfg.new" "$cfg"
 }
 
 # newrepo <dir> [visibility|none]: repo with an initial commit made WITHOUT hooks
@@ -614,7 +621,8 @@ echo "--- E. end-to-end (kit setup, global hooksPath, bare remote)"
 EM="$W/e2e"; mkdir -p "$EM/home" "$EM/fakebin"
 printf '#!/bin/sh\ncase "$*" in "--version") echo "2.1.303 (Claude Code)";; *"--json"*) echo "[]";; esac\nexit 0\n' > "$EM/fakebin/claude"; chmod +x "$EM/fakebin/claude"
 : > "$EM/gitconfig"
-e2e() { env HOME="$EM/home" KIT_CONFIG_HOME="$EM/home/.config/kit" KIT_STATE_HOME="$EM/home/.local/state/kit" \
+e2e() { env https_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 \
+          HOME="$EM/home" KIT_CONFIG_HOME="$EM/home/.config/kit" KIT_STATE_HOME="$EM/home/.local/state/kit" \
           GIT_CONFIG_GLOBAL="$EM/gitconfig" XDG_CONFIG_HOME="$EM/home/.config" PATH="$EM/fakebin:$GL_PATH" "$@"; }
 SETUP_OUT="$(e2e python3 "$KIT_ROOT/bin/kit" setup --bin-dir "$EM/home/.local/bin" 2>&1)"
 eq   "E0: kit setup sets the global hooksPath" "$(GIT_CONFIG_GLOBAL="$EM/gitconfig" git config --global core.hooksPath)" "$EM/home/.config/kit/git-hooks"
@@ -972,6 +980,61 @@ psh "$H2" "" -f origin feat2
 eq   "H-R3-2: force-push in a kit repo passes" "$PC" "0"
 rm -rf "$W/h8"; git init -q "$W/h8"; echo n > "$W/h8/n"; git -C "$W/h8" add n; cmt "$W/h8"
 eq   "H-R3-2: first commit in a brand-new non-kit repo passes" "$CC" "0"
+
+# ============================================================ I. round-4 review fixes
+echo "--- I. round-4 review fixes"
+# R4-1: scanner trust = content hash. (a) kit setup with a version-spoofing stub FIRST on PATH
+# never records it; (b) a stub copied / linked over the hash-recorded tools_dir binary is R8
+# "binary replaced" (push blocked), and never runs
+mkdir -p "$W/spoof"; printf '#!/bin/sh\ntouch "%s/spoof-ran"\necho 8.30.1\nexit 0\n' "$W" > "$W/spoof/gitleaks"; chmod +x "$W/spoof/gitleaks"
+I1="$W/i1home"; rm -rf "$I1"; mkdir -p "$I1/home"; : > "$I1/gitconfig"; rm -f "$W/spoof-ran"
+i1() { env https_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 HOME="$I1/home" KIT_CONFIG_HOME="$I1/home/.config/kit" \
+         KIT_STATE_HOME="$I1/home/.local/state/kit" KIT_CACHE_HOME="$I1/home/.cache/kit" GIT_CONFIG_GLOBAL="$I1/gitconfig" \
+         XDG_CONFIG_HOME="$I1/home/.config" PATH="$EM/fakebin:$W/spoof:$GL_PATH" "$@"; }
+I1OUT="$(i1 python3 "$KIT_ROOT/bin/kit" setup 2>&1)"
+I1CFG="$(cat "$I1/home/.config/kit/config.toml" 2>/dev/null)"
+lacks "H-R4-1a: kit setup never records a version-spoofing PATH stub" "$I1CFG" "$W/spoof/gitleaks"
+has   "H-R4-1a: …and says it is not the pinned build" "$I1OUT" "not the pinned gitleaks"
+I1DOC="$(i1 python3 "$KIT_ROOT/bin/kit" doctor --install 2>&1)"
+lacks "H-R4-1a: kit doctor --install does not record it either" "$(cat "$I1/home/.config/kit/config.toml")" "$W/spoof/gitleaks"
+if [ -n "$GITLEAKS" ]; then
+  has "H-R4-1a: …the real pinned gitleaks (same sha256) is recorded instead" "$(cat "$I1/home/.config/kit/config.toml")" "gitleaks_sha256 = \"$(sha256sum < "$GITLEAKS" | cut -d' ' -f1)\""
+  I1R="$W/i1repo"; rm -rf "$I1R"; git init -q "$I1R"; printf 'kit = 5\nvisibility = "public"\n' > "$I1R/kit.toml"
+  printf 'aws_key = "%s"\n' "$FAKE_AWS" > "$I1R/k.txt"; git -C "$I1R" add -A
+  CO="$(cd "$I1R" && i1 git commit -q -m t 2>&1)"; CC=$?
+  eq  "H-R4-1a: commit with an AWS key after that setup → blocked by R1" "$CC" "1"
+  has "H-R4-1a: …R1" "$CO" "[R1 secret] k.txt:1"
+else skip "H-R4-1a: real gitleaks recorded by setup" "no gitleaks"; fi
+absent_f "H-R4-1a: the spoofing stub never ran (setup, doctor, commit)" "$W/spoof-ran"
+# (b) replaced in place
+mkdir -p "$W/trusted"; cp "$W/glbin/gitleaks" "$W/trusted/gitleaks"; chmod +x "$W/trusted/gitleaks"
+I2="$W/i2"; pushrepo "$I2" none noproj
+printf 'aws_key = "%s"\n' "$FAKE_AWS" > "$I2/k.txt"; git -C "$I2" add k.txt
+i2sel() { glsel default; grep -v '^tools_dir' "$KIT_CONFIG_HOME/config.toml" > "$W/c.new"
+          { printf 'tools_dir = "%s"\n' "$W/trusted"; cat "$W/c.new"; } > "$KIT_CONFIG_HOME/config.toml"; }
+i2sel
+cp "$W/spoof/gitleaks" "$W/trusted/gitleaks"; rm -f "$W/spoof-ran"
+CO="$(cd "$I2" && PATH="$NOGL_PATH" git -c core.hooksPath="$TH" commit -q -m t 2>&1)"; CC=$?
+has  "H-R4-1b: stub copied over tools_dir/gitleaks → commit warns R8" "$CO" "[R8 gitleaks-missing]"
+has  "H-R4-1b: …binary replaced" "$CO" "gitleaks binary replaced"
+nc "$I2" 2>/dev/null
+PO="$(cd "$I2" && PATH="$NOGL_PATH" git -c core.hooksPath="$TH" push -q origin main 2>&1)"; PC=$?
+eq   "H-R4-1b: …push blocked" "$PC" "1"
+has  "H-R4-1b: …as R8 binary replaced" "$PO" "gitleaks binary replaced"
+absent_f "H-R4-1b: …the stub never ran" "$W/spoof-ran"
+ln -sf /bin/true "$W/trusted/gitleaks"
+PO="$(cd "$I2" && PATH="$NOGL_PATH" git -c core.hooksPath="$TH" push -q origin main 2>&1)"; PC=$?
+eq   "H-R4-1b: ln -sf /bin/true over it → push blocked" "$PC" "1"
+has  "H-R4-1b: …binary replaced" "$PO" "gitleaks binary replaced"
+rm -f "$W/trusted/gitleaks"; cp "$W/glbin/gitleaks" "$W/trusted/gitleaks"; chmod +x "$W/trusted/gitleaks"
+grep -v '^gitleaks_sha256' "$KIT_CONFIG_HOME/config.toml" > "$W/c.new"; mv "$W/c.new" "$KIT_CONFIG_HOME/config.toml"
+PO="$(cd "$I2" && PATH="$NOGL_PATH" git -c core.hooksPath="$TH" push -q origin main 2>&1)"; PC=$?
+eq   "H-R4-1b: no gitleaks_sha256 recorded → push blocked" "$PC" "1"
+has  "H-R4-1b: …says so" "$PO" "no gitleaks_sha256 recorded"
+i2sel
+PO="$(cd "$I2" && PATH="$NOGL_PATH" git -c core.hooksPath="$TH" push -q origin main 2>&1)"; PC=$?
+eq   "H-R4-1b: the hash-equal binary restored → push scans again (blocked by R1 or passes without real gitleaks)" "$PC" "$([ -n "$GITLEAKS" ] && echo 1 || echo 0)"
+lacks "H-R4-1b: …no R8" "$PO" "R8 gitleaks-missing"
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"

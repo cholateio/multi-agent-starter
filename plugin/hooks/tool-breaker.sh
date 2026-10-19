@@ -135,7 +135,31 @@ GP_GITCP="([^[:space:];&|]*/)?git([[:space:]][^;&|]*)?[[:space:]](commit|push)([
 # core.hooksPath), privacy.local.toml, the kit config.toml (kit_root → the guard
 # scripts), the guard scripts themselves (plugin/guard/) and the Claude hooks that
 # enforce all this — activation gate (lib.sh) + this breaker (plugin/hooks/; review R3-9).
-GP_PROT='(kit/guard|kit/git-hooks|guard/bypass-|bypass-[0-9a-f]{6,}|guard/audit\.jsonl|\.gitconfig|\.git/config|/git/config|config\.worktree|privacy\.local\.toml|kit/config\.toml|plugin/guard/|plugin/hooks/)'
+# … and the scanner binaries the guard runs (review R4-1): ~/.local/bin/{gitleaks,osv-scanner},
+# <tools_dir>/… and the gitleaks_path / osv_scanner_path recorded in config.toml. The guard
+# also hash-checks them before each run (a replaced binary = R8, push blocked), so this
+# only keeps a `cp stub ~/.local/bin/gitleaks` from turning into a blocked push.
+GP_TOOLS='(gitleaks|osv-scanner)([^A-Za-z0-9_.-]|$)'
+gp_re_escape() { printf '%s' "$1" | sed 's/[][\.*^$+?(){}|]/\\&/g'; }
+gp_path_re() {  # $1 absolute path → regex for it, also spelled ~/… / $HOME/… / ${HOME}/… under HOME
+    local p="$1" h="${HOME:-}"
+    if [[ -n "$h" && "$p" == "$h"/* ]]; then
+        printf '(~|\\$HOME|\\$\\{HOME\\}|%s)/%s' "$(gp_re_escape "$h")" "$(gp_re_escape "${p#"$h"/}")"
+    else gp_re_escape "$p"; fi
+}
+gp_tool_paths() {
+    local cfg="${KIT_CONFIG_HOME:-${HOME:-/nonexistent}/.config/kit}/config.toml" k v out=""
+    [[ -f "$cfg" ]] || return 0
+    for k in tools_dir gitleaks_path osv_scanner_path; do
+        v="$(sed -nE '/^[[:space:]]*\[/q; s/^[[:space:]]*'"$k"'[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$cfg" 2>/dev/null | head -n 1)"
+        [[ "$v" == "~/"* ]] && v="${HOME:-/nonexistent}${v:1}"
+        [[ "$v" == /?* ]] || continue
+        if [[ "$k" == tools_dir ]]; then out+="|$(gp_path_re "${v%/}")/${GP_TOOLS}"
+        else out+="|$(gp_path_re "$v")([^A-Za-z0-9_.-]|\$)"; fi
+    done
+    printf '%s' "$out"
+}
+GP_PROT="(kit/guard|kit/git-hooks|guard/bypass-|bypass-[0-9a-f]{6,}|guard/audit\\.jsonl|\\.gitconfig|\\.git/config|/git/config|config\\.worktree|privacy\\.local\\.toml|kit/config\\.toml|plugin/guard/|plugin/hooks/|\\.local/bin/${GP_TOOLS}$(gp_tool_paths))"
 # guard_write_hit <flattened text>: 0 when a simple command WRITES a protected path.
 # Per command segment (split on ; && || | &): a redirect whose target is protected,
 # or a write verb whose written operand is protected — rm/mv/touch/truncate/chmod/

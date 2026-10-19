@@ -84,10 +84,13 @@ fi
 [[ -n "$(git config --global core.hooksPath 2>/dev/null)" ]] && GUARD_HP="set" || GUARD_HP="UNSET"
 # the guard's own resolver: config.toml tools_dir (default ~/.local/bin) or a recorded gitleaks_path — never PATH (review O3/F13, R3-1)
 source "$PLUGIN_ROOT/guard/lib-tools.sh" 2>/dev/null
-if declare -F kit_tool_path >/dev/null && kit_tool_path gitleaks "${KIT_CONFIG_HOME:-${HOME:-}/.config/kit}" >/dev/null; then
-    GUARD_GL="ok"
-else
-    GUARD_GL="MISSING"
+# — and only when its sha256 equals the recorded gitleaks_sha256 (review R4-1)
+GUARD_GL="MISSING"
+if declare -F kit_tool_resolve >/dev/null; then
+    if kit_tool_resolve gitleaks "${KIT_CONFIG_HOME:-${HOME:-}/.config/kit}"; then GUARD_GL="ok"
+    elif [[ "${KIT_TOOL_WHY:-}" == replaced ]]; then GUARD_GL="REPLACED (sha256 mismatch; pushes blocked; user runs: kit doctor --install)"
+    elif [[ "${KIT_TOOL_WHY:-}" == unrecorded ]]; then GUARD_GL="UNVERIFIED (no gitleaks_sha256 recorded; user runs: kit doctor --install)"
+    fi
 fi
 
 # Export the session id for /kit:review and /kit:skip-review (the text

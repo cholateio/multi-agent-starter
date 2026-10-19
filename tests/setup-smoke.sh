@@ -9,6 +9,13 @@ fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); printf 'FAIL %s (%s)\n' "$1" "$2"; }
 has() { if printf '%s' "$2" | grep -qF -- "$3"; then pass "$1"; else fail "$1" "missing [$3]"; fi; }
 lacks() { if printf '%s' "$2" | grep -qF -- "$3"; then fail "$1" "unexpected [$3]"; else pass "$1"; fi; }
 eq() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "got [$2] want [$3]"; fi; }
+SKIP_COUNT=0; skip() { SKIP_COUNT=$((SKIP_COUNT + 1)); printf 'SKIP %s (%s)\n' "$1" "$2"; }
+# the pinned gitleaks / osv-scanner (same sha256 as kit doctor's pins) — setup records them
+# from PATH; without them its tools step must download, which this test never allows
+# (https_proxy points at a closed port), so "exit 0" is only checkable with them (review R4-1)
+TOOLS=""
+[ -n "${KIT_TOOLS:-}" ] && [ -x "$KIT_TOOLS/gitleaks" ] && [ -x "$KIT_TOOLS/osv-scanner" ] && TOOLS="$KIT_TOOLS"
+rc0() { if [ -n "$TOOLS" ]; then eq "$1" "$2" "0"; else skip "$1" "needs \$KIT_TOOLS with the pinned gitleaks + osv-scanner"; fi; }
 
 W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
 mkdir -p "$W/fakebin" "$W/state"
@@ -38,7 +45,8 @@ fresh() {  # new isolated machine under $W/m<n>
 ks() {
   env HOME="$M/home" KIT_CONFIG_HOME="$M/home/.config/kit" KIT_CACHE_HOME="$M/home/.cache/kit" \
       GIT_CONFIG_GLOBAL="$M/gitconfig" GIT_CONFIG_NOSYSTEM=1 CLAUDE_CONFIG_DIR= XDG_CONFIG_HOME= \
-      FAKE_CLAUDE_LOG="$W/claude.log" FAKE_STATE="$W/state" PATH="$W/fakebin:$PATH" \
+      FAKE_CLAUDE_LOG="$W/claude.log" FAKE_STATE="$W/state" PATH="$W/fakebin:${TOOLS:+$TOOLS:}$PATH" \
+      https_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 \
       python3 "$KIT_ROOT/bin/kit" setup "$@" 2>&1
 }
 hp() { GIT_CONFIG_GLOBAL="$M/gitconfig" GIT_CONFIG_NOSYSTEM=1 git config --global --get core.hooksPath; }
@@ -47,7 +55,7 @@ CFG() { printf '%s' "$M/home/.config/kit"; }
 # (1) fresh local setup
 fresh 1
 OUT="$(ks --marketplace local)"; CODE=$?
-eq "s1: exit 0" "$CODE" "0"
+rc0 "s1: exit 0" "$CODE"
 has "s1: marketplace add <kit_root>" "$(cat "$W/claude.log")" "plugin marketplace add $KIT_ROOT"
 has "s1: plugin install --scope user" "$(cat "$W/claude.log")" "plugin install kit@multi-agent-kit --scope user"
 S="$M/home/.claude/settings.json"
@@ -99,7 +107,7 @@ has "s2b: custom allow kept" "$(jq -r '.permissions.allow[]' "$S")" "Bash(pnpm *
 # (3) re-run → every step skip
 : > "$W/claude.log"
 OUT="$(ks)"; CODE=$?
-eq "s3: rerun exit 0" "$CODE" "0"
+rc0 "s3: rerun exit 0" "$CODE"
 lacks "s3: rerun has no [done]" "$OUT" "[done]"
 has "s3: rerun reports [skip]" "$OUT" "[skip]"
 lacks "s3: rerun does not reinstall plugin" "$(cat "$W/claude.log")" "plugin install"
@@ -168,6 +176,21 @@ eq "s10: …exactly one tools_dir line" "$(grep -c '^tools_dir' "$(CFG)/config.t
 # (11) review R3-5: a relative --bin-dir is persisted as an absolute path
 mkdir -p "$M/cwd"; OUT="$(cd "$M/cwd" && ks --bin-dir reltools)"
 has "s11: relative --bin-dir recorded absolute" "$(cat "$(CFG)/config.toml")" "tools_dir = \"$M/cwd/reltools\""
+
+# (12) review R4-1: the fakebin gitleaks / osv-scanner print the pinned versions but are not the
+# pinned builds — setup never records them (trust = sha256, not version output)
+fresh 12
+OUT="$(ks)"
+lacks "s12: a version-spoofing PATH gitleaks is never recorded" "$(cat "$(CFG)/config.toml")" "$W/fakebin/gitleaks"
+lacks "s12: …nor osv-scanner" "$(cat "$(CFG)/config.toml")" "$W/fakebin/osv-scanner"
+has "s12: …and setup says so" "$OUT" "$W/fakebin/gitleaks is not the pinned gitleaks build"
+if [ -n "$TOOLS" ]; then
+  has "s12: the pinned binary further down PATH is recorded" "$(cat "$(CFG)/config.toml")" "gitleaks_path = \"$TOOLS/gitleaks\""
+  has "s12: …with the pin's sha256" "$(cat "$(CFG)/config.toml")" "gitleaks_sha256 = \"$(sha256sum < "$TOOLS/gitleaks" | cut -d' ' -f1)\""
+  has "s12: …osv-scanner too" "$(cat "$(CFG)/config.toml")" "osv_scanner_sha256 = \""
+else
+  lacks "s12: no gitleaks_sha256 without the pinned binary" "$(cat "$(CFG)/config.toml")" "gitleaks_sha256"
+fi
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"

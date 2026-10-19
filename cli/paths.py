@@ -7,6 +7,7 @@
     data_dir()    KIT_DATA_HOME    else ~/.local/share/kit
     claude_dir()  CLAUDE_CONFIG_DIR else ~/.claude
 """
+import hashlib
 import os
 import re
 import shutil
@@ -111,26 +112,68 @@ def tool_key(name: str) -> str:
     return name.replace("-", "_") + "_path"
 
 
+def tool_sha_key(name: str) -> str:
+    """config.toml key of the recorded binary sha256: gitleaks → gitleaks_sha256 (review R4-1)."""
+    return name.replace("-", "_") + "_sha256"
+
+
 def _exe(p: Path) -> bool:
     return p.is_file() and os.access(p, os.X_OK)
 
 
-def find_tool(name: str) -> str | None:
-    """THE tool resolver (guard, session start, doctor, guard status): <tools_dir>/<name>, else
-    the absolute `<name>_path` that setup / doctor --install recorded after a version check.
-    NEVER the caller's PATH (review R3-1: a stub `gitleaks` on PATH would switch R1 off)."""
+def sha256_file(path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def tool_candidates(name: str) -> list[Path]:
+    """<tools_dir>/<name>, then the absolute recorded <name>_path — the existing executables only."""
+    out = []
     p = tools_dir() / name
     if _exe(p):
-        return str(p)
+        out.append(p)
     try:
         rec = load_config().get(tool_key(name))
     except Exception:
         rec = None
     if isinstance(rec, str) and rec:
         r = expand(rec)
-        if r.is_absolute() and _exe(r):
-            return str(r)
-    return None
+        if r.is_absolute() and _exe(r) and r not in out:
+            out.append(r)
+    return out
+
+
+def tool_state(name: str) -> tuple[str | None, str]:
+    """THE tool resolver (guard, session start, doctor, guard status) — twin of
+    plugin/guard/lib-tools.sh kit_tool_resolve. Returns (path, "ok") for the first candidate
+    whose sha256 equals the recorded <name>_sha256; else (first candidate or None, why) with
+    why = "missing" | "unrecorded" (no sha recorded) | "replaced" (sha256 mismatch).
+    NEVER the caller's PATH (review R3-1) and never a binary by location alone (R4-1)."""
+    cands = tool_candidates(name)
+    if not cands:
+        return None, "missing"
+    try:
+        want = load_config().get(tool_sha_key(name))
+    except Exception:
+        want = None
+    if not (isinstance(want, str) and re.fullmatch(r"[0-9a-f]{64}", want)):
+        return str(cands[0]), "unrecorded"
+    for c in cands:
+        try:
+            if sha256_file(c) == want:
+                return str(c), "ok"
+        except OSError:
+            continue
+    return str(cands[0]), "replaced"
+
+
+def find_tool(name: str) -> str | None:
+    """The verified tool binary (tool_state == ok), else None."""
+    p, state = tool_state(name)
+    return p if state == "ok" else None
 
 
 def set_config_value(key: str, value: str) -> None:

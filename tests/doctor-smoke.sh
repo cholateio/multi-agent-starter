@@ -16,6 +16,7 @@ for t in python3 git jq; do ln -s "$(command -v $t)" "$W/shimbin/$t"; done
 d() {  # run doctor isolated; cwd = $W/proj
   (cd "$W/proj" && env -i PATH="$W/shimbin" HOME="$W/home" KIT_CONFIG_HOME="$W/cfg" \
      GIT_CONFIG_GLOBAL="$W/gitconfig" GIT_CONFIG_NOSYSTEM=1 KIT_CACHE_HOME="$W/cache" \
+     https_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 \
      "$W/shimbin/python3" "$KIT_ROOT/bin/kit" doctor "$@" 2>&1)
 }
 
@@ -67,6 +68,28 @@ has "d5: WARN unknown literal name" "$OUT" "unknown literal name"
 printf '#!/bin/sh\necho "2.1.200 (Claude Code)"\n' > "$W/shimbin/claude"
 OUT="$(d)"; CODE=$?
 has "d6: old claude fails" "$OUT" "FAIL claude"
+
+printf '#!/bin/sh\necho "2.1.303 (Claude Code)"\n' > "$W/shimbin/claude"
+
+# review R4-1: trust = sha256, never the version output
+printf '#!/bin/sh\ntouch "%s/stub-ran"\necho 8.30.1\n' "$W" > "$W/shimbin/gitleaks"; chmod +x "$W/shimbin/gitleaks"
+OUT="$(d --install)"
+lacks "d7: doctor --install never records a version-spoofing PATH gitleaks" "$(cat "$W/cfg/config.toml")" "$W/shimbin/gitleaks"
+lacks "d7: …nor a gitleaks_sha256 for it" "$(cat "$W/cfg/config.toml")" "gitleaks_sha256"
+has "d7: …and names it" "$OUT" "$W/shimbin/gitleaks is not the pinned gitleaks build"
+rm -f "$W/shimbin/gitleaks" "$W/stub-ran"
+mkdir -p "$W/home/.local/bin"; printf '#!/bin/sh\necho 8.30.1\n' > "$W/home/.local/bin/gitleaks"; chmod +x "$W/home/.local/bin/gitleaks"
+OUT="$(d)"
+has "d8: a tools_dir gitleaks with no sha256 recorded is a WARN (the guard will not run it)" "$OUT" "no gitleaks_sha256 recorded"
+printf 'gitleaks_sha256 = "%s"\n' "$(printf x | sha256sum | cut -d' ' -f1)" >> "$W/cfg/config.toml"
+OUT="$(d)"; CODE=$?
+has "d8: a tools_dir gitleaks whose sha256 differs from the recorded one → FAIL replaced" "$OUT" "FAIL gitleaks"
+has "d8: …says replaced" "$OUT" "the binary was replaced"
+[ "$CODE" -eq 1 ] && pass "d8: …exit 1" || fail "d8: …exit 1" "got $CODE"
+grep -v '^gitleaks_sha256' "$W/cfg/config.toml" > "$W/c.new"; mv "$W/c.new" "$W/cfg/config.toml"
+printf 'gitleaks_sha256 = "%s"\n' "$(sha256sum < "$W/home/.local/bin/gitleaks" | cut -d' ' -f1)" >> "$W/cfg/config.toml"
+OUT="$(d)"
+has "d8: hash-equal but hand-recorded (not the pin) → WARN" "$OUT" "sha256 recorded by hand"
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"
