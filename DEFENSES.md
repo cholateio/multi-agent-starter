@@ -236,6 +236,9 @@ claude 啟動時的環境)。
   訊號時)——`--depth=1`、伺服器允許就 `--filter=blob:none`(kit.toml 的 blob 需要時才補抓)、
   非互動、`KIT_GUARD_FETCH_TIMEOUT` 預設 30 秒,抓進 hook 暫存目錄裡的**一次性 bare repo**
   (alternates 借用本 repo 物件):本 repo 不留 ref、不留物件、不變 shallow;從不抓整個公告命名空間。
+  「本地有」= 讀得到 commit 的根 tree(tree 列出 kit.toml 時連同它的 blob,不觸發 lazy fetch);
+  partial clone 裡只有 commit 沒有 tree 的舊 tip / `HEAD` 照「本地沒有」走上述抓取,抓了仍讀不到
+  tree → fail closed(review R5-2)。
   被覆蓋的遠端舊 tip 有 kit.toml = 移除 → block。**舊 tip(非零 rsha)本地沒有又抓不到**——離線、
   或 hook 自己的連線認證不過(push 本身的連線過了,例如有密碼的 ssh key 沒 agent)——一律
   **fail closed** `[R2 kit-status-unknown]`(user bypass 放行;review R4-2);遠端 `HEAD` 列得出卻抓不到
@@ -285,7 +288,11 @@ git config 檔、`privacy.local.toml`、kit `config.toml` 或 `plugin/guard/`—
 `gitleaks_sha256` / `osv_scanner_sha256` 寫進 config.toml。guard 每次執行前重算 sha256
 (22 MB 的 gitleaks:解析 + 雜湊約多 11 ms,pre-commit 中位數 285→296 ms、pre-push 390→404 ms,本機 SHA-NI;不做快取——快取檔本身會變成可偽造的輸入),
 候選裡第一支雜湊相符的才跑;都不符 → R8「binary replaced」,沒記錄 → R8「no gitleaks_sha256
-recorded」。非 linux/x86_64 的 owner 自己裝好後,在 config.toml 手寫 `<tool>_path` 與
+recorded」。雜湊工具本身只用固定絕對路徑(`/usr/bin/sha256sum`、`/bin/sha256sum`、`/usr/bin/shasum`、
+`/usr/bin/openssl`),不經 PATH、不經 shell 函式(review R5-1:匯出一個印出釘版值的 `sha256sum`
+函式曾能替假 stub 背書);shim 以 `bash -p` 重跑自己、也以 `bash -p` 跑 guard / localfiles——環境裡
+匯出的 shell 函式(`BASH_FUNC_*`,例如假的 `cat` / `bash` / `git`)與 `$BASH_ENV` 都不載入(舊機器
+重跑 `kit setup` 換上新 shim)。非 linux/x86_64 的 owner 自己裝好後,在 config.toml 手寫 `<tool>_path` 與
 `<tool>_sha256`(doctor 以 WARN 標「sha256 recorded by hand」)。protect-paths 對 Edit/Write 到
 `~/.config/kit`、`<state>/guard`、git config 檔轉 ask。
 
@@ -352,13 +359,22 @@ recorded」。非 linux/x86_64 的 owner 自己裝好後,在 config.toml 手寫 
    (離線、要密碼)時只剩本地訊號(本地分支 tip、範圍、工作樹 kit.toml)——全新 repo 離線推不相干
    歷史成為沒抓過的 kit remote 的**新分支**不會被認出(通常推送本身也會失敗);覆蓋既有 ref 的推送
    則 fail closed。只看遠端 `HEAD`:kit.toml 只存在遠端**非預設分支 / tag** 上、本地又沒有時,不算
-   kit 訊號(review R4-3 的取捨:不再抓整個命名空間);`refs/pull/*` 等 review 命名空間與
+   kit 訊號(review R4-3 的取捨:不再抓整個命名空間;R5 複審維持——有上限的公告 tip 掃描留待日後);`refs/pull/*` 等 review 命名空間與
    remote-tracking refs 不當 kit 訊號。反過來的成本:本地沒有遠端舊 tip、又暫時連不上(或 hook 的
    第二條連線認證不過)時,**覆蓋式推送一個沒有 kit.toml 的 tip** 一律 `[R2 kit-status-unknown]`,
    非 kit repo 也一樣——`git fetch` 後重推,或 user bypass。
 15. **掃描器雜湊的縫**(review R4-1 殘餘):驗雜湊與執行之間有極短的 TOCTOU 窗(換檔要剛好卡在
    兩者之間);`kit doctor --install` 會把 `tools_dir` 裡被換掉的檔換回釘版(或改記 PATH 上雜湊相符的
    那支),所以模型跑它無害;間接寫法(`python3 -c` 改 config.toml 的 `gitleaks_sha256`)同第 7 條。
+16. **刻意操弄 hook 環境不在範圍內**(review R5 殘餘;**防呆不防敵**):guard 擋手滑與模型的直覺路徑,
+   不擋刻意改造自己 hook 環境的人。R5-1 之後雜湊工具走絕對路徑、shim 之後的一切不載入匯出函式與
+   `$BASH_ENV`,但仍有:shim 第一行(`bash -p` 重跑)之前就生效的 `$BASH_ENV` 與名為 `exec` 的匯出
+   函式;PATH 上的冒牌 `git` / awk / sed(第 7 條);`/usr/bin/shasum`(perl)、`openssl` 讀的
+   `PERL5LIB` / `OPENSSL_CONF` 類變數;guard 的 git 讀的 `GIT_*` 變數。partial clone 的邊角:git < 2.44
+   不認 `GIT_NO_LAZY_FETCH`,檢查 tree 時照 git 設定 lazy fetch(多一次連線、可能提示);本地分支 tip /
+   已有的公告物件只有 commit 沒有 tree 時不算 kit 訊號(只有被覆蓋的舊 tip 與 `HEAD` 會補抓);
+   以及第 14 條「kit.toml 只在沒抓過的非預設分支 / tag」。這些都要先在呼叫端環境或 clone 方式上
+   動手腳,與「把 `--no-verify` 寫進腳本」同類,不另設防。
 
 ## 四、誠實條款:這套 harness 的能力極限
 
