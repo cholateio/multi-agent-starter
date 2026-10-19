@@ -98,7 +98,7 @@ def a2_a3(t, ctx):
         lit_file = tf.name
     try:
         r = subprocess.run(["git", "-C", str(t.path), "grep", "-n", "-I", "-F", "-i", "-f", lit_file, "--"],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, errors="replace")
     finally:
         Path(lit_file).unlink(missing_ok=True)
     seen: dict[tuple, list] = {}
@@ -264,7 +264,8 @@ def a12(t, ctx, tracked):
 def a13(t, ctx, tracked):
     if ctx.visibility != "public":
         return []
-    lic = next((p for p in ("LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING") if p in tracked), None)
+    lic = next((p for p in ("LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING")
+                if p in tracked and (t.path / p).is_file()), None)
     if lic is None or (t.path / lic).stat().st_size == 0:
         return [Finding(t.name, "A13", "MEDIUM", lic, None, "LICENSE missing" if lic is None else "LICENSE is empty",
                         "add the full license text (kit migrate lays down MIT)")]
@@ -285,7 +286,7 @@ MARKERS = ("私人 repo", "私人repo", "written for future me", "寫給未來�
 def a15(t, ctx, tracked):
     if ctx.visibility != "public":
         return []
-    readme = next((p for p in ("README.md", "README", "readme.md") if p in tracked), None)
+    readme = next((p for p in ("README.md", "README", "readme.md") if p in tracked and (t.path / p).is_file()), None)
     if readme is None:
         return [Finding(t.name, "A15", "MEDIUM", None, None, "README missing", "write README.md (kit recipe)")]
     text = (t.path / readme).read_text(errors="replace")
@@ -344,16 +345,15 @@ def a17(t, ctx):
 
 
 def run_local_checks(t, ctx) -> list:
+    """One broken repo / file never aborts the fleet run: a crashing check becomes UNKNOWN."""
     tracked = _tracked(t)
     out = []
-    out += a1(t, ctx)
-    out += a2_a3(t, ctx)
-    out += a4(t, ctx, tracked)
-    out += a5(t, ctx)
-    out += a10_a11(t, ctx, tracked)
-    out += a12(t, ctx, tracked)
-    out += a13(t, ctx, tracked)
-    out += a15(t, ctx, tracked)
-    out += a16(t, ctx)
-    out += a17(t, ctx)
+    for check, fn in (("A1", lambda: a1(t, ctx)), ("A2", lambda: a2_a3(t, ctx)), ("A4", lambda: a4(t, ctx, tracked)),
+                      ("A5", lambda: a5(t, ctx)), ("A10", lambda: a10_a11(t, ctx, tracked)),
+                      ("A12", lambda: a12(t, ctx, tracked)), ("A13", lambda: a13(t, ctx, tracked)),
+                      ("A15", lambda: a15(t, ctx, tracked)), ("A16", lambda: a16(t, ctx)), ("A17", lambda: a17(t, ctx))):
+        try:
+            out += fn()
+        except Exception as e:  # noqa: BLE001 — reported, never silent
+            out.append(Finding(t.name, check, "UNKNOWN", None, None, f"check crashed: {type(e).__name__}", ""))
     return out

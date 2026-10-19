@@ -99,6 +99,22 @@ echo 'broken = [' > "$W/cfg/config.toml"
 OUT="$(ka --offline "$FIX")"; CODE=$?
 eq "a9: malformed config → exit 1" "$CODE" "1"
 
+# a10 (final review C2): literal values in PATHS are redacted; invalid privacy still redacts + shows the gap
+write_cfg
+printf 'usernames = ["testuser"]\nemails = []\n[[literal]]\nname = "t-uid"\nvalue = "%s"\ntier = "always"\n[[literal]]\nname = "secret-proj"\nvalue = "zebracorn"\ntier = "always"\n' "$UID_FAKE" > "$W/cfg/privacy.local.toml"
+R="$W/fleet/proj-a"; mkdir -p "$R/docs/plans"; echo "launch" > "$R/docs/plans/zebracorn-launch.md"; echo "/home/zebracorn/x" > "$R/p.txt"; commit
+OUT="$(ka --offline "$FIX" -v --json "$W/z.json" --html "$W/z.html" proj-a)"
+lacks "a10: literal not in verbose paths" "$OUT" "zebracorn"
+lacks "a10: literal not in json paths" "$(cat "$W/z.json")" "zebracorn"
+lacks "a10: literal not in html" "$(cat "$W/z.html")" "zebracorn"
+printf '[[literal]]\nname = "bad-one"\nvalue = "abc"\ntier = "always"\n' >> "$W/cfg/privacy.local.toml"
+OUT="$(ka --offline "$FIX" -v --json "$W/z2.json" proj-a)"
+lacks "a10: invalid privacy still redacts" "$OUT" "zebracorn"
+lacks "a10: invalid privacy still redacts json" "$(cat "$W/z2.json")" "zebracorn"
+has "a10: invalid privacy → visible UNKNOWN A2" "$(python3 -c "import json;print([f['severity'] for f in json.load(open('$W/z2.json'))['findings'] if f['check']=='A2' and 'privacy' in f['snippet']])")" "UNKNOWN"
+lacks "a10: literal not in invalid-privacy json either" "$(cat "$W/z2.json")" "$UID_FAKE"
+chmod 600 "$W/cfg/privacy.local.toml"
+
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1

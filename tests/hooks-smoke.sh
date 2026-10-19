@@ -1573,6 +1573,10 @@ bgp deny "env -i git commit -n denied"                               'env -i git
 bgp deny "backslash-escaped \\git commit --no-verify denied"          '\git commit --no-verify -m x'
 bgp ""   "absolute-path git log -n allowed"                          '/usr/bin/git log -n 3'
 bgp ""   "ls of the git binary allowed"                              'ls -l /usr/bin/git'
+# Phase-3 final review: an EMPTY value also disables the global hooks (git 2.43 verified)
+bgp deny "core.hooksPath set to empty \"\" denied"                   'git config --global core.hooksPath ""'
+bgp deny "core.hooksPath set to empty '' denied"                     "git config core.hooksPath ''"
+bgp ""   "commit with an empty message still allowed"                'git commit --allow-empty-message -m ""'
 
 # ===========================================================================
 # B-scope - guard-preserve runs in EVERY directory (orchestrator ruling

@@ -193,6 +193,17 @@ class TestLocalChecks(IsolatedTestCase):
         f = checks(self.run_local(repo, ctx(tools={})), "A12")
         self.assertEqual([x.severity for x in f], ["UNKNOWN"])
 
+    def test_non_utf8_file_with_literal_does_not_crash(self):
+        repo = self.make_repo("proj-a", {"a.txt": b"caf\xe9 " + UID.encode() + b"\n"})
+        f = self.run_local(repo, ctx())
+        self.assertEqual(len(checks(f, "A2")), 1)
+
+    def test_tracked_files_deleted_in_worktree_do_not_crash(self):
+        repo = self.make_repo("proj-a", BAD_FILES)
+        (repo / "README.md").unlink()
+        (repo / "LICENSE").unlink()
+        self.run_local(repo, ctx())       # must not raise
+
     def test_redact(self):
         self.assertEqual(redact(f"id={UID}!", PRIV), "id=<t-uid>!")
         self.assertEqual(redact("x " + UID.upper(), PRIV), "x <t-uid>")

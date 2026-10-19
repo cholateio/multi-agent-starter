@@ -177,6 +177,42 @@ OUT="$(km "$W/plain" --apply)"; CODE=$?
 eq "M10: non-kit repo refused (exit 1)" "$CODE" "1"
 has "M10: points at kit init" "$OUT" "kit init"
 
+# ---- M11 (final review C1): owner's untracked / edited files that migrate would also write → dirty
+R="$W/m11"; make_v4 "$R"; mkdir -p "$R/docs"
+echo "DB_PASSWORD=not-a-real-secret" > "$R/docs/DEVELOPMENT.md"; echo "draft agents" > "$R/AGENTS.md"
+printf 'MIT License\nowner edit\n' > "$R/LICENSE"; git -C "$R" add LICENSE; git -C "$R" commit -qm lic; echo "more" >> "$R/LICENSE"
+HEAD0="$(g "$R" rev-parse HEAD)"
+OUT="$(km "$R" --commit)"; CODE=$?
+eq "M11: owner files in managed paths → dirty, exit 1" "$CODE" "1"
+has "M11: says dirty" "$OUT" "dirty"
+eq "M11: nothing committed" "$(g "$R" rev-parse HEAD)" "$HEAD0"
+OUT="$(km "$R" --commit --allow-dirty)"; CODE=$?
+eq "M11: --allow-dirty commit exit 0" "$CODE" "0"
+eq "M11: owner's untracked docs/DEVELOPMENT.md NOT committed" "$(g "$R" ls-files docs/DEVELOPMENT.md)" ""
+eq "M11: owner's draft AGENTS.md NOT committed" "$(g "$R" ls-files AGENTS.md)" ""
+has "M11: owner's LICENSE edit left uncommitted" "$(g "$R" status --porcelain)" " M LICENSE"
+# a resumed run (manifest of what migrate wrote) is still not "dirty"
+R="$W/m12"; make_v4 "$R"; km "$R" --apply >/dev/null
+echo "owner new file" > "$R/docs/DEVELOPMENT.md"
+OUT="$(km "$R" --commit)"; CODE=$?
+eq "M12: untracked owner file after apply → dirty on commit" "$CODE" "1"
+rm "$R/docs/DEVELOPMENT.md"
+OUT="$(km "$R" --commit)"; CODE=$?
+eq "M12: resume after apply commits (exit 0)" "$CODE" "0"
+for f in kit.toml AGENTS.md CLAUDE.md .gitignore LICENSE; do has "M12: $f committed" "$(g "$R" ls-files)" "$f"; done
+eq "M12: clean after commit" "$(g "$R" status --porcelain)" ""
+
+# ---- M13 (final review I4): invalid settings.local.json never wedges the migration
+R="$W/m13"; make_v4 "$R"; printf '{"permissions": {"allow": ["Bash(x)",]}}\n' > "$R/.claude/settings.local.json"
+OUT="$(km "$R" --apply)"; CODE=$?
+eq "M13: apply exit 0" "$CODE" "0"
+has "M13: needs-review names settings.local.json" "$OUT" "settings.local.json"
+absent "M13: kit-version removed (migration completed)" "$R/.claude/kit-version"
+lacks "M13: kit hooks stripped from settings.json" "$(cat "$R/.claude/settings.json" 2>/dev/null)" ".claude/hooks/"
+has "M13: owner allow kept in settings.json" "$(cat "$R/.claude/settings.json" 2>/dev/null)" "Bash(pnpm *)"
+has "M13: invalid local file untouched" "$(cat "$R/.claude/settings.local.json")" '"Bash(x)",]'
+OUT="$(km "$R" --apply)"; has "M13: rerun converges" "$OUT" "nothing to do"
+
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1

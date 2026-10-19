@@ -115,6 +115,15 @@ class TestStripSettings(IsolatedTestCase):
         self.assertEqual(out["hooks"]["Stop"][0]["hooks"][0]["command"], "notify-send done")
         self.assertNotIn("permissions", out)
 
+    def test_owner_hook_under_claude_hooks_survives(self):
+        s = json.loads(V4_SETTINGS_JSON)
+        s["hooks"]["PreToolUse"].append({"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/block-prod-deploy.sh"}]})
+        out = migrate.strip_kit_settings(s)
+        self.assertIsNotNone(out)
+        self.assertEqual(out["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+                         "$CLAUDE_PROJECT_DIR/.claude/hooks/block-prod-deploy.sh")
+
     def test_merge_into_local(self):
         local = {"permissions": {"allow": ["Bash(npm test)"]}, "model": "sonnet"}
         resid = {"permissions": {"allow": ["Bash(pnpm *)", "Bash(npm test)"], "deny": ["Read(.env)"]}, "model": "opus"}

@@ -16,15 +16,20 @@ from cli.audit import checks_github, checks_local, report, scan
 
 
 def _load_privacy():
+    """(privacy | None, problem | None). An invalid file is still loaded leniently (bad
+    entries dropped) so redaction keeps working; the problem surfaces as UNKNOWN A2."""
     p = paths.privacy_path()
     if not p.is_file():
         print(f"note: {p} missing — personal-literal checks (A2/A3) skipped", file=sys.stderr)
-        return None
+        return None, None
     errs = privacy.validate_privacy(p)
+    try:
+        prv = privacy.load_privacy(p)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None, "privacy.local.toml unparseable — A2/A3 skipped, redaction off"
     if errs:
-        print(f"note: privacy.local.toml invalid ({errs[0]}) — A2/A3 skipped", file=sys.stderr)
-        return None
-    return privacy.load_privacy(p)
+        return prv, f"privacy.local.toml has {len(errs)} error(s) (run kit doctor) — invalid entries ignored"
+    return prv, None
 
 
 def _kittoml(path: Path | None):
@@ -67,7 +72,7 @@ def run(args) -> int:
     targets = scan.scan_targets(cfg, args.names or None, gh if gh.available() else None, owner)
     if not targets:
         raise KitError("no audit targets (check [audit].root / exclude in config.toml, or the names given)")
-    prv = _load_privacy()
+    prv, prv_problem = _load_privacy()
     tools = {"gitleaks": shutil.which("gitleaks"), "osv-scanner": shutil.which("osv-scanner")}
     findings, repos = [], []
     for t in targets:
@@ -86,8 +91,13 @@ def run(args) -> int:
         else:
             fs.append(report.Finding(t.name, "A0", "INFO", None, None, "not cloned locally — local/history checks "
                                      "skipped", "kit audit --fetch-remote"))
+        if prv_problem and t.path is not None:
+            fs.append(report.Finding(t.name, "A2", "UNKNOWN", None, None, prv_problem, "kit doctor"))
         for f in fs:
             f.snippet = report.redact(f.snippet, prv)
+            f.fix = report.redact(f.fix, prv)
+            if f.path:
+                f.path = report.redact(f.path, prv)
         findings += fs
         repos.append((t.name, vis))
     shown = findings

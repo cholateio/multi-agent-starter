@@ -77,7 +77,7 @@ hash_stdin() {
 # aliases and scripts are out of scope (v4.9 threat boundary).
 guard_flatten() {  # stdin: raw command → stdout: flattened single line
     tr '\n' ';' | awk '
-        function flush(tok) { if (tok ~ /^[A-Za-z0-9_.=\/:@+,-]*$/) return tok; return "Q" }
+        function flush(tok) { if (tok != "" && tok ~ /^[A-Za-z0-9_.=\/:@+,-]*$/) return tok; return "Q" }
         { out=""; st=0; tok=""; len=length($0)
           for(i=1;i<=len;i++){ c=substr($0,i,1)
             if(st==0){

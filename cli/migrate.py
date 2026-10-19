@@ -24,8 +24,6 @@ from cli import gitutil, init_cmd, kittoml, paths
 
 UNTRACK = [".claude", "PROJECT.toml", "docs/LESSONS.md", "docs/plans", "docs/superpowers/plans", "docs/decisions"]
 BACKUP = UNTRACK + ["CLAUDE.md", ".gitignore"]
-WRITES = ["kit.toml", "AGENTS.md", "CLAUDE.md", ".gitignore", "LICENSE", "docs/DEVELOPMENT.md"]
-MANAGED = UNTRACK + WRITES
 COMMIT_MSG = "chore(kit): migrate to kit v5 — untrack .claude, add AGENTS.md + kit.toml"
 
 V4_KIT_FILES = {
@@ -136,6 +134,11 @@ def render_kit_toml(visibility: str, license: str, protected: list[str]) -> str:
     return kittoml.render_kit_toml(visibility, license, "en", protected)
 
 
+def _is_kit_hook(command: str) -> bool:
+    """Only the five v4 kit hook scripts — an owner's own .claude/hooks/*.sh stays registered."""
+    return any(f".claude/hooks/{n}" in command for n in V4_KIT_FILES["hooks"])
+
+
 def strip_kit_settings(settings: dict) -> dict | None:
     """Remove the kit's hooks (commands under .claude/hooks/), the v4 permission
     baseline and the template _comment; None when nothing user-owned remains."""
@@ -147,7 +150,7 @@ def strip_kit_settings(settings: dict) -> dict | None:
         for ev in list(hooks):
             groups = []
             for g in hooks[ev] if isinstance(hooks[ev], list) else []:
-                hs = [h for h in g.get("hooks", []) if ".claude/hooks/" not in str(h.get("command", ""))]
+                hs = [h for h in g.get("hooks", []) if not _is_kit_hook(str(h.get("command", "")))]
                 if hs:
                     groups.append({**g, "hooks": hs})
             if groups:
@@ -237,6 +240,14 @@ class Migration:
     visibility_override: str | None = None
     results: list[Result] = field(default_factory=list)
     _visibility: str | None = None
+    written: set = field(default_factory=set)
+
+    def write(self, rel: str, text: str):
+        """All tracked-file writes go through here so --commit stages only what migrate wrote."""
+        p = self.p(rel)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+        self.written.add(rel)
 
     def r(self, status, step, detail="", diff="", change=None):
         if change is None:
@@ -294,7 +305,7 @@ class Migration:
         text = render_kit_toml(vis, license, items)
         n = sum(1 for i in items if not i.startswith("#"))
         if self.act:
-            kt.write_text(text, encoding="utf-8")
+            self.write("kit.toml", text)
         self.r("would", "kit.toml", f"visibility={vis}, license={license}, protected={n}",
                diff="".join(difflib.unified_diff([], text.splitlines(True), "/dev/null", "kit.toml")))
 
@@ -306,7 +317,7 @@ class Migration:
                 self.r("skip", "AGENTS.md", "exists; CLAUDE.md is the stub")
             elif ctext is None:
                 if self.act:
-                    cm.write_text(_stub_text(), encoding="utf-8")
+                    self.write("CLAUDE.md", _stub_text())
                 self.r("would", "CLAUDE.md", "stub (@AGENTS.md)")
             else:
                 self.r("needs-review", "AGENTS.md", "AGENTS.md already exists and CLAUDE.md is not the stub — "
@@ -321,8 +332,8 @@ class Migration:
         agents, stub, review = split_claude_md(ctext)
         diff = "".join(difflib.unified_diff(ctext.splitlines(True), stub.splitlines(True), "CLAUDE.md", "CLAUDE.md"))
         if self.act:
-            am.write_text(agents, encoding="utf-8")
-            cm.write_text(stub, encoding="utf-8")
+            self.write("AGENTS.md", agents)
+            self.write("CLAUDE.md", stub)
         if review:
             self.r("needs-review", "AGENTS.md", "no kit boilerplate markers found — whole CLAUDE.md moved to "
                    "AGENTS.md verbatim; review it", diff, change=True)
@@ -340,7 +351,7 @@ class Migration:
             self.r("skip", ".gitignore", "kit block present")
             return
         if self.act:
-            gi.write_text(new, encoding="utf-8")
+            self.write(".gitignore", new)
         self.r("would", ".gitignore", "kit v5 block (managed markers)"
                + ("; v4 tracked-on-purpose block removed" if stripped != old else ""),
                "".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True), ".gitignore", ".gitignore")))
@@ -371,13 +382,27 @@ class Migration:
                 self.r("needs-review", "clean .claude", ".claude/settings.json is not valid JSON — left as is")
             if isinstance(data, dict) and strip_kit_settings(data) != data:
                 resid = strip_kit_settings(data)
-                if self.act:
-                    if resid:
-                        lj = cl / "settings.local.json"
-                        local = json.loads(lj.read_text()) if lj.is_file() else {}
-                        lj.write_text(json.dumps(merge_settings(local, resid), indent=2, ensure_ascii=False) + "\n")
-                    sj.unlink()
-                notes.append("settings.json → " + ("settings.local.json (user allows kept)" if resid else "removed (kit-only)"))
+                lj = cl / "settings.local.json"
+                local, local_bad = {}, False
+                if lj.is_file():
+                    try:
+                        local = json.loads(lj.read_text())
+                        local_bad = not isinstance(local, dict)
+                    except ValueError:
+                        local_bad = True
+                if resid and local_bad:
+                    # never wedge on the owner's broken file: strip kit parts in place, merge later by hand
+                    if self.act:
+                        sj.write_text(json.dumps(resid, indent=2, ensure_ascii=False) + "\n")
+                    notes.append("settings.json: kit hooks/baseline stripped in place")
+                    self.r("needs-review", "clean .claude", ".claude/settings.local.json is not valid JSON — "
+                           "left untouched; merge .claude/settings.json into it by hand", change=True)
+                else:
+                    if self.act:
+                        if resid:
+                            lj.write_text(json.dumps(merge_settings(local, resid), indent=2, ensure_ascii=False) + "\n")
+                        sj.unlink()
+                    notes.append("settings.json → " + ("settings.local.json (user allows kept)" if resid else "removed (kit-only)"))
         for d, names in V4_KIT_FILES.items():
             dd = cl / d
             for n in names:
@@ -432,7 +457,7 @@ class Migration:
                 text = (tpl.read_text().replace("{{YEAR}}", str(datetime.date.today().year))
                         .replace("{{OWNER}}", owner))
                 if self.act:
-                    lic.write_text(text, encoding="utf-8")
+                    self.write("LICENSE", text)
                 self.r("would", "LICENSE", f"MIT ({'was empty' if lic.is_file() else 'was missing'}; public repo)")
         else:
             self.r("skip", "LICENSE", "present" if lic.is_file() and lic.stat().st_size else f"{vis} repo")
@@ -443,8 +468,7 @@ class Migration:
                 self.r("skip", "docs/DEVELOPMENT.md", "template missing")
             else:
                 if self.act:
-                    dev.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(tpl, dev)
+                    self.write("docs/DEVELOPMENT.md", tpl.read_text(encoding="utf-8"))
                 self.r("would", "docs/DEVELOPMENT.md", "skeleton")
 
     STEPS = ("step_kit_toml", "step_agents", "step_gitignore", "step_untrack", "step_clean", "step_extras")
@@ -458,12 +482,32 @@ class Migration:
         return any(r.change for r in self.results)
 
 
-def _dirty_outside_managed(root: Path) -> tuple[list[str], list[str]]:
-    """(dirty paths outside the migration's own files, staged paths outside them)."""
+def _manifest(root: Path) -> Path:
+    gd = gitutil.run_git(root, "rev-parse", "--absolute-git-dir").strip()
+    return Path(gd) / "kit-migrate-written.json"
+
+
+def _load_written(root: Path) -> set:
+    try:
+        return set(json.loads(_manifest(root).read_text()))
+    except (OSError, ValueError):
+        return set()
+
+
+def _save_written(root: Path, written: set):
+    if written:
+        _manifest(root).write_text(json.dumps(sorted(written)))
+
+
+def _dirty_outside_managed(root: Path, written: set) -> tuple[list[str], list[str]]:
+    """(dirty paths, staged paths) that are the OWNER's: everything except the local-only
+    untrack set (never committed by migrate) and files an earlier migrate run wrote
+    (recorded in .git/kit-migrate-written.json) — so a resumed run is not 'dirty', but an
+    owner's own AGENTS.md / LICENSE / docs/DEVELOPMENT.md edits are."""
     dirty, staged = [], []
     for e in gitutil.status_porcelain(root):
         path = e[3:]
-        if any(path == m or path.startswith(m + "/") for m in MANAGED):
+        if path in written or any(path == m or path.startswith(m + "/") for m in UNTRACK):
             continue
         dirty.append(path)
         if e[0] not in (" ", "?"):
@@ -511,7 +555,8 @@ def run(args) -> int:
         raise KitError(f"{root} is not a kit v4 project (no .claude/kit-version) and has no kit.toml — "
                        "for a new project use: kit init")
     apply = args.apply or args.commit
-    dirty, staged = _dirty_outside_managed(root)
+    written = _load_written(root)
+    dirty, staged = _dirty_outside_managed(root, written)
     if dirty and not args.allow_dirty:
         raise KitError(f"working tree is dirty ({len(dirty)} path(s), e.g. {', '.join(dirty[:3])}) — "
                        "commit or stash first, or pass --allow-dirty")
@@ -537,15 +582,18 @@ def run(args) -> int:
         try:
             m2.plan()
         except StopForTest as e:
+            _save_written(root, written | m2.written)
             _print(m2.results, show_diff=False)
             print(f"(test) stopped after {e}")
             return 3
+        written |= m2.written
+        _save_written(root, written)
         _print(m2.results, show_diff=False)
     else:
         _print(m.results, show_diff=False)
 
     if args.commit:
-        add = [w for w in WRITES if (root / w).exists()]
+        add = sorted(w for w in written if (root / w).exists())
         if add:
             gitutil.run_git(root, "add", "--", *add)
         if subprocess.run(["git", "-C", str(root), "diff", "--cached", "--quiet"]).returncode != 0:
@@ -554,6 +602,7 @@ def run(args) -> int:
                 print(f"needs-review commit — git commit failed: {(r.stderr or r.stdout).strip()[:300]}")
                 return 1
             print(f"done commit — {COMMIT_MSG}")
+            _manifest(root).unlink(missing_ok=True)
             pending = True
         else:
             print("skip commit — nothing staged")
