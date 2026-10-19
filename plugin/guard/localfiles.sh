@@ -17,9 +17,15 @@
 # store keeps the content — including edits made after the last snapshot, as long
 # as the edit was in place (an editor that saves by rename breaks the link; the
 # next snapshot re-links). The previous store version of a changed file is kept
-# once under prev/.
+# once under prev/. A symlink is stored AS a symlink (its target), never followed.
+# Files over 8 MiB and files beyond the first 2000 are NOT stored: they are listed in
+# <store>/omitted and named in a WARNING (when the list changes, and on every
+# `kit guard status`) — the store never claims to protect them (review R3-3).
+# A stored file that is gone from the work tree while HEAD does not track it was
+# deleted by the owner: it moves to <store>/trash/ (one generation) and is never put
+# back by a checkout (review N2). The store root is mode 700 (review R3-9).
 #
-#   localfiles.sh snapshot                    kit migrate / kit guard status / session start
+#   localfiles.sh snapshot [--report]         kit migrate / kit guard status (--report) / session start
 #   localfiles.sh post-commit                 (snapshot)
 #   localfiles.sh post-checkout <prev> <new> <flag>
 #   localfiles.sh post-merge [squash]         (prev = ORIG_HEAD)
@@ -51,40 +57,89 @@ FILES="$STORE/files"
 if [[ ! -d "$FILES" && ! -f "$TOP/kit.toml" ]] && ! git cat-file -e HEAD:kit.toml 2>/dev/null; then
     exit 0
 fi
+# the store holds PROJECT.toml / LESSONS / plan copies: private (hard links share the
+# work-tree inode, so only the directory can be locked down)
+mkdir -p "$STATE/localfiles" 2>/dev/null && chmod 700 "$STATE/localfiles" 2>/dev/null
 
 lf_tracked_in() {  # $1 commit → tracked local-only paths (one per line)
     [[ -n "$1" ]] || return 0
     git -c core.quotePath=false ls-tree -r --name-only "$1" -- "${LF_PATHS[@]}" 2>/dev/null
 }
-lf_same() { [[ -e "$1" && -e "$2" && "$1" -ef "$2" ]]; }
-lf_link() {  # $1 src $2 dest: hard link (atomic replace), else copy
+lf_here() { [[ -e "$1" || -L "$1" ]]; }
+lf_same() {  # same inode (hard link), or two symlinks with the same target
+    if [[ -L "$1" || -L "$2" ]]; then
+        [[ -L "$1" && -L "$2" && "$(readlink "$1")" == "$(readlink "$2")" ]]
+    else
+        [[ -e "$1" && -e "$2" && "$1" -ef "$2" ]]
+    fi
+}
+lf_differs() {  # content (or link target) differs
+    if [[ -L "$1" || -L "$2" ]]; then ! lf_same "$1" "$2"; else ! cmp -s "$1" "$2"; fi
+}
+lf_link() {  # $1 src $2 dest: hard link (atomic replace), else copy; a symlink is copied as a symlink
     mkdir -p "$(dirname "$2")" 2>/dev/null || return 1
     rm -f "$2.kit-tmp"
-    ln "$1" "$2.kit-tmp" 2>/dev/null || cp -p "$1" "$2.kit-tmp" 2>/dev/null || return 1
+    if [[ -L "$1" ]]; then
+        cp -P "$1" "$2.kit-tmp" 2>/dev/null || return 1
+    else
+        ln "$1" "$2.kit-tmp" 2>/dev/null || cp -p "$1" "$2.kit-tmp" 2>/dev/null || return 1
+    fi
     mv -f "$2.kit-tmp" "$2"
 }
+lf_store_list() { find "$FILES" \( -type f -o -type l \) ! -name '*.kit-tmp' -print0 2>/dev/null; }
+lf_when() { date -r "$1" '+%Y-%m-%d %H:%M' 2>/dev/null || stat -c %y "$1" 2>/dev/null | cut -c1-16; }
 
 snapshot() {
-    local p n=0 size
+    local p n=0 size report="${1:-}"
+    local -a omitted=()
     # untracked (index) local-only files in the work tree; never .claude/worktrees
     while IFS= read -r -d '' p; do
         [[ "$p" == .claude/worktrees/* ]] && continue
-        [[ -f "$p" && ! -L "$p" ]] || continue
-        n=$((n + 1)); [[ $n -le $LF_MAX_FILES ]] || break
-        size=$(stat -c %s "$p" 2>/dev/null || echo 0)
-        [[ $size -le $LF_MAX_BYTES ]] || continue
+        [[ -L "$p" || -f "$p" ]] || continue
+        n=$((n + 1))
+        if [[ $n -gt $LF_MAX_FILES ]]; then omitted+=("$p (beyond the first $LF_MAX_FILES files)"); continue; fi
+        if [[ ! -L "$p" ]]; then
+            size=$(stat -c %s "$p" 2>/dev/null || echo 0)
+            if [[ $size -gt $LF_MAX_BYTES ]]; then omitted+=("$p (over 8 MiB)"); continue; fi
+        fi
         lf_same "$p" "$FILES/$p" && continue
-        if [[ -f "$FILES/$p" ]] && ! cmp -s "$p" "$FILES/$p"; then
-            mkdir -p "$(dirname "$STORE/prev/$p")" && cp -p "$FILES/$p" "$STORE/prev/$p" 2>/dev/null
+        if lf_here "$FILES/$p" && lf_differs "$p" "$FILES/$p"; then
+            mkdir -p "$(dirname "$STORE/prev/$p")" && rm -f "$STORE/prev/$p" && cp -P -p "$FILES/$p" "$STORE/prev/$p" 2>/dev/null
         fi
         lf_link "$p" "$FILES/$p"
     done < <(git -c core.quotePath=false ls-files -z --others -- "${LF_PATHS[@]}" 2>/dev/null)
+    prune
     [[ -d "$FILES" ]] && printf '%s\n' "$TOP" > "$STORE/repo" 2>/dev/null
+    # files the store does NOT protect: never silent (review R3-3)
+    local list="" old=""
+    [[ ${#omitted[@]} -gt 0 ]] && list="$(printf '%s\n' "${omitted[@]}")"
+    [[ -f "$STORE/omitted" ]] && old="$(cat "$STORE/omitted" 2>/dev/null)"
+    if [[ -n "$list" ]]; then
+        mkdir -p "$STORE" 2>/dev/null && printf '%s\n' "$list" > "$STORE/omitted" 2>/dev/null
+        if [[ "$list" != "$old" || "$report" == --report ]]; then
+            echo "kit: WARNING — ${#omitted[@]} local-only file(s) are NOT protected against a checkout of a pre-migration commit (not in the snapshot store): $(printf '%s\n' "$list" | head -n 5 | paste -sd ';' -)$([[ ${#omitted[@]} -gt 5 ]] && echo " …") — back them up yourself (full list: $STORE/omitted)" >&2
+        fi
+    else
+        rm -f "$STORE/omitted" 2>/dev/null
+    fi
+    return 0
+}
+
+prune() {  # store entries the owner deleted (gone from the work tree, HEAD does not track) → trash/
+    [[ -d "$FILES" ]] || return 0
+    local p now
+    now="$(lf_tracked_in HEAD)"
+    while IFS= read -r -d '' p; do
+        p="${p#"$FILES"/}"
+        lf_here "$p" && continue
+        printf '%s\n' "$now" | grep -qxF -- "$p" && continue
+        mkdir -p "$(dirname "$STORE/trash/$p")" 2>/dev/null && rm -f "$STORE/trash/$p" && mv -f "$FILES/$p" "$STORE/trash/$p" 2>/dev/null
+    done < <(lf_store_list)
     return 0
 }
 
 restore() {  # $1 = previous HEAD (may be empty)
-    local prev="$1" p restored=() kept=() blob=()
+    local prev="$1" p restored=() kept=() blob=() when=()
     [[ -n "$prev" && ! "$prev" =~ ^0+$ ]] || { snapshot; return 0; }
     local -A now=() before=()
     while IFS= read -r p; do now[$p]=1; done < <(lf_tracked_in HEAD)
@@ -94,27 +149,40 @@ restore() {  # $1 = previous HEAD (may be empty)
         while IFS= read -r -d '' p; do
             p="${p#"$FILES"/}"
             if [[ -n "${now[$p]:-}" ]]; then
-                [[ -e "$p" ]] && ! lf_same "$p" "$FILES/$p" && ! cmp -s "$p" "$FILES/$p" && kept+=("$p")
+                lf_here "$p" && ! lf_same "$p" "$FILES/$p" && lf_differs "$p" "$FILES/$p" && kept+=("$p")
                 continue
             fi
-            if [[ ! -e "$p" && -n "${before[$p]:-}" ]]; then
-                lf_link "$FILES/$p" "$p" && restored+=("$p")
+            if ! lf_here "$p" && [[ -n "${before[$p]:-}" ]]; then
+                lf_link "$FILES/$p" "$p" && { restored+=("$p"); when+=("$p as of $(lf_when "$FILES/$p")"); }
             fi
-        done < <(find "$FILES" -type f ! -name '*.kit-tmp' -print0 2>/dev/null)
+        done < <(lf_store_list)
     fi
     # 2) no store copy: the previous HEAD's blob (e.g. the migration commit pulled into a
-    # clone) — owner content only, never .claude/ (that would resurrect v4 kit files)
+    # clone) — owner content only, never .claude/ (that would resurrect v4 kit files);
+    # a tracked symlink (mode 120000) comes back as a symlink. Never from trash/: the
+    # owner deleted those on purpose.
+    local mode
     for p in "${!before[@]}"; do
-        [[ -n "${now[$p]:-}" || -e "$p" || -e "$FILES/$p" ]] && continue
+        [[ -n "${now[$p]:-}" ]] && continue
+        lf_here "$p" || lf_here "$FILES/$p" || lf_here "$STORE/trash/$p" && continue
         [[ "$p" =~ $LF_BLOB_RE ]] || continue
         mkdir -p "$(dirname "$p")" 2>/dev/null
-        git cat-file blob "$prev:$p" > "$p.kit-tmp" 2>/dev/null && mv -f "$p.kit-tmp" "$p" && blob+=("$p")
+        mode="$(git ls-tree "$prev" -- "$p" 2>/dev/null | cut -d' ' -f1)"
+        rm -f "$p.kit-tmp"
+        if [[ "$mode" == 120000 ]]; then
+            ln -s "$(git cat-file blob "$prev:$p" 2>/dev/null)" "$p.kit-tmp" 2>/dev/null && mv -f "$p.kit-tmp" "$p" && blob+=("$p")
+        else
+            git cat-file blob "$prev:$p" > "$p.kit-tmp" 2>/dev/null && mv -f "$p.kit-tmp" "$p" && blob+=("$p")
+        fi
         rm -f "$p.kit-tmp"
     done
     snapshot
     if [[ ${#restored[@]} -gt 0 || ${#blob[@]} -gt 0 ]]; then
         local all=("${restored[@]}" "${blob[@]}")
         echo "kit: restored ${#all[@]} local-only file(s) this checkout removed (${all[*]:0:4}${all[4]:+ …}) — from $STORE${blob[0]:+ / the previous commit}" >&2
+        # review N4: the store copy is as recent as the last in-place edit or snapshot — an
+        # edit saved by rename (sed -i, atomic-save editors) after that time is not in it
+        [[ ${#when[@]} -gt 0 ]] && echo "kit: store copies: $(printf '%s; ' "${when[@]:0:4}")(an edit saved by rename after that time is not in them — see $STORE/prev)" >&2
     fi
     if [[ ${#kept[@]} -gt 0 ]]; then
         echo "kit: ${#kept[@]} local-only file(s) now hold the version this commit tracks (${kept[*]:0:4}${kept[4]:+ …}); your own copies are kept in $FILES and come back when you return to a commit that does not track them" >&2
@@ -122,22 +190,17 @@ restore() {  # $1 = previous HEAD (may be empty)
     return 0
 }
 
-missing_note() {  # snapshot callers that a person reads: name store files missing from the work tree
-    [[ -d "$FILES" ]] || return 0
-    local p miss=() now
-    now="$(lf_tracked_in HEAD)"
-    while IFS= read -r -d '' p; do
-        p="${p#"$FILES"/}"
-        [[ -e "$p" ]] && continue
-        printf '%s\n' "$now" | grep -qxF -- "$p" && continue
-        miss+=("$p")
-    done < <(find "$FILES" -type f ! -name '*.kit-tmp' -print0 2>/dev/null)
-    [[ ${#miss[@]} -gt 0 ]] && echo "kit: ${#miss[@]} local-only file(s) are missing from the work tree but kept in $FILES (${miss[*]:0:4}${miss[4]:+ …}) — copy back what you still want" >&2
+trash_note() {  # `kit guard status`: what the owner deleted is still recoverable — say where
+    [[ -d "$STORE/trash" ]] || return 0
+    local p t=()
+    while IFS= read -r -d '' p; do t+=("${p#"$STORE/trash"/}"); done \
+        < <(find "$STORE/trash" \( -type f -o -type l \) -print0 2>/dev/null)
+    [[ ${#t[@]} -gt 0 ]] && echo "kit: ${#t[@]} local-only file(s) gone from the work tree (deleted, or removed by a reset / stash / clean that runs no hook) are kept in $STORE/trash (${t[*]:0:4}${t[4]:+ …}) — copy back what you still want; a checkout never restores them" >&2
     return 0
 }
 
 case "$MODE" in
-    snapshot) snapshot; [[ "${2:-}" == --report ]] && missing_note ;;
+    snapshot) snapshot "${2:-}"; [[ "${2:-}" == --report ]] && trash_note ;;
     post-commit) snapshot ;;
     post-checkout) [[ "${4:-1}" == 1 ]] && restore "${2:-}" ;;
     post-merge|post-rewrite) restore "$(git rev-parse -q --verify ORIG_HEAD 2>/dev/null)" ;;

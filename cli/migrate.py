@@ -558,12 +558,17 @@ def _backup(root: Path) -> Path:
 def _snapshot_local(root: Path) -> str:
     """Hard-link the now-untracked local-only files into the guard's store
     (plugin/guard/localfiles.sh) so a checkout of a pre-migration commit — which still
-    tracks them — cannot lose them (review F3). Returns the store path."""
+    tracks them — cannot lose them (review F3). Returns the store path. Files the store
+    cannot hold (over 8 MiB, beyond 2000 files) are printed as a
+    WARNING — never claimed as protected (review R3-3)."""
     script = paths.plugin_dir() / "guard" / "localfiles.sh"
     try:
-        subprocess.run(["bash", str(script), "snapshot"], cwd=root, capture_output=True, text=True, timeout=60)
+        r = subprocess.run(["bash", str(script), "snapshot", "--report"], cwd=root, capture_output=True, text=True, timeout=60)
+        for line in r.stderr.splitlines():
+            if "NOT protected" in line:
+                print(line)
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        print("warning: the local-only file snapshot failed — pre-migration checkouts are NOT protected (kit guard status retries)")
     import hashlib
     top = gitutil.repo_root(root) or root
     return str(paths.state_dir() / "localfiles" / hashlib.sha1(str(top).encode()).hexdigest()[:12])

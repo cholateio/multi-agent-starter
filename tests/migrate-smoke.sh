@@ -276,6 +276,43 @@ NKID="$(printf '%s' "$NK" | sha1sum | cut -c1-12)"
 absent "M14: non-kit repo: no localfiles store" "$W/state/localfiles/$NKID"
 git config --file "$W/gitconfig" --unset core.hooksPath
 
+# ---- M17 (review R3-3 / R3-9a / N2 / N4): symlinks, omitted files, store perms, prune, mtime
+git config --file "$W/gitconfig" core.hooksPath "$SHD"
+R="$W/m17"; make_v4 "$R"
+ln -s ../README.md "$R/docs/plans/link.md"; ln -s /nonexistent/target "$R/.claude/dangling"
+head -c $((9 * 1024 * 1024)) /dev/zero | tr '\0' 'x' > "$R/docs/plans/big.md"
+g "$R" add -A; g "$R" commit -qm "v4 extras"; g "$R" tag v4-state
+OUT="$(km "$R" --commit)"; CODE=$?
+eq "M17: migrate --commit exit 0" "$CODE" "0"
+has "M17: migrate warns about the file it cannot protect (> 8 MiB)" "$OUT" "docs/plans/big.md"
+has "M17: …as NOT protected" "$OUT" "NOT protected"
+RID17="$(printf '%s' "$R" | sha1sum | cut -c1-12)"; ST17="$W/state/localfiles/$RID17"
+[ -L "$ST17/files/docs/plans/link.md" ] && pass "M17: a symlink is stored AS a symlink" || fail "M17: a symlink is stored AS a symlink" "$(ls -l "$ST17/files/docs/plans/" 2>&1 | head -3)"
+eq "M17: …with its target" "$(readlink "$ST17/files/docs/plans/link.md" 2>/dev/null)" "../README.md"
+eq "M17: store root is private (700)" "$(stat -c %a "$W/state/localfiles" 2>/dev/null)" "700"
+GS="$(cd "$R" && python3 "$KIT_ROOT/bin/kit" guard status 2>&1)"
+has "M17: kit guard status lists the omitted file" "$GS" "docs/plans/big.md"
+has "M17: …as NOT protected" "$GS" "NOT protected"
+(cd "$R" && git checkout -q v4-state 2>/dev/null)
+CO2="$(cd "$R" && git checkout -q main 2>&1)"
+[ -L "$R/docs/plans/link.md" ] && pass "M17: the symlink comes back as a symlink" || fail "M17: the symlink comes back as a symlink" "$(ls -l "$R/docs/plans/link.md" 2>&1)"
+eq "M17: …same target" "$(readlink "$R/docs/plans/link.md" 2>/dev/null)" "../README.md"
+[ -L "$R/.claude/dangling" ] && pass "M17: a dangling .claude symlink comes back (store, not blob)" || fail "M17: a dangling .claude symlink comes back" "missing"
+has "M17: the restore message dates the store copies" "$CO2" "as of"
+# N2: a plan the owner deletes on purpose is not resurrected after a later snapshot
+echo "# done plan" > "$R/docs/plans/done.md"; g "$R" commit -q --allow-empty -m snap1
+rm -f "$R/docs/plans/done.md" "$R/docs/plans/p.md"; g "$R" commit -q --allow-empty -m snap2
+(cd "$R" && git checkout -q v4-state 2>/dev/null && git checkout -q main 2>/dev/null)
+absent "M17: a deleted plan (snapshot taken after the delete) stays deleted after visiting an old ref" "$R/docs/plans/p.md"
+absent "M17: …an untracked-only deleted plan too" "$R/docs/plans/done.md"
+exists "M17: …but its last copy is kept in the store's trash" "$ST17/trash/docs/plans/p.md"
+mkdir -p "$R/.claude/many"; for i in $(seq 1 2005); do : > "$R/.claude/many/f$i"; done
+LO="$(cd "$R" && bash "$KIT_ROOT/plugin/guard/localfiles.sh" snapshot 2>&1)"
+has "M17: files beyond the 2000-file cap are named as NOT protected" "$LO" "beyond the first 2000 files"
+has "M17: …with the full list in the store" "$(cat "$ST17/omitted" 2>/dev/null)" "(beyond the first 2000 files)"
+rm -rf "$R/.claude/many"
+git config --file "$W/gitconfig" --unset core.hooksPath
+
 # ---- M15 (review O8): an owner edit to a file migrate wrote, between --apply and --commit
 R="$W/m15"; make_v4 "$R"; km "$R" --apply >/dev/null
 echo "owner tweak after apply" >> "$R/AGENTS.md"
