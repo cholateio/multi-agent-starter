@@ -217,7 +217,7 @@ OUT="$(km "$R" --apply)"; has "M13: rerun converges" "$OUT" "nothing to do"
 # ---- M14 (review F3): a checkout of a pre-migration ref must not lose local-only files
 # exact reviewer repro, with the kit shims installed under the global hooksPath
 SHD="$KIT_CONFIG_HOME/git-hooks"; mkdir -p "$SHD"
-for h in pre-commit pre-push post-checkout post-merge post-rewrite post-commit; do
+for h in pre-commit pre-push pre-rebase post-checkout post-merge post-rewrite post-commit; do
   sed "s/__HOOK__/$h/g" "$KIT_ROOT/plugin/guard/shim.sh" > "$SHD/$h"; chmod 755 "$SHD/$h"
 done
 printf 'kit_root = "%s"\n' "$KIT_ROOT" > "$KIT_CONFIG_HOME/config.toml"
@@ -359,6 +359,80 @@ has "M19: session start reports the move" "$SSO" "docs/plans/ss.md"
 # … and a checkout never resurrects a trashed file
 (cd "$R" && git checkout -q v4-state 2>/dev/null && git checkout -q main 2>/dev/null)
 absent "M19: trashed plans are not restored by a checkout" "$R/docs/plans/cycle.md"
+git config --file "$W/gitconfig" --unset core.hooksPath
+
+# ---- M20 (v5.0.1): a rebase that replays the migration commit onto pre-migration history
+# (real case: a scheduled workflow keeps pushing empty commits to the remote's old side).
+# git checks out the base (old tracked versions overwrite the local-only files), replays the
+# migration commit (deletes them) and runs post-commit per pick: the files must come back
+# from the store with the owner's newest content — not be trashed as an owner deletion
+git config --file "$W/gitconfig" core.hooksPath "$SHD"
+m20repo() {  # <dir>: pre-migration remote, migrated local + one more commit, unfetched remote heartbeat
+  local R="$1" e
+  make_v4 "$R"; echo "# mine" > "$R/.claude/skills/my-skill.md"; g "$R" add -A; g "$R" commit -qm mine
+  rm -rf "$R.git"; git clone -q --bare "$R" "$R.git" 2>/dev/null; g "$R" remote add origin "$R.git"; g "$R" fetch -q origin 2>/dev/null
+  km "$R" --commit >/dev/null 2>&1
+  echo "work" > "$R/work.txt"; g "$R" add work.txt; g "$R" commit -qm work 2>/dev/null
+  e="$(g "$R.git" commit-tree -p main -m heartbeat "main^{tree}")"; g "$R.git" update-ref refs/heads/main "$e"
+}
+ntrash() { find "$1/trash" -type f 2>/dev/null | wc -l | tr -d ' '; }
+R="$W/m20"; m20repo "$R"; g "$R" fetch -q origin
+ST20="$W/state/localfiles/$(printf '%s' "$R" | sha1sum | cut -c1-12)"
+# an edit saved by rename AFTER the last snapshot (breaks the hard link) — only the
+# pre-rebase snapshot can capture it — and an in-place edit
+sed -i 's/^status = .*/status = "edited just before the rebase"/' "$R/PROJECT.toml"
+echo "- three (in place)" >> "$R/docs/LESSONS.md"
+RO="$(cd "$R" && git rebase origin/main 2>&1)"; RC=$?
+eq "M20: rebase of the migration commit onto the pre-migration side exit 0" "$RC" "0"
+eq "M20: …PROJECT.toml untracked after the rebase" "$(g "$R" ls-files PROJECT.toml)" ""
+has "M20: PROJECT.toml is back with the edit made just before the rebase" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "edited just before the rebase"
+has "M20: …docs/LESSONS.md with the owner's in-place edit" "$(cat "$R/docs/LESSONS.md" 2>/dev/null)" "three (in place)"
+exists "M20: …docs/plans/p.md is back" "$R/docs/plans/p.md"
+exists "M20: …docs/superpowers/plans/q.md is back" "$R/docs/superpowers/plans/q.md"
+has "M20: …the owner's .claude file is back" "$(cat "$R/.claude/skills/my-skill.md" 2>/dev/null)" "mine"
+absent "M20: …v4 kit files are NOT resurrected" "$R/.claude/kit-version"
+lacks "M20: …nothing reported as moved to trash" "$RO" "moved to"
+eq "M20: …the trash is empty" "$(ntrash "$ST20")" "0"
+has "M20: …the hook says it restored them" "$RO" "restored"
+eq "M20: …tree clean (restored files are ignored)" "$(g "$R" status --porcelain)" ""
+# (b) the same through git pull --rebase (no separate fetch)
+RB20="$W/m20b"; m20repo "$RB20"
+sed -i 's/^status = .*/status = "edited before pull --rebase"/' "$RB20/PROJECT.toml"
+RO="$(cd "$RB20" && git pull -q --rebase origin main 2>&1)"; RC=$?
+eq "M20b: git pull --rebase exit 0" "$RC" "0"
+has "M20b: PROJECT.toml is back with the newest edit" "$(cat "$RB20/PROJECT.toml" 2>/dev/null)" "edited before pull --rebase"
+exists "M20b: …docs/LESSONS.md is back" "$RB20/docs/LESSONS.md"
+exists "M20b: …docs/plans/p.md is back" "$RB20/docs/plans/p.md"
+lacks "M20b: …nothing moved to trash" "$RO" "moved to"
+# (c) a genuine owner deletion (no tree-changing git operation since the last snapshot) is trashed
+rm -f "$R/docs/LESSONS.md"; echo other > "$R/other.txt"; g "$R" add other.txt
+CO="$(cd "$R" && git commit -q -m other 2>&1)"
+absent "M20c: an owner rm + unrelated commit: LESSONS.md stays deleted" "$R/docs/LESSONS.md"
+has "M20c: …moved to the store's trash" "$CO" "moved to $ST20/trash (docs/LESSONS.md"
+TG20="$(ls -d "$ST20/trash/docs/LESSONS.md".~*~ 2>/dev/null | head -n 1)"
+exists "M20c: …its last copy is in the trash" "${TG20:-$ST20/trash/docs/LESSONS.md.~none~}"
+# (d) a hook-less reset round trip through a pre-migration commit is detected (reflog) at the next snapshot
+TIP="$(g "$R" rev-parse HEAD)"
+(cd "$R" && git reset -q --hard origin/main && git reset -q --hard "$TIP")
+absent "M20d: (git deleted PROJECT.toml during the reset round trip)" "$R/PROJECT.toml"
+GS="$(cd "$R" && python3 "$KIT_ROOT/bin/kit" guard status 2>&1)"
+has "M20d: kit guard status restores it from the store" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "edited just before the rebase"
+has "M20d: …and says so" "$GS" "restored"
+absent "M20d: …the owner-deleted LESSONS.md stays deleted" "$R/docs/LESSONS.md"
+# (e) cherry-picking the migration commit onto the pre-migration side (post-commit runs with
+# CHERRY_PICK_HEAD present) and (f) a non-ff merge of it (post-merge runs with MERGE_HEAD present)
+MIG="$(g "$R" rev-parse main~2)"
+(cd "$R" && git checkout -q -b cp origin/main 2>/dev/null)
+CPO="$(cd "$R" && git cherry-pick "$MIG" 2>&1)"
+eq "M20e: cherry-pick of the migration commit untracks PROJECT.toml" "$(g "$R" ls-files PROJECT.toml)" ""
+has "M20e: …PROJECT.toml is back with the owner's content" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "edited just before the rebase"
+lacks "M20e: …nothing moved to trash" "$CPO" "moved to"
+(cd "$R" && git checkout -q -b mg origin/main 2>/dev/null); echo side > "$R/side.txt"; g "$R" add side.txt; g "$R" commit -qm side 2>/dev/null
+MGO="$(cd "$R" && git merge -q --no-edit main 2>&1)"
+eq "M20f: non-ff merge of the migrated main untracks PROJECT.toml" "$(g "$R" ls-files PROJECT.toml)" ""
+has "M20f: …PROJECT.toml is back with the owner's content" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "edited just before the rebase"
+lacks "M20f: …nothing moved to trash" "$MGO" "moved to"
+(cd "$R" && git checkout -q main 2>/dev/null)
 git config --file "$W/gitconfig" --unset core.hooksPath
 
 # ---- M15 (review O8): an owner edit to a file migrate wrote, between --apply and --commit

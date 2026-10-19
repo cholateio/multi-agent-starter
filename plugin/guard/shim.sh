@@ -11,10 +11,12 @@
 # core.hooksPath, resolves back to this shim and recurses forever (Phase 0 spike).
 # A repo-local core.hooksPath (husky-style) overrides the global one and this shim
 # never runs there — `kit doctor` / `kit guard status` / `kit audit` (A16) flag it.
-#   post-checkout / post-merge / post-rewrite / post-commit: also keep the repo's
-#     local-only files (PROJECT.toml, docs/LESSONS.md, plans, .claude/) safe across
-#     checkouts of pre-migration commits ($kit_root/plugin/guard/localfiles.sh; best
-#     effort, never changes the hook's exit status).
+#   pre-rebase / post-checkout / post-merge / post-rewrite / post-commit: also keep the
+#     repo's local-only files (PROJECT.toml, docs/LESSONS.md, plans, .claude/) safe across
+#     checkouts / rebases through pre-migration commits ($kit_root/plugin/guard/localfiles.sh;
+#     pre-rebase snapshots the newest owner edits before git touches the tree; best effort,
+#     never changes the hook's exit status). pre-merge-commit / pre-applypatch are not used:
+#     git runs them after it has already rewritten the work tree.
 # Runs as `bash -p` (review R5-1): no shell functions imported from the environment (an
 # exported `cat` / `bash` / `git` function would blind or skip the guard) and no $BASH_ENV
 # for everything after this line; "$BASH" is the running bash by absolute path (no lookup).
@@ -25,7 +27,7 @@ CFG_DIR="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)"
 CFG="$CFG_DIR/config.toml"
 INPUT=""
 case "$HOOK" in
-    post-checkout|post-merge|post-rewrite|post-commit)
+    pre-rebase|post-checkout|post-merge|post-rewrite|post-commit)
         KIT_ROOT="$(sed -nE '/^[[:space:]]*\[/q; s/^[[:space:]]*kit_root[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$CFG" 2>/dev/null | head -n 1)"
         LF="$KIT_ROOT/plugin/guard/localfiles.sh"
         [[ -n "$KIT_ROOT" && -f "$LF" ]] && "$BASH" -p "$LF" "$HOOK" "$@" </dev/null || true
