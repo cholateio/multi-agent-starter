@@ -391,7 +391,7 @@
 
 <!-- ================================================================ -->
 <section class="part" id="hooks-intro">
-  <p class="sec-label">.claude/hooks/ · 物理層</p>
+  <p class="sec-label">plugin/hooks/ · 物理層</p>
   <h2>一、五支 hook</h2>
   <p>
     Hook 是掛在 Claude Code 事件上的 bash 腳本。Claude Code 的一個 session 只有五個時點
@@ -511,12 +511,12 @@
     迷航的模型會在某個瞬間覺得「我小心一點改應該沒事」。文字規則擋不住一個已經說服自己的模型。
   </p>
   <p>
-    所以禁區同時存在兩份：CLAUDE.md 的文字給人讀，<code>.claude/protected-paths</code> 的路徑清單
+    所以禁區同時存在兩份：CLAUDE.md 的文字給人讀，<code>kit.toml</code> 的 <code>protected</code> 路徑清單（v4 為 <code>.claude/protected-paths</code>）
     給這支 hook 執行。模型要編輯的檔案命中清單，<strong>直接拒絕</strong>，不進入討論。
     路徑先做過正規化——想用 <code>src/../.claude/settings.json</code> 這種寫法繞路徑比對，繞不過去。
   </p>
   <p>
-    它還保護第二種東西：kit 自己的規則檔。模型要改 <code>.claude/</code> 底下的 rules、hooks、
+    它還保護第二種東西：kit 自己的規則檔。模型要改 <code>plugin/</code> 底下的 rules、hooks、
     settings 時，跳出視窗<strong>問你</strong>。為什麼是問而不是直接擋？因為你在場時，一鍵就能放行
     自己真的要求過的修改；而你不在場時——沒有人能按核准，「問」就自動變成「擋」。
     一個決定，兩種情境都對。
@@ -626,7 +626,7 @@
 
 <!-- ================================================================ -->
 <section class="part" id="rules-intro">
-  <p class="sec-label">.claude/rules/ · 判斷層</p>
+  <p class="sec-label">plugin/rules/ · 判斷層</p>
   <h2>二、五份 rule</h2>
   <p>
     Hook 擋得住的都是機械可判定的事：路徑命中清單、調用完全相同、行數超過門檻。
@@ -737,7 +737,7 @@
 
 <!-- ================================================================ -->
 <section class="part" id="docs">
-  <p class="sec-label">.claude/docs/ · 需要時才讀</p>
+  <p class="sec-label">plugin/skills/ · 需要時才讀</p>
   <h2>三、兩份檢核表</h2>
   <p>
     有些判斷力沒必要每個 session 都載入，但在特定時刻價值連城——卡關的時候、要宣告完成的時候、
@@ -765,7 +765,7 @@
 
 <!-- ================================================================ -->
 <section class="part" id="skills">
-  <p class="sec-label">.claude/skills/ + agents/</p>
+  <p class="sec-label">plugin/skills/ + agents/</p>
   <h2>四、Skills 與 Agents</h2>
   <p>
     Skills 是模型可以調用的標準操作，agents 是預先定義好的 subagent 角色。這裡的設計重點只有一個：
@@ -794,21 +794,21 @@
 
 <!-- ================================================================ -->
 <section class="part" id="deploy">
-  <p class="sec-label">init.sh · tests/ · LESSONS</p>
+  <p class="sec-label">kit CLI · tests/ · LESSONS</p>
   <h2>五、安裝與回饋迴路</h2>
   <p>
-    十六個專案各有一份 <code>.claude/</code>，規則改了一條，要怎麼讓十六份同步？人肉複製貼上
+    v4 時代十六個專案各有一份 <code>.claude/</code> 副本，規則改了一條，要怎麼讓十六份同步？人肉複製貼上
     十六次？三個月後每個專案的規則都長得不一樣——這叫 drift，是多專案部署的慢性死因。
   </p>
   <p>
-    Kit 的解法是<strong>檔案所有權二分</strong>：<code>.claude/</code> 整套屬於 kit（kit-owned），
-    要客製就改 kit repo，跑 <code>init.sh --update</code> 一鍵鋪回所有專案；CLAUDE.md、
-    PROJECT.toml、禁區清單屬於專案（user-owned），更新<strong>永不覆蓋</strong>。
+    Kit 的解法是<strong>檔案所有權二分</strong>：整套規則與 hook 屬於 kit（kit-owned），v5 起
+    以 plugin 在機器上裝一次、所有專案共用，要客製就改 kit repo，跑 <code>kit update</code>；AGENTS.md、
+    kit.toml 與禁區清單屬於專案（user-owned），更新<strong>永不覆蓋</strong>。
     誰擁有哪個檔案不是君子協定——protect-paths hook 在物理層執法。
   </p>
 
   <figure>
-    <svg viewBox="0 0 720 240" role="img" aria-label="回饋迴路：kit repo 經 init.sh 鋪進 16 個專案，專案的 LESSONS 踩坑紀錄聚類後回流成 kit 的新防線">
+    <svg viewBox="0 0 720 240" role="img" aria-label="回饋迴路：kit repo 經 plugin 一次安裝、供 16 個專案共用，專案的 LESSONS 踩坑紀錄聚類後回流成 kit 的新防線">
       <defs>
         <marker id="ah4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M1 1L9 5L1 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
@@ -820,12 +820,12 @@
         <text x="120" y="126" text-anchor="middle" font-size="10.5" opacity="0.75">規則 · hooks · 測試</text>
 
         <line x1="210" y1="100" x2="490" y2="100" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah4)"/>
-        <text x="350" y="90" text-anchor="middle" font-size="11" font-family="var(--mono)">init.sh --update</text>
+        <text x="350" y="90" text-anchor="middle" font-size="11" font-family="var(--mono)">kit setup / update</text>
         <text x="350" y="118" text-anchor="middle" font-size="10.5" opacity="0.7">kit-owned 檔案覆蓋鋪回</text>
 
         <rect x="494" y="66" width="196" height="98" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
         <text x="592" y="94" text-anchor="middle" font-weight="700">16 個專案</text>
-        <text x="592" y="112" text-anchor="middle" font-size="10.5" opacity="0.75">.claude/ = kit-owned</text>
+        <text x="592" y="112" text-anchor="middle" font-size="10.5" opacity="0.75">plugin/ = kit-owned</text>
         <text x="592" y="128" text-anchor="middle" font-size="10.5" opacity="0.75">CLAUDE.md / TOML = user-owned</text>
         <text x="592" y="150" text-anchor="middle" font-size="10.5" opacity="0.75">各自累積 LESSONS.md</text>
 

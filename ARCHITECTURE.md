@@ -170,7 +170,7 @@ user 收據「批次破檻後每個動碼輪連攔」。設計文件與三輪 co
 3. **kit-evolution 減法紀律**：降級是預設、真刪僅限 hook 接管、GREEN-without
    隔離 A/B、回升觸發、總量棘輪——減法從此跟加法一樣有收據要求。
 
-### v4.10（當前）：驗證閉環——驗證器可信度、驗證終點、不可逆前置閘
+### v4.10：驗證閉環——驗證器可信度、驗證終點、不可逆前置閘
 
 第一個以**全機隊 LESSONS 掃描**為收據來源的版本（13 專案 85 條聚 11 類；
 LESSONS→kit 的回饋迴路首次完整跑通）。設計與七輪 codex 計畫審軌跡見
@@ -189,6 +189,51 @@ LESSONS→kit 的回饋迴路首次完整跑通）。設計與七輪 codex 計�
    哨兵、正向證明才刪、回復決策先於變異）。
 3. **維護件**：LESSONS 門檻中文修正（300 行為準，byte 限僅 ASCII 檔）、
    R5 加代理變數列。rules/ no-growth 不變量守住（19621→19615B）。
+
+### v5（當前）：機器級安裝與機隊安全流程
+
+v4 的三件承重牆（Stop gate、tool-breaker、re-anchor）不動；v5 改的是**安裝形態**與
+**洩漏面**，兩者同源——v4 把 kit 複製進每個專案並 tracked。審計（2026-10）的收據：
+沒有活憑證進過歷史，但成本、雲端專案名、事故筆記、本機路徑與私人 README 都躺在公開
+repo 裡，全是**開發產物**而非程式碼；沒有任何一道閘攔手動 commit；十幾份 `.claude/`
+副本其中多數已與模板 drift；`Bash(timeout *)` 放行任何指令。設計權威與 D1–D20 決定
+見 `docs/design-history/2026-10-19-kit-v5-design.md`，實作計畫見同目錄的 plan。
+
+一句話：**kit 從「專案的一部分」變成「機器的一部分」**。專案只留 tracked、工具中立、
+陌生人安全的最小真相（`AGENTS.md` + `kit.toml`），其餘要嘛在 plugin，要嘛只在本機。
+
+元件地圖（v4 → v5）：
+
+| v4（每專案一份） | v5 去處 |
+|---|---|
+| `.claude/rules/`（5） | `plugin/rules/`，由 SessionStart hook 注入（plugin 不能帶 rules）；兩段、預算雙軌 |
+| `.claude/hooks/`（5）+ `settings.json` 的 hooks | `plugin/hooks/` + `hooks.json`；hook 主體只多路徑解析與**啟用閘** |
+| `.claude/skills/`、`agents/`、`docs/` | `plugin/skills/`（`/kit:*`，docs 併入 `judgment`、`verify-signals`）、`plugin/agents/` |
+| `settings.json` permissions | `~/.claude/settings.json`，由 `kit setup` 合併（plugin 無法出貨 permissions）；移除 `Bash(timeout *)` |
+| `.claude/protected-paths` | 專案 `kit.toml` 的 `protected` |
+| `init.sh`、`--update` | `kit init` / `kit migrate` / `kit update`（Python 3.11 純標準庫，`bin/kit` → `cli/`） |
+| （無） | `plugin/guard/`：全域 `core.hooksPath` 上的 pre-commit / pre-push guard；`kit audit` 機隊審計 |
+| `PROJECT.toml`、`docs/LESSONS.md`、`.claude/` | 仍存在但**不 track**（統一 `.gitignore` 區塊，guard R2 擋推） |
+
+三個機制：
+
+1. **啟用閘**：plugin 在每個目錄都會 fire，所以每支 hook 開頭先找 `kit.toml`；找不到就
+   exit 0、stdout 空——非 kit 目錄（含 `$HOME`）完全靜默。v4 專案（有 `.claude/kit-version`
+   的）讓位並提示 `kit migrate`，避免雙重執行。
+2. **本機 git guard**（威脅面：人與 AI 的每次 commit / push）：`kit setup` 把全域
+   `core.hooksPath` 指向 shim，shim 先跑 guard 再鏈到 repo 自己的 hook。規則 R1 gitleaks、
+   R2 禁推路徑、R3 本機路徑、R4/R5 個人字面值（`always` / `public-only` 兩層）、R6/R7
+   警示、R8 gitleaks 缺席。個人字面值只存在本機 `privacy.local.toml`（mode 600），輸出
+   永不回顯值。bypass 只有 user 在 TTY 前能開，單次、有時效、留審計痕跡。細節見
+   `DEFENSES.md` 的 v5 guard 一節。
+3. **機隊 audit**（`kit audit`）：一條指令掃全機隊，涵蓋 gitleaks 全史、目前樹與歷史中的
+   個人字面值（A2/A3）、被 track 的禁推路徑、GitHub 設定（secret scanning、workflow 權限）、
+   workflow SHA 釘選、lockfile 漏洞、README 陌生人安全。輸出終端表 + HTML，有 CRITICAL 或
+   HIGH 即非零退出。
+
+kit repo 自己的衛生（Phase 6）：HEAD 對陌生人乾淨——私人專案名以 `proj-a…` 代稱
+（對照表只存在 owner 本機）、金額與事故識別細節刪除、本機路徑改 `$HOME`、測試 fixture
+的 `/home/<user>` 字串在執行期組出。**歷史尚未重寫**；history rewrite 排在 v5 落地之後。
 
 ## 三、角色設計
 

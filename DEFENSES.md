@@ -24,7 +24,7 @@
 
 ## 一、Prompt engineering 防護(措辭層:寫進 model context 的規則與模板)
 
-五份 `.claude/rules/` 每個 session 自動載入,是固定的 context 稅,總量由
+六份 `plugin/rules/`(v5 起由 SessionStart hook 注入;v4 為 `.claude/rules/`)每個 session 自動載入,是固定的 context 稅,總量由
 smoke test 把關(cap 20480B,v4.9 起附棘輪公式:瘦身後下修至實際值 +5%、
 不高於舊 cap)。
 
@@ -73,10 +73,10 @@ smoke test 把關(cap 20480B,v4.9 起附棘輪公式:瘦身後下修至實際值
   = 規則被無視,不是缺席)、要 RED-GREEN 收據(拿不出失敗證據 = 不知道
   在修什麼,不加)、逐字記藉口(paraphrase 會丟觸發詞)、rules/ 20KB 總量
   預算。防的是「模型以優化名義把規則越改越軟」。
-- **判斷檢核表**(`.claude/docs/judgment-matrix.md`,需要時才讀)——換路徑
+- **判斷檢核表**(`plugin/skills/judgment`,需要時才讀)——換路徑
   信號(R1)、完成判準(R2)、熔斷提問時機(R3)、品味不拍板(R4),
   每條附正例反例。R3/R4 觸發條件明文**優先於** kit-judgment 的「直接做」傾向。
-- **驗證信號注入**(`.claude/docs/verification-signals.md`,需要時才讀,v4.2
+- **驗證信號注入**(`plugin/skills/verify-signals`,需要時才讀,v4.2
   起,v4.10 擴至八節)——「迴圈裡缺便宜驗證信號」的高風險領域:UI 沒截圖
   =視覺上未驗證(S1)、schema 每欄要有現存讀取路徑(S2)、bug 連環卡後
   交接去假設化(S3)、SaaS 引入必附實查成本卡且 user 拍板(S4)、業務邏輯
@@ -121,7 +121,7 @@ API 呼叫都重複攜帶,越肥 → compact 越早 → 迷航越早。這層專
 claude 啟動時的環境)。
 
 - **protect-paths.sh**(PreToolUse,Edit/Write/NotebookEdit)——兩檔防護:
-  `.claude/protected-paths` 清單命中即 **hard-deny**(你宣告的專案禁區,
+  專案 `kit.toml` 的 `protected` 清單(v4 為 `.claude/protected-paths`)命中即 **hard-deny**(你宣告的專案禁區,
   路徑經 dot-segment 正規化,防 `src/../.claude/x` 繞過);kit-owned 檔案
   (rules/hooks/scripts/agents/skills/docs、settings.json、kit-version)
   命中轉 **ask**——user 在場一鍵放行你確實要求過的修改,**無人值守時等同
@@ -166,12 +166,12 @@ claude 啟動時的環境)。
   fail-closed)。block 訊息仍不印 marker 捷徑;defer 的 echo 教學行例外
   ——它是有界的門(150 行後必再問),不是認證。**架構轉向:與其把 skip
   做難,不如讓誠實免費、讓謊言留痕**——正門開著,走正門留名留理由。
-- **檔案級所有權二分 + 回流**——`.claude/` 全套 kit-owned(每 session 自動
-  載入)、CLAUDE.md 純專案內容。客製改 kit repo 再 `init.sh --update` 覆蓋
-  回流,不靠人肉同步(drift 陷阱)。所有權從「檔案內的段落約定」升格成
+- **檔案級所有權二分 + 回流**——kit 全套(`plugin/`)由 kit-owned plugin 一次安裝、
+  所有專案共用(v4 為每專案複製 `.claude/`),專案只留 `AGENTS.md` + `kit.toml`。
+  客製改 kit repo 再 `kit update`,不靠人肉同步(drift 陷阱)。所有權從「檔案內的段落約定」升格成
   「檔案本身 + hook 執法」。
 - **constraints ↔ protected-paths 同步執法**——CLAUDE.md 每條「路徑型」禁區
-  要同步寫進 `.claude/protected-paths`,讓 prose(給人看)和物理執法(給 hook)
+  要同步寫進 `kit.toml` 的 `protected`,讓 prose(給人看)和物理執法(給 hook)
   是同一份清單的兩面。模型只能加嚴、不能放寬(放寬需 user 明確同意)。
 - **Reviewer isolation(KIT_PROFILE)**——full=`/codex:review` 跨模型真隔離;
   solo=fresh-context Claude 自審(只剩狀態/時間隔離),且**明文宣告降級、
