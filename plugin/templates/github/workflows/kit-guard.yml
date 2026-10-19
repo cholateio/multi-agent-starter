@@ -1,0 +1,44 @@
+# kit-guard: CI backstop for the local git guard. Generic rules only: secrets (gitleaks),
+# files that must never be tracked, and local absolute paths. No personal values belong here.
+name: kit-guard
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: gitleaks
+        env:
+          GITLEAKS_URL: https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -sSLf -o gitleaks.tar.gz "$GITLEAKS_URL"
+          echo "$GITLEAKS_SHA256  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          cd "$GITHUB_WORKSPACE"
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --exit-code 1
+
+      - name: kit privacy
+        run: |
+          set -euo pipefail
+          bad=0
+          forbidden='^(\.claude/|\.superpowers/|PROJECT\.toml$|docs/LESSONS\.md$|docs/plans/|docs/superpowers/plans/|docs/decisions/|CLAUDE\.local\.md$|.*\.local\.toml$)'
+          if git ls-files | grep -E "$forbidden"; then
+            echo "::error::local-only files are tracked (see the list above)"; bad=1
+          fi
+          if git grep -nE '/home/[a-z_][a-z0-9_-]*/|/mnt/[a-z]/Users/' -- . ':!*.lock'; then
+            echo "::error::local absolute paths found (see the list above)"; bad=1
+          fi
+          exit "$bad"

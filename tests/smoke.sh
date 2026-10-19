@@ -23,12 +23,17 @@ sums() { (cd "$1" && find . -path ./.git -prune -o -type f -print | sort | xargs
 # i1: empty dir, public (default)
 OUT="$(ki "$W/p1")"; CODE=$?
 [ "$CODE" -eq 0 ] && pass "i1: exit 0" || fail "i1: exit 0" "got $CODE: $OUT"
-for f in CLAUDE.md kit.toml .gitignore PROJECT.toml LICENSE; do
+for f in AGENTS.md CLAUDE.md README.md kit.toml .gitignore PROJECT.toml LICENSE docs/DEVELOPMENT.md .github/workflows/kit-guard.yml; do
   [ -f "$W/p1/$f" ] && pass "i1: $f laid down" || fail "i1: $f laid down" "missing"
 done
 has "i1: kit.toml visibility public" "$(cat "$W/p1/kit.toml" 2>/dev/null)" 'visibility = "public"'
 has "i1: kit.toml license MIT" "$(cat "$W/p1/kit.toml" 2>/dev/null)" 'license = "MIT"'
 has "i1: CLAUDE.md stub imports AGENTS.md" "$(head -1 "$W/p1/CLAUDE.md" 2>/dev/null)" "@AGENTS.md"
+[ "$(grep -c '^## ' "$W/p1/AGENTS.md" 2>/dev/null)" = "6" ] && pass "i1: AGENTS.md has six sections" || fail "i1: AGENTS.md has six sections" "$(grep -c '^## ' "$W/p1/AGENTS.md" 2>&1)"
+has "i1: DEVELOPMENT.md env section" "$(cat "$W/p1/docs/DEVELOPMENT.md" 2>/dev/null)" "## Environment variables"
+[ "$(cat "$W"/p1/AGENTS.md "$W"/p1/README.md "$W"/p1/docs/DEVELOPMENT.md | grep -c '/home/\|NT\$\|US\$')" = "0" ] && pass "i1: templates carry no local paths/costs" || fail "i1: templates carry no local paths/costs" "hit"
+[ "$(head -1 "$W/p1/LICENSE")" = "MIT License" ] && pass "i1: LICENSE is MIT" || fail "i1: LICENSE is MIT" "$(head -1 "$W/p1/LICENSE")"
+[ -z "$(grep -rl '{{' "$W/p1" --exclude-dir=.git)" ] && pass "i1: no {{placeholder}} leaked" || fail "i1: no {{placeholder}} leaked" "$(grep -rl '{{' "$W/p1" --exclude-dir=.git)"
 has "i1: LICENSE has the year" "$(cat "$W/p1/LICENSE" 2>/dev/null)" "$(date +%Y) Test User"
 [ "$(g "$W/p1" log --oneline 2>/dev/null | wc -l | tr -d ' ')" = "1" ] && pass "i1: one bootstrap commit" || fail "i1: one bootstrap commit" "$(g "$W/p1" log --oneline 2>&1)"
 has "i1: commit subject" "$(g "$W/p1" log -1 --format=%s 2>/dev/null)" "chore: bootstrap with multi-agent-kit v5"
@@ -43,7 +48,13 @@ has "i2: kit.toml visibility private" "$(cat "$W/p2/kit.toml" 2>/dev/null)" 'vis
 has "i2: kit.toml license none" "$(cat "$W/p2/kit.toml" 2>/dev/null)" 'license = "none"'
 [ ! -e "$W/p2/LICENSE" ] && pass "i2: no LICENSE" || fail "i2: no LICENSE" "exists"
 [ ! -e "$W/p2/.github/workflows/kit-guard.yml" ] && pass "i2: no workflow" || fail "i2: no workflow" "exists"
-has "i2: README from the private template" "$OUT" "README.private.md"
+has "i2: README from the private template" "$(cat "$W/p2/README.md" 2>/dev/null)" "docs/DEVELOPMENT.md"
+[ "$(wc -l < "$W/p2/README.md")" -le 15 ] && pass "i2: README <= 15 lines" || fail "i2: README <= 15 lines" "$(wc -l < "$W/p2/README.md")"
+
+# i6: CC-BY-4.0 license text
+OUT="$(ki "$W/p6" --license CC-BY-4.0)"
+has "i6: CC-BY text" "$(cat "$W/p6/LICENSE" 2>/dev/null)" "Attribution 4.0 International"
+has "i6: CC-BY holder filled" "$(head -1 "$W/p6/LICENSE")" "$(date +%Y) Test User"
 
 # i3: re-run → nothing changes
 BEFORE="$(sums "$W/p1")"; HEAD1="$(g "$W/p1" rev-parse HEAD)"
