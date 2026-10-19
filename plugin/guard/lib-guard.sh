@@ -87,7 +87,12 @@ guard_run_gitleaks() {
     return 0
 }
 
-guard_add() { G_FIND+=("$1"$'\x1f'"$2"$'\x1f'"$3"$'\x1f'"$4"); }
+declare -A G_SEEN=()
+guard_add() {  # dedupes: a push of several refs scans shared commits more than once
+    local k="$1"$'\x1f'"$2"$'\x1f'"$3"$'\x1f'"$4"
+    [[ -n "${G_SEEN[$k]:-}" ]] && return 0
+    G_SEEN[$k]=1; G_FIND+=("$k")
+}
 
 guard_add_scan() {  # stdin: privacy_scan_* output lines
     local act tag where why

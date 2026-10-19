@@ -343,6 +343,109 @@ mv "$PRIV" "$PRIV.off"; printf 'uid 11111111-2222-3333-4444-555555555555\n' > "$
 eq   "B18: privacy.local.toml missing → R4/R5 skipped (passes)" "$CC" "0"
 has  "B18: …with a warning" "$CO" "privacy.local.toml"
 mv "$PRIV.off" "$PRIV"; git -C "$P" reset -q m.txt
+
+# ============================================================ C. pre-push
+echo "--- C. pre-push"
+# pushrepo <dir> [visibility]: newrepo + bare origin with the initial history
+# pushed WITHOUT hooks (= history that predates the guard)
+pushrepo() {
+  newrepo "$1" "${2:-public}"; rm -rf "$1.git"; git init -q --bare "$1.git"
+  git -C "$1" remote add origin "$1.git"; git -C "$1" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null
+}
+# psh <repo> <PATH|""> <push args…> → PO, PC
+psh() {
+  local r="$1" p="${2:-$GL_PATH}"; shift 2
+  PO="$(cd "$r" && PATH="$p" git -c core.hooksPath="$TH" push -q "$@" 2>&1)"; PC=$?
+}
+nc() { git -C "$1" -c core.hooksPath=/dev/null commit -q -m "${2:-c}"; }   # commit without the guard
+Q="$W/pq"; pushrepo "$Q"
+echo more >> "$Q/README.md"; git -C "$Q" add README.md; nc "$Q"
+T0=$(date +%s%N); psh "$Q" "" origin main; MS=$(( ($(date +%s%N) - T0) / 1000000 ))
+eq   "C1: long-tracked PROJECT.toml (not in the pushed range) → push exit 1" "$PC" "1"
+has  "C1: [R2] from the whole pushed tree" "$PO" "KIT GUARD BLOCKED [R2 forbidden-path] PROJECT.toml"
+has  "C14: audit.jsonl logs pre-push" "$(cat "$AUDIT")" '"hook":"pre-push"'
+git -C "$Q" rm -q --cached PROJECT.toml; nc "$Q"
+psh "$Q" "" origin main
+eq   "C2: after git rm --cached the push passes" "$PC" "0"
+[ "$MS" -lt 3000 ] && pass "C1: typical push scan < 3s (${MS}ms)" || fail "C1: typical push scan < 3s" "${MS}ms"
+printf 'p = "/home/testuser/x"\n' > "$Q/c3.txt"; git -C "$Q" add c3.txt; nc "$Q"
+psh "$Q" "" origin main
+eq   "C3: new commit with /home/testuser/ → exit 1" "$PC" "1"
+has  "C3: [R3] with path:line @commit" "$PO" "[R3 local-path] c3.txt:1 @"
+lacks "C3: user name never printed" "$PO" "testuser"
+psh "$Q" "$NOGL_PATH" origin main
+eq   "C4: no gitleaks → push blocked" "$PC" "1"
+has  "C4: says gitleaks required for push" "$PO" "gitleaks required for push"
+has  "C4: [R8]" "$PO" "[R8 gitleaks-missing]"
+git -C "$Q" reset -q --hard HEAD~1
+git -C "$Q" -c core.hooksPath=/dev/null push -q origin main:br 2>/dev/null
+psh "$Q" "$NOGL_PATH" origin :br
+eq   "C5: deleting a remote branch passes (even without gitleaks)" "$PC" "0"
+git -C "$Q" checkout -q -b feat
+printf 'uid 11111111-2222-3333-4444-555555555555\n' > "$Q/f1.txt"; git -C "$Q" add f1.txt; nc "$Q"
+echo clean > "$Q/f2.txt"; git -C "$Q" add f2.txt; nc "$Q"
+psh "$Q" "" origin feat
+eq   "C6: first push of a new branch scans every local-only commit" "$PC" "1"
+has  "C6: the older commit's literal is found" "$PO" "[R4 personal-literal] f1.txt:1"
+git -C "$Q" rm -q f1.txt; nc "$Q"
+psh "$Q" "" origin feat
+eq   "C8: a leak added then removed inside the range still blocks (history reaches the remote)" "$PC" "1"
+has  "C8: …reported on the intermediate commit" "$PO" "[R4 personal-literal] f1.txt:1 @"
+git -C "$Q" checkout -q main; git -C "$Q" branch -q -D feat
+mkdir -p "$Q/docs/plans"; echo p > "$Q/docs/plans/x.md"; git -C "$Q" add docs/plans/x.md; nc "$Q"
+git -C "$Q" rm -q docs/plans/x.md; nc "$Q"
+psh "$Q" "" origin main
+eq   "C9: a forbidden path added then deleted inside the range blocks" "$PC" "1"
+has  "C9: [R2] for the intermediate path" "$PO" "[R2 forbidden-path] docs/plans/x.md"
+git -C "$Q" reset -q --hard origin/main
+printf 'p /home/testuser/old\n' > "$Q/old.txt"; git -C "$Q" add old.txt; nc "$Q"
+git -C "$Q" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null
+echo clean >> "$Q/README.md"; git -C "$Q" add README.md; nc "$Q"
+psh "$Q" "" origin main
+eq   "C10: content already on this remote is not rescanned" "$PC" "0"
+rm -rf "$Q.other.git"; git init -q --bare "$Q.other.git"; git -C "$Q" remote add other "$Q.other.git"
+printf 'p /home/testuser/new\n' > "$Q/new.txt"; git -C "$Q" add new.txt; nc "$Q"
+git -C "$Q" -c core.hooksPath=/dev/null push -q other main 2>/dev/null
+psh "$Q" "" origin main
+eq   "C11: commits already on ANOTHER remote are still scanned for this one" "$PC" "1"
+git -C "$Q" reset -q --hard origin/main
+git -C "$Q" checkout -q -b b1; echo one > "$Q/m.txt"; git -C "$Q" add m.txt; nc "$Q"
+git -C "$Q" checkout -q main; echo two > "$Q/m.txt"; git -C "$Q" add m.txt; nc "$Q"
+git -C "$Q" -c core.hooksPath=/dev/null merge -q b1 >/dev/null 2>&1
+printf 'merged /home/testuser/evil\n' > "$Q/m.txt"; git -C "$Q" add m.txt; git -C "$Q" -c core.hooksPath=/dev/null commit -q --no-edit
+psh "$Q" "" origin main
+eq   "C13: content introduced by a merge resolution is scanned" "$PC" "1"
+has  "C13: …as an R3 hit" "$PO" "[R3 local-path] m.txt"
+git -C "$Q" reset -q --hard origin/main; git -C "$Q" branch -q -D b1
+printf 'p /home/testuser/t\n' > "$Q/t.txt"; git -C "$Q" add t.txt; nc "$Q"; git -C "$Q" tag -a v1 -m v1; git -C "$Q" reset -q --hard origin/main
+psh "$Q" "" origin v1
+eq   "C15: pushing an annotated tag scans its commits" "$PC" "1"
+git -C "$Q" tag -d v1 >/dev/null
+if [ -n "$GITLEAKS" ]; then
+  printf 'aws_key = "%s"\n' "$FAKE_AWS" > "$Q/k.txt"; git -C "$Q" add k.txt; nc "$Q"
+  psh "$Q" "" origin main
+  eq  "C12: fake AWS key in the range → blocked" "$PC" "1"
+  has "C12: [R1 secret]" "$PO" "[R1 secret] k.txt:1"
+  lacks "C12: secret not printed" "$PO" "$FAKE_AWS"
+  git -C "$Q" reset -q --hard origin/main
+else skip "C12: R1 on push" "no gitleaks"; fi
+QP="$W/pp"; pushrepo "$QP" private; git -C "$QP" rm -q --cached PROJECT.toml; nc "$QP"
+printf 'name proj-a-secret-name\n' > "$QP/n.txt"; git -C "$QP" add n.txt; nc "$QP"
+psh "$QP" "" origin main
+eq   "C7: private repo → public-only literal passes" "$PC" "0"
+printf 'kit = 5\nvisibility = "public"\n' > "$QP/kit.toml"; echo "again proj-a-secret-name" >> "$QP/n.txt"; git -C "$QP" add kit.toml n.txt; nc "$QP"
+psh "$QP" "" origin main
+eq   "C7: same repo flipped to public (pushed kit.toml) → blocked" "$PC" "1"
+has  "C7: [R5]" "$PO" "[R5 public-only-literal]"
+QN="$W/pn"; pushrepo "$QN" none
+echo x >> "$QN/README.md"; git -C "$QN" add README.md; nc "$QN"
+psh "$QN" "" origin main
+eq   "C16: no kit.toml → long-tracked PROJECT.toml is not R2" "$PC" "0"
+echo "K=v" > "$QN/.env"; git -C "$QN" add -f .env; nc "$QN"; git -C "$QN" rm -q --cached .env; nc "$QN"
+git -C "$QN" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null   # .env reached history before the guard
+printf 'x\n' > "$QN/.env.local"; git -C "$QN" add -f .env.local; nc "$QN"
+psh "$QN" "" origin main
+eq   "C16: no kit.toml → .env* in the pushed tree is R2" "$PC" "1"
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1
