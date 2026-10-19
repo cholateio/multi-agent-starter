@@ -3,7 +3,7 @@
 
 ## Project goal
 
-[One sentence: what this is and who it is for. Example: "A personal proj-l site that lists my projects and writing."]
+[One sentence: what this is and who it is for. Example: "A personal site that lists my projects and writing."]
 
 ## Stack
 

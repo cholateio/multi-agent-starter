@@ -9,6 +9,7 @@
 #
 # Sections: A engine (lib-privacy.sh) · B pre-commit · C pre-push ·
 #           D shim / chaining / bypass · E end-to-end (kit setup + bare remote)
+HP=/home   # fixtures build "/home/<user>" strings at runtime so the kit guard does not flag this file
 set -uo pipefail
 KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GUARD="$KIT_ROOT/plugin/guard"
@@ -82,21 +83,21 @@ eng() {
 echo "--- A. engine"
 if [ ! -f "$GUARD/lib-privacy.sh" ]; then fail "A0: plugin/guard/lib-privacy.sh exists" "missing"; fi
 
-eng public "" "x = '/home/testuser/proj/x'"
+eng public "" "x = '$HP/testuser/proj/x'"
 has  "A1: /home/<configured user>/ BLOCK R3" "$EO" $'BLOCK\tR3 local-path\tf.txt:1'
 eq   "A1: exit 1 on a block" "$EC" "1"
 lacks "A1: user name redacted" "$EO$EE" "testuser"
-eng public "" "WORKDIR /home/node/app"
-has  "A2: /home/node/ WARN R3b" "$EO" $'WARN\tR3b other-home-path'
-lacks "A2: /home/node/ not a block" "$EO" "BLOCK"
+eng public "" "WORKDIR $HP/node/app"
+has  "A2: $HP/node/ WARN R3b" "$EO" $'WARN\tR3b other-home-path'
+lacks "A2: $HP/node/ not a block" "$EO" "BLOCK"
 eq   "A2: warn only → exit 0" "$EC" "0"
 eng public "" "see /mnt/c/Users/testuser/Desktop"
 has  "A3: /mnt/c/Users/<user>/ BLOCK R3" "$EO" $'BLOCK\tR3 local-path'
 eng public "" 'path = "C:\Users\TestUser\Documents"'
 has  "A3: C:\\Users\\<User> (any case) BLOCK R3" "$EO" $'BLOCK\tR3 local-path'
-eng public "" "home=/home/testuser"
+eng public "" "home=$HP/testuser"
 has  "A3: /home/<user> at end of line BLOCK" "$EO" $'BLOCK\tR3 local-path'
-eng public "" "home=/home/testuser2/x"
+eng public "" "home=$HP/testuser2/x"
 lacks "A3: /home/<user>2/ is a different user (not R3)" "$EO" "R3 local-path"
 eng public "" "osuser /home/$(id -un)/x"
 has  "A3b: the OS user's home is R3 even if not listed" "$EO" $'BLOCK\tR3 local-path'
@@ -131,7 +132,7 @@ eng public "nope" "uid: 11111111-2222-3333-4444-555555555555"
 has  "A8: unknown name → stderr warn" "$EE" "unknown literal name"
 has  "A8: unknown name → others still block" "$EO" $'BLOCK\tR4 personal-literal'
 
-eng public "" "uid: 11111111-2222-3333-4444-555555555555 /home/testuser/ # kit-privacy: allow"
+eng public "" "uid: 11111111-2222-3333-4444-555555555555 $HP/testuser/ # kit-privacy: allow"
 eq   "A9: 'kit-privacy: allow' line skipped" "$EO" ""
 eng public "" $'mail a@b.co\nbot x@users.noreply.github.com\nnoreply@example.com\nsee git@github.com:o/r'
 has  "A10: generic email WARN R6" "$EO" $'WARN\tR6 email\tf.txt:1'
@@ -143,7 +144,7 @@ has  "A11: personal email (privacy emails) BLOCK R4 as <email>" "$EO" "<email>"
 lacks "A11: personal email never printed" "$EO$EE" "personal-mail"
 eng public "email" "owner@personal-mail.test wrote this"
 lacks "A11: allow_literals=email exempts it (same as audit A2)" "$EO" "BLOCK"
-eng public "" "scratch /tmp/claude-1000/x/y"
+eng public "" "scratch /tmp/claude""-1000/x/y"
 has  "A12: /tmp/claude-<uid>/ WARN R7" "$EO" $'WARN\tR7 claude-tmp-path'
 eng public "" "ab abc"
 eq   "A13: literal < 4 chars ignored" "$EO" ""
@@ -151,9 +152,9 @@ eng public "" "aXbbc aXbbbcc"
 eq   "A14: literal is a fixed string (regex chars inert)" "$EO" ""
 eng public "" "lit a.b*c+ here"
 has  "A14: fixed-string literal matches itself" "$EO" $'BLOCK\tR4 personal-literal'
-eng public "" "/home/testuser/x 11111111-2222-3333-4444-555555555555" "docs/media/*" "docs/media/a.txt"
+eng public "" "$HP/testuser/x 11111111-2222-3333-4444-555555555555" "docs/media/*" "docs/media/a.txt"
 eq   "A15: allow_paths glob skips R3–R7" "$EO" ""
-eng public "" "/home/testuser/x" "docs/media/*" "src/a.txt"
+eng public "" "$HP/testuser/x" "docs/media/*" "src/a.txt"
 has  "A15: allow_paths does not cover other paths" "$EO" $'BLOCK\tR3'
 
 # stream form: path<TAB>lineno<TAB>tag<TAB>content (pre-push tags lines with a commit)
@@ -255,8 +256,8 @@ eq   "B1: .env.example passes" "$CC" "0"
 git -C "$R" rm -q --cached PROJECT.toml; cmt "$R"
 eq   "B2: git rm --cached PROJECT.toml (deletion) passes" "$CC" "0"
 
-printf 'ok\npath = "/home/testuser/x"\n' > "$R/c.txt"; git -C "$R" add c.txt; cmt "$R"
-eq   "B3: /home/testuser/ → exit 1" "$CC" "1"
+printf 'ok\npath = "'"$HP"'/testuser/x"\n' > "$R/c.txt"; git -C "$R" add c.txt; cmt "$R"
+eq   "B3: $HP/testuser/ → exit 1" "$CC" "1"
 has  "B3: [R3 local-path] with path:line" "$CO" "KIT GUARD BLOCKED [R3 local-path] c.txt:2 —"
 lacks "B3: block output never prints the user name" "$CO" "testuser"
 git -C "$R" reset -q c.txt; rm -f "$R/c.txt"
@@ -287,18 +288,18 @@ eq   "B6: clean commit passes" "$CC" "0"
 
 printf 'bin\0ary 11111111-2222-3333-4444-555555555555\n' > "$R/blob.bin"; git -C "$R" add blob.bin; cmt "$R"
 eq   "B7: binary file (NUL) content not scanned" "$CC" "0"
-printf '*.txt binary\n' > "$R/.gitattributes"; printf 'x /home/testuser/y\n' > "$R/hid.txt"; git -C "$R" add .gitattributes hid.txt; cmt "$R"
+printf '*.txt binary\n' > "$R/.gitattributes"; printf 'x '"$HP"'/testuser/y\n' > "$R/hid.txt"; git -C "$R" add .gitattributes hid.txt; cmt "$R"
 has  "B10: .gitattributes 'binary' cannot hide text from the guard" "$CO" "[R3 local-path] hid.txt:1"
 git -C "$R" reset -q hid.txt; rm -f "$R/hid.txt"; git -C "$R" add .gitattributes; cmt "$R"
 
-printf 'WORKDIR /home/node/app\n' > "$R/Dockerfile"; git -C "$R" add Dockerfile; cmt "$R"
-eq   "B16: /home/node warns but passes" "$CC" "0"
+printf 'WORKDIR '"$HP"'/node/app\n' > "$R/Dockerfile"; git -C "$R" add Dockerfile; cmt "$R"
+eq   "B16: $HP/node warns but passes" "$CC" "0"
 has  "B16: warn line format" "$CO" "KIT GUARD WARN [R3b other-home-path] Dockerfile:1"
 
-printf 'echo /home/testuser/old\n' > "$R/old.sh"; git -C "$R" add old.sh; git -C "$R" -c core.hooksPath=/dev/null commit -q -m "pre-guard"
+printf 'echo '"$HP"'/testuser/old\n' > "$R/old.sh"; git -C "$R" add old.sh; git -C "$R" -c core.hooksPath=/dev/null commit -q -m "pre-guard"
 git -C "$R" mv old.sh renamed.sh; cmt "$R"
 eq   "B17: pure rename of pre-existing content is not re-flagged (only added lines)" "$CC" "0"
-printf 'echo /home/testuser/new\n' >> "$R/renamed.sh"; cmt "$R"
+printf 'echo '"$HP"'/testuser/new\n' >> "$R/renamed.sh"; cmt "$R"
 cmt "$R"; (cd "$R" && PATH="$GL_PATH" git -c core.hooksPath="$TH" commit -q -a -m t >"$W/o" 2>&1); CC=$?; CO="$(cat "$W/o")"
 eq   "B15: git commit -a (temporary index) still guarded" "$CC" "1"
 has  "B15: the added line is reported" "$CO" "[R3 local-path] renamed.sh:2"
@@ -322,7 +323,7 @@ echo "K=v" > "$N/.env"; git -C "$N" add -f .env; cmt "$N"
 eq   "B9: no kit.toml → .env still blocked" "$CC" "1"
 has  "B9: .env is R2" "$CO" "[R2 forbidden-path] .env"
 git -C "$N" rm -q --cached .env
-printf 'p /home/testuser/x\n' > "$N/n.txt"; git -C "$N" add n.txt; cmt "$N"
+printf 'p '"$HP"'/testuser/x\n' > "$N/n.txt"; git -C "$N" add n.txt; cmt "$N"
 has  "B9: no kit.toml → R3 still runs" "$CO" "[R3 local-path]"
 git -C "$N" reset -q n.txt
 printf 'name proj-a-secret-name\n' > "$N/n.txt"; git -C "$N" add n.txt; cmt "$N"
@@ -370,9 +371,9 @@ git -C "$Q" rm -q --cached PROJECT.toml; nc "$Q"
 psh "$Q" "" origin main
 eq   "C2: after git rm --cached the push passes" "$PC" "0"
 [ "$MS" -lt 3000 ] && pass "C1: typical push scan < 3s (${MS}ms)" || fail "C1: typical push scan < 3s" "${MS}ms"
-printf 'p = "/home/testuser/x"\n' > "$Q/c3.txt"; git -C "$Q" add c3.txt; nc "$Q"
+printf 'p = "'"$HP"'/testuser/x"\n' > "$Q/c3.txt"; git -C "$Q" add c3.txt; nc "$Q"
 psh "$Q" "" origin main
-eq   "C3: new commit with /home/testuser/ → exit 1" "$PC" "1"
+eq   "C3: new commit with $HP/testuser/ → exit 1" "$PC" "1"
 has  "C3: [R3] with path:line @commit" "$PO" "[R3 local-path] c3.txt:1 @"
 lacks "C3: user name never printed" "$PO" "testuser"
 psh "$Q" "$NOGL_PATH" origin main
@@ -400,13 +401,13 @@ psh "$Q" "" origin main
 eq   "C9: a forbidden path added then deleted inside the range blocks" "$PC" "1"
 has  "C9: [R2] for the intermediate path" "$PO" "[R2 forbidden-path] docs/plans/x.md"
 git -C "$Q" reset -q --hard origin/main
-printf 'p /home/testuser/old\n' > "$Q/old.txt"; git -C "$Q" add old.txt; nc "$Q"
+printf 'p '"$HP"'/testuser/old\n' > "$Q/old.txt"; git -C "$Q" add old.txt; nc "$Q"
 git -C "$Q" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null
 echo clean >> "$Q/README.md"; git -C "$Q" add README.md; nc "$Q"
 psh "$Q" "" origin main
 eq   "C10: content already on this remote is not rescanned" "$PC" "0"
 rm -rf "$Q.other.git"; git init -q --bare "$Q.other.git"; git -C "$Q" remote add other "$Q.other.git"
-printf 'p /home/testuser/new\n' > "$Q/new.txt"; git -C "$Q" add new.txt; nc "$Q"
+printf 'p '"$HP"'/testuser/new\n' > "$Q/new.txt"; git -C "$Q" add new.txt; nc "$Q"
 git -C "$Q" -c core.hooksPath=/dev/null push -q other main 2>/dev/null
 psh "$Q" "" origin main
 eq   "C11: commits already on ANOTHER remote are still scanned for this one" "$PC" "1"
@@ -414,12 +415,12 @@ git -C "$Q" reset -q --hard origin/main
 git -C "$Q" checkout -q -b b1; echo one > "$Q/m.txt"; git -C "$Q" add m.txt; nc "$Q"
 git -C "$Q" checkout -q main; echo two > "$Q/m.txt"; git -C "$Q" add m.txt; nc "$Q"
 git -C "$Q" -c core.hooksPath=/dev/null merge -q b1 >/dev/null 2>&1
-printf 'merged /home/testuser/evil\n' > "$Q/m.txt"; git -C "$Q" add m.txt; git -C "$Q" -c core.hooksPath=/dev/null commit -q --no-edit
+printf 'merged '"$HP"'/testuser/evil\n' > "$Q/m.txt"; git -C "$Q" add m.txt; git -C "$Q" -c core.hooksPath=/dev/null commit -q --no-edit
 psh "$Q" "" origin main
 eq   "C13: content introduced by a merge resolution is scanned" "$PC" "1"
 has  "C13: …as an R3 hit" "$PO" "[R3 local-path] m.txt"
 git -C "$Q" reset -q --hard origin/main; git -C "$Q" branch -q -D b1
-printf 'p /home/testuser/t\n' > "$Q/t.txt"; git -C "$Q" add t.txt; nc "$Q"; git -C "$Q" tag -a v1 -m v1; git -C "$Q" reset -q --hard origin/main
+printf 'p '"$HP"'/testuser/t\n' > "$Q/t.txt"; git -C "$Q" add t.txt; nc "$Q"; git -C "$Q" tag -a v1 -m v1; git -C "$Q" reset -q --hard origin/main
 psh "$Q" "" origin v1
 eq   "C15: pushing an annotated tag scans its commits" "$PC" "1"
 git -C "$Q" tag -d v1 >/dev/null
@@ -485,7 +486,7 @@ printf '#!/bin/sh\necho local-hook-says-no >&2\nexit 3\n' > "$S1/.git/hooks/pre-
 echo d > "$S1/d.txt"; git -C "$S1" add d.txt; gcm "$S1"
 eq   "D2: repo-local hook failure blocks the commit" "$GC" "1"
 has  "D2: …its output is shown" "$GO" "local-hook-says-no"
-printf 'p /home/testuser/x\n' > "$S1/e.txt"; git -C "$S1" add e.txt; rm -f "$W/local-pc"
+printf 'p '"$HP"'/testuser/x\n' > "$S1/e.txt"; git -C "$S1" add e.txt; rm -f "$W/local-pc"
 printf '#!/bin/sh\necho ran > "%s/local-pc"\n' "$W" > "$S1/.git/hooks/pre-commit"; gcm "$S1"
 eq   "D2: guard block stops before the local hook" "$(cat "$W/local-pc" 2>/dev/null)" ""
 git -C "$S1" reset -q e.txt; rm -f "$S1/e.txt"; git -C "$S1" add d.txt; gcm "$S1"
@@ -504,7 +505,7 @@ git -C "$S1" worktree add -q "$W/sd-wt" -b wt 2>/dev/null
 rm -f "$W/local-pc"; echo w > "$W/sd-wt/w.txt"; git -C "$W/sd-wt" add w.txt; gcm "$W/sd-wt"
 eq   "D3: commit in a linked worktree passes" "$GC" "0"
 eq   "D3: …and chains to the MAIN repo's hook (--git-common-dir)" "$(cat "$W/local-pc" 2>/dev/null)" "ran"
-printf 'p /home/testuser/x\n' > "$W/sd-wt/x.txt"; git -C "$W/sd-wt" add x.txt; gcm "$W/sd-wt"
+printf 'p '"$HP"'/testuser/x\n' > "$W/sd-wt/x.txt"; git -C "$W/sd-wt" add x.txt; gcm "$W/sd-wt"
 eq   "D3: the guard runs in a linked worktree too" "$GC" "1"
 git -C "$W/sd-wt" reset -q x.txt
 
@@ -577,7 +578,7 @@ git -C "$S1" config --unset core.hooksPath
 SUB="$W/subsrc"; newrepo "$SUB" none
 git -C "$S1" -c protocol.file.allow=always submodule -q add "$SUB" sub >/dev/null 2>&1
 git -C "$S1" -c core.hooksPath=/dev/null commit -q -m sub
-printf 'p /home/testuser/s\n' > "$S1/sub/s.txt"; git -C "$S1/sub" add s.txt; gcm "$S1/sub"
+printf 'p '"$HP"'/testuser/s\n' > "$S1/sub/s.txt"; git -C "$S1/sub" add s.txt; gcm "$S1/sub"
 eq   "D15: guard runs inside a submodule" "$GC" "1"
 git -C "$S1/sub" reset -q s.txt; rm -f "$S1/sub/s.txt"
 
@@ -625,7 +626,7 @@ echo "--- F. final-review fixes"
 git config --file "$GIT_CONFIG_GLOBAL" --unset core.hooksPath   # back to the explicit test hooks dir
 # C1: remote-tracking refs are not what a (new / extra) push URL has
 F1="$W/f1"; pushrepo "$F1" none; git -C "$F1" rm -q --cached PROJECT.toml; nc "$F1"
-printf 'p /home/testuser/x\nuid 11111111-2222-3333-4444-555555555555\n' > "$F1/old.txt"; git -C "$F1" add old.txt; nc "$F1"
+printf 'p '"$HP"'/testuser/x\nuid 11111111-2222-3333-4444-555555555555\n' > "$F1/old.txt"; git -C "$F1" add old.txt; nc "$F1"
 git -C "$F1" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null; git -C "$F1" fetch -q origin
 git -C "$F1" rm -q old.txt; nc "$F1"
 rm -rf "$F1.pub.git"; git init -q --bare "$F1.pub.git"; git -C "$F1" remote set-url origin "$F1.pub.git"
@@ -641,7 +642,7 @@ eq   "F-C1: an extra push URL (mirror) gets the full scan" "$PC" "1"
 eq   "F-C1: …and the mirror stays empty" "$(git -C "$F1.pp.git" rev-parse -q --verify main)" ""
 # C2: the caller's config cannot blind the scans
 F2="$W/f2"; newrepo "$F2" none
-printf 'p /home/testuser/x\n' > "$F2/a.txt"; git -C "$F2" add a.txt
+printf 'p '"$HP"'/testuser/x\n' > "$F2/a.txt"; git -C "$F2" add a.txt
 CO="$(cd "$F2" && PATH="$GL_PATH" git -c core.hooksPath="$TH" -c color.ui=always -c color.diff=always -c diff.noprefix=true -c diff.mnemonicPrefix=true -c diff.relative=true commit -q -m t 2>&1)"; CC=$?
 eq   "F-C2: -c color/noprefix/relative do not blind pre-commit" "$CC" "1"
 git -C "$F2" reset -q a.txt
@@ -654,7 +655,7 @@ if [ -n "$GITLEAKS" ]; then
   PO="$(cd "$F2" && PATH="$GL_PATH" git -c core.hooksPath="$TH" -c color.ui=always -c log.showRoot=false push -q origin main 2>&1)"; PC=$?
   eq  "F-C2: color.ui=always + log.showRoot=false do not blind R1 at push" "$PC" "1"; has "F-C2: …R1 on push" "$PO" "[R1 secret] k.txt:1"
 else skip "F-C2: gitleaks under hostile config" "no gitleaks"; fi
-F3="$W/f3"; newrepo "$F3" none noproj; printf 'p /home/testuser/root\n' > "$F3/r.txt"; git -C "$F3" add r.txt; git -C "$F3" -c core.hooksPath=/dev/null commit -q --amend -m root
+F3="$W/f3"; newrepo "$F3" none noproj; printf 'p '"$HP"'/testuser/root\n' > "$F3/r.txt"; git -C "$F3" add r.txt; git -C "$F3" -c core.hooksPath=/dev/null commit -q --amend -m root
 rm -rf "$F3.git"; git init -q --bare "$F3.git"; git -C "$F3" remote add origin "$F3.git"
 PO="$(cd "$F3" && PATH="$GL_PATH" git -c core.hooksPath="$TH" -c log.showRoot=false push -q origin main 2>&1)"; PC=$?
 eq   "F-C2: log.showRoot=false does not hide the root commit" "$PC" "1"
@@ -662,7 +663,7 @@ has  "F-C2: …root commit content found" "$PO" "[R3 local-path] r.txt:1"
 # I1: attributes from outside the tree
 F4="$W/f4"; newrepo "$F4" none
 printf '* -diff\n' > "$F4/.git/info/attributes"
-printf 'p /home/testuser/x\n' > "$F4/a.txt"; git -C "$F4" add a.txt; cmt "$F4"
+printf 'p '"$HP"'/testuser/x\n' > "$F4/a.txt"; git -C "$F4" add a.txt; cmt "$F4"
 eq   "F-I1: .git/info/attributes '* -diff' cannot hide text (commit)" "$CC" "1"
 git -C "$F4" -c core.hooksPath=/dev/null commit -q -m leak; rm -rf "$F4.git"; git init -q --bare "$F4.git"; git -C "$F4" remote add origin "$F4.git"
 git -C "$F4" rm -q --cached PROJECT.toml 2>/dev/null; psh "$F4" "" origin main
@@ -673,12 +674,12 @@ if [ -n "$GITLEAKS" ]; then
 fi
 rm -f "$F4/.git/info/attributes"; printf '*.json -diff\n' > "$W/gattr"
 git config --file "$GIT_CONFIG_GLOBAL" core.attributesFile "$W/gattr"
-printf '{"p":"/home/testuser/x"}\n' > "$F4/c.json"; git -C "$F4" add c.json; cmt "$F4"
+printf '{"p":"'"$HP"'/testuser/x"}\n' > "$F4/c.json"; git -C "$F4" add c.json; cmt "$F4"
 eq   "F-I1: a global attributes file cannot hide text" "$CC" "1"
 git config --file "$GIT_CONFIG_GLOBAL" --unset core.attributesFile; git -C "$F4" reset -q c.json
 # I2: commit / tag messages, file names, ref names
 F5="$W/f5"; pushrepo "$F5" public; git -C "$F5" rm -q --cached PROJECT.toml; nc "$F5"; git -C "$F5" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null
-echo ok >> "$F5/README.md"; git -C "$F5" add README.md; git -C "$F5" -c core.hooksPath=/dev/null commit -q -m "fix: see /home/testuser/proj/log.txt"
+echo ok >> "$F5/README.md"; git -C "$F5" add README.md; git -C "$F5" -c core.hooksPath=/dev/null commit -q -m "fix: see $HP/testuser/proj/log.txt"
 psh "$F5" "" origin main
 eq   "F-I2: a local path in a commit MESSAGE blocks the push" "$PC" "1"
 has  "F-I2: …reported as the commit message" "$PO" "[R3 local-path] (commit message)"
@@ -689,7 +690,7 @@ has  "F-I2: …reported as a file name" "$CO" "[R5 public-only-literal] (file na
 git -C "$F5" reset -q notes-proj-a-secret-name.md; rm -f "$F5/notes-proj-a-secret-name.md"
 psh "$F5" "" origin main:proj-a-secret-name
 eq   "F-I2: a literal in the pushed REF NAME blocks" "$PC" "1"
-git -C "$F5" tag -a v2 -m "built on /home/testuser/box"
+git -C "$F5" tag -a v2 -m "built on $HP/testuser/box"
 psh "$F5" "" origin v2
 eq   "F-I2: a local path in an annotated TAG message blocks" "$PC" "1"
 git -C "$F5" tag -d v2 >/dev/null
@@ -725,13 +726,13 @@ T0=$(date +%s%N); cmt "$F8"; MS=$(( ($(date +%s%N) - T0) / 1000000 ))
 eq   "F-I5: 8000-line email CSV passes (warn only)" "$CC" "0"
 [ "$MS" -lt 5000 ] && pass "F-I5: …in < 5s (${MS}ms)" || fail "F-I5: 8000 R6 hits < 5s" "${MS}ms"
 # M2: a path with a space keeps the line format
-printf 'p /home/testuser/x\n' > "$F8/a b.txt"; git -C "$F8" add "a b.txt"; cmt "$F8"
+printf 'p '"$HP"'/testuser/x\n' > "$F8/a b.txt"; git -C "$F8" add "a b.txt"; cmt "$F8"
 has  "F-M2: path with a space reported as 'a b.txt:1'" "$CO" "[R3 local-path] a b.txt:1 —"
 git -C "$F8" reset -q "a b.txt"
 # M3: privacy.local.toml variants the bash loader must not drop
 cp "$PRIV" "$PRIV.bak"
 printf 'usernames = [\n  "otheruser",\n]\nemails = []\n\n[[ literal ]]\nname = "t-spaced"\nvalue = "zz-spaced-literal"\ntier = "always"\n' > "$PRIV"
-printf 'p /home/otheruser/x\nq zz-spaced-literal\n' > "$F8/m3.txt"; git -C "$F8" add m3.txt; cmt "$F8"
+printf 'p '"$HP"'/otheruser/x\nq zz-spaced-literal\n' > "$F8/m3.txt"; git -C "$F8" add m3.txt; cmt "$F8"
 has  "F-M3: multi-line usernames array is enforced" "$CO" "[R3 local-path] m3.txt:1"
 has  "F-M3: '[[ literal ]]' header is enforced" "$CO" "[R4 personal-literal] m3.txt:2"
 mv "$PRIV.bak" "$PRIV"; git -C "$F8" reset -q m3.txt

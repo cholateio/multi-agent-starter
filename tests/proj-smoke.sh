@@ -302,7 +302,7 @@ assert_contains "html: langs-only project still gets a tags row" "$HTML" '<div c
 assert_contains "html: mixed currency kept separate" "$HTML" 'NT$100 + US$2.5/月'
 # ? 項誠實標未估,不謊報 0(cost-proj 的 Unknown 按用量無月額)
 assert_contains "html: unestimable flagged not zeroed" "$HTML" '<span class="cost-warn">+1未估</span>'
-# 年費且附月額等值 → 用月額(longtext NT$600/年（≈NT$50/月）→ NT$22)
+# 年費且附月額等值 → 用月額(longtext NT$600/年（≈NT$50/月）→ NT$50)
 assert_contains "html: yearly uses monthly equiv" "$HTML" '<div class="cost-sum">NT$50/月</div>'
 # 全 free-tier → 免費
 assert_contains "html: all free shows 免費" "$HTML" '<div class="cost-sum">免費</div>'

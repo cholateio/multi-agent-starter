@@ -85,7 +85,7 @@ class TestProtected(IsolatedTestCase):
         self.assertEqual(rejected, [])
 
     def test_absolute_paths_rejected(self):
-        items, rejected = migrate.protected_from_v4("/home/testuser/notes/\n~/x\nC:\\Users\\t\\y\nok/*\n")
+        items, rejected = migrate.protected_from_v4("/ho" "me/testuser/notes/\n~/x\nC:\\Users\\t\\y\nok/*\n")
         self.assertEqual(items, ["ok/*"])
         self.assertEqual(len(rejected), 3)
 

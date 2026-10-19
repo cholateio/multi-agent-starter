@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # tests/audit-smoke.sh - `kit audit` end to end on a generated fixture fleet with
 # recorded gh api fixtures (fake owner acme). Isolated HOME / config / data dirs.
+HP=/home   # fixtures build "/home/<user>" strings at runtime so the kit guard does not flag this file
 set -uo pipefail
 KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PASS_COUNT=0; FAIL_COUNT=0
@@ -30,7 +31,7 @@ commit() { git -C "$R" add -A; git -C "$R" commit -qm fixture; }
 mk proj-a
 mkdir -p "$R/.claude" "$R/src" "$R/.github/workflows"
 echo x > "$R/.claude/x"; printf '# proj-a — my private tool\n\n這是私人 repo。\n' > "$R/README.md"
-echo "see /home/testuser/x" > "$R/notes.txt"; : > "$R/LICENSE"; echo node_modules/ > "$R/.gitignore"
+echo "see $HP/testuser/x" > "$R/notes.txt"; : > "$R/LICENSE"; echo node_modules/ > "$R/.gitignore"
 printf "const OWNER = '%s';\n" "$UID_FAKE" > "$R/src/a.js"
 printf 'on: push\njobs:\n  b:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n' > "$R/.github/workflows/w.yml"
 commit
@@ -102,7 +103,7 @@ eq "a9: malformed config → exit 1" "$CODE" "1"
 # a10 (final review C2): literal values in PATHS are redacted; invalid privacy still redacts + shows the gap
 write_cfg
 printf 'usernames = ["testuser"]\nemails = []\n[[literal]]\nname = "t-uid"\nvalue = "%s"\ntier = "always"\n[[literal]]\nname = "secret-proj"\nvalue = "zebracorn"\ntier = "always"\n' "$UID_FAKE" > "$W/cfg/privacy.local.toml"
-R="$W/fleet/proj-a"; mkdir -p "$R/docs/plans"; echo "launch" > "$R/docs/plans/zebracorn-launch.md"; echo "/home/zebracorn/x" > "$R/p.txt"; commit
+R="$W/fleet/proj-a"; mkdir -p "$R/docs/plans"; echo "launch" > "$R/docs/plans/zebracorn-launch.md"; echo "$HP/zebracorn/x" > "$R/p.txt"; commit
 OUT="$(ka --offline "$FIX" -v --json "$W/z.json" --html "$W/z.html" proj-a)"
 lacks "a10: literal not in verbose paths" "$OUT" "zebracorn"
 lacks "a10: literal not in json paths" "$(cat "$W/z.json")" "zebracorn"

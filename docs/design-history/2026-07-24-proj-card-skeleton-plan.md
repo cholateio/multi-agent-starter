@@ -443,7 +443,7 @@ Expected: `passed N, failed 0`
 同檔 `monthly_est` 那一項改成（加粗成分規則，長度規則不動）：
 
 ```markdown
-- `monthly_est`：只放金額與用量（`NT$100/月;Actions 用量估 2000+ 分/月`），
+- `monthly_est`：只放金額與用量（`NT$100/月;Actions 用量估 1000+ 分/月`），
   上限 40 字，且**不得夾帶確認日期或算法依據**（`proj` 對 `YYYY-MM-DD` 與
   「確認」二字會 warn）。怎麼算出來的、確認日期、月上限設定——全歸 TOML 註解。
 ```

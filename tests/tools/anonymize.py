@@ -28,7 +28,7 @@ def load_table(path):
         v = b.get("value", "")
         if alias and len(v) >= 4:
             pairs.append((v, alias))
-    pairs.sort(key=lambda p: -len(p[0]))  # longest first: proj-f before proj-e
+    pairs.sort(key=lambda p: -len(p[0]))  # longest first: a name before its own prefix
     return pairs
 
 

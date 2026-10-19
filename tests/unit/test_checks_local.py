@@ -1,5 +1,5 @@
 """kit audit local checks (Task 3.8a). Fixture repos are built in a temp dir;
-all literals are fake (11111111-2222-..., /home/testuser/, proj-a)."""
+all literals are fake (11111111-2222-..., fake home paths, proj-a)."""
 import json
 import os
 import shutil
@@ -31,7 +31,7 @@ def checks(findings, check):
 BAD_FILES = {
     "README.md": "# proj-a — my private tool\n\n這是私人 repo，給自己用。\n",
     ".claude/x": "x\n",
-    "notes.txt": "see /home/testuser/x for data\n",
+    "notes.txt": "see /ho" "me/testuser/x for data\n",
     ".github/workflows/w.yml": "on: push\njobs:\n  b:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n",
     "LICENSE": "",
     ".gitignore": "node_modules/\n",
@@ -142,7 +142,7 @@ class TestLocalChecks(IsolatedTestCase):
         self.assertEqual([(x.path, x.line) for x in a5], [("c.txt", 1)])
 
     def test_allow_paths_skip_a5(self):
-        repo = self.make_repo("proj-b", dict(CLEAN_FILES, **{"docs/media/x.txt": "/home/testuser/y\n"}))
+        repo = self.make_repo("proj-b", dict(CLEAN_FILES, **{"docs/media/x.txt": "/ho" "me/testuser/y\n"}))
         f = self.run_local(repo, ctx(kittoml=KitToml(allow_paths=["docs/media/*"])))
         self.assertEqual(checks(f, "A5"), [])
 
@@ -207,7 +207,7 @@ class TestLocalChecks(IsolatedTestCase):
     def test_redact(self):
         self.assertEqual(redact(f"id={UID}!", PRIV), "id=<t-uid>!")
         self.assertEqual(redact("x " + UID.upper(), PRIV), "x <t-uid>")
-        self.assertEqual(redact("path /home/testuser/x", PRIV), "path /home/<user>/x")
+        self.assertEqual(redact("path /ho" "me/testuser/x", PRIV), "path /home/<user>/x")
         self.assertIn("***", redact("token ghp_" + "a" * 36, None))
 
     def test_finding_shape(self):

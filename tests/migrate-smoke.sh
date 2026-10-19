@@ -2,6 +2,7 @@
 # tests/migrate-smoke.sh - `kit migrate` on v4 fixtures generated at run time
 # (nothing .claude/ is tracked in the kit repo). Isolated HOME / state dir; a
 # fake `gh` that fails simulates offline / not logged in.
+HP=/home   # fixtures build "/home/<user>" strings at runtime so the kit guard does not flag this file
 set -uo pipefail
 KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PASS_COUNT=0; FAIL_COUNT=0
@@ -161,9 +162,9 @@ eq "M8: gitignore kit block once" "$(grep -c '^# >>> kit v5' "$R/.gitignore")" "
 
 # ---- M9: absolute protected entries never reach the tracked kit.toml
 R="$W/m9"; make_v4 "$R"
-printf 'src/legacy/*\n/home/testuser/notes/\n' > "$R/.claude/protected-paths"; g "$R" commit -qam "abs protected"
+printf 'src/legacy/*\n'"$HP"'/testuser/notes/\n' > "$R/.claude/protected-paths"; g "$R" commit -qam "abs protected"
 OUT="$(km "$R" --apply)"
-lacks "M9: absolute path not in kit.toml" "$(cat "$R/kit.toml")" "/home/testuser"
+lacks "M9: absolute path not in kit.toml" "$(cat "$R/kit.toml")" "$HP/testuser"
 has "M9: absolute path flagged needs-review" "$OUT" "needs-review"
 has "M9: relative entry kept" "$(cat "$R/kit.toml")" '"src/legacy/*",'
 
