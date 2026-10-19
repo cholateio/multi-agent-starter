@@ -154,6 +154,8 @@ def status() -> int:
         store = paths.state_dir() / "localfiles" / repo_id(top) / "files"
         if store.is_dir():
             print(f"local-only files: snapshot in {store}" + (f" — {note}" if note else ""))
+        elif note:   # e.g. the store of an earlier clone at this path, set aside (v5.0.2)
+            print(f"local-only files: {note}")
     return 0
 
 

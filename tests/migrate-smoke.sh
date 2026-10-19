@@ -460,6 +460,90 @@ eq "M21b: …HEAD unchanged" "$(g "$R" rev-parse HEAD)" "$H21"
 eq "M21b: …no snapshot taken (the owner's rm is not trashed yet)" "$(ntrash "$ST21")" "0"
 git config --file "$W/gitconfig" --unset core.hooksPath
 
+# ---- M22 (v5.0.2, field report): the owner re-clones a repo at the SAME path (mv the old clone
+# away, git clone into the same dir, rsync the ignored files back). The store is keyed by path, so
+# the clone's post-checkout (previous HEAD = null) found the store's files "gone" and trashed them.
+# Now: same remote recorded in the store → missing local-only files come back from the store
+# (never over an existing file); a different / unknown remote → nothing restored, nothing trashed
+git config --file "$W/gitconfig" core.hooksPath "$SHD"
+LF="$KIT_ROOT/plugin/guard/localfiles.sh"
+st_trash() { find "$1" "$1".* -path '*/trash/*' \( -type f -o -type l \) 2>/dev/null | wc -l | tr -d ' '; }
+R="$W/m22"; make_v4 "$R"; g "$R" tag v4-state; km "$R" --commit >/dev/null 2>&1
+rm -rf "$R.git"; git clone -q --bare "$R" "$R.git" 2>/dev/null; g "$R" remote add origin "$R.git"
+echo "# a plan written after the migration" > "$R/docs/plans/new.md"
+sed -i 's/^status = .*/status = "owner edit before the re-clone"/' "$R/PROJECT.toml"
+(cd "$R" && bash "$LF" snapshot 2>/dev/null)
+ST22="$W/state/localfiles/$(printf '%s' "$R" | sha1sum | cut -c1-12)"
+mv "$R" "$R.old"
+CO22="$(git clone -q "$R.git" "$R" 2>&1)"; RC=$?
+eq "M22: re-clone at the same path exit 0" "$RC" "0"
+has "M22: PROJECT.toml comes back with the owner's content" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "owner edit before the re-clone"
+exists "M22: …docs/LESSONS.md" "$R/docs/LESSONS.md"
+exists "M22: …docs/plans/p.md" "$R/docs/plans/p.md"
+exists "M22: …the plan written after the migration" "$R/docs/plans/new.md"
+exists "M22: …docs/superpowers/plans/q.md" "$R/docs/superpowers/plans/q.md"
+has "M22: the clone's hook says what it restored" "$CO22" "restored"
+eq "M22: …in one line" "$(printf '%s\n' "$CO22" | grep -c 'restored')" "1"
+lacks "M22: …nothing moved to trash" "$CO22" "moved to"
+eq "M22: …the trash is empty" "$(st_trash "$ST22")" "0"
+eq "M22: …tree clean (restored files are ignored)" "$(g "$R" status --porcelain)" ""
+[ ! "$R/PROJECT.toml" -ef "$R.old/PROJECT.toml" ] && pass "M22: …a copy, not a hard link shared with the old clone" || fail "M22: restored file shares an inode with the old clone" "same inode"
+# the owner then copies the ignored files back anyway: identical content, harmless
+RS="$(rsync -a -I --exclude .git "$R.old/" "$R/" 2>&1)"; cp -p "$R.old/docs/LESSONS.md" "$R/docs/LESSONS.md"
+SO="$(cd "$R" && bash "$LF" snapshot --report 2>&1)"
+lacks "M22: rsync/cp of the same files back: nothing moved to trash" "$SO" "moved to"
+eq "M22: …the trash is still empty" "$(st_trash "$ST22")" "0"
+has "M22: …PROJECT.toml unchanged" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "owner edit before the re-clone"
+cmp -s "$R/PROJECT.toml" "$ST22/files/PROJECT.toml" && pass "M22: …store copy matches" || fail "M22: store copy matches" "$(cat "$ST22/files/PROJECT.toml" 2>&1)"
+eq "M22: …tree clean" "$(g "$R" status --porcelain)" ""
+# (b) a fresh clone whose checkout already has a file at a local-only path: never overwritten
+mv "$R" "$R.b"
+CO22="$(git clone -q -b v4-state "$R.git" "$R" 2>&1)"; RC=$?
+eq "M22b: re-clone of a pre-migration tag at the same path exit 0" "$RC" "0"
+lacks "M22b: the tracked PROJECT.toml is NOT overwritten by the store copy" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "owner edit before the re-clone"
+has "M22b: …it holds what the commit tracks" "$(cat "$R/PROJECT.toml" 2>/dev/null)" 'status = "active"'
+exists "M22b: an untracked local-only file still comes back" "$R/docs/plans/new.md"
+has "M22b: …the store keeps the owner's PROJECT.toml" "$(cat "$ST22/files/PROJECT.toml" 2>/dev/null)" "owner edit before the re-clone"
+lacks "M22b: …nothing moved to trash" "$CO22" "moved to"
+eq "M22b: …the trash is empty" "$(st_trash "$ST22")" "0"
+# (c) a DIFFERENT repository cloned into the same path: nothing restored, nothing trashed
+mv "$R" "$R.c"
+O="$W/m22other"; make_v4 "$O"; sed -i 's/proj-a/proj-b/' "$O/PROJECT.toml"; g "$O" commit -qam other; km "$O" --commit >/dev/null 2>&1
+rm -rf "$O.git"; git clone -q --bare "$O" "$O.git" 2>/dev/null
+CO22="$(git clone -q "$O.git" "$R" 2>&1)"; RC=$?
+eq "M22c: clone of another repo into the same path exit 0" "$RC" "0"
+absent "M22c: the other repo's PROJECT.toml is NOT restored" "$R/PROJECT.toml"
+absent "M22c: …nor its plans" "$R/docs/plans/new.md"
+lacks "M22c: …nothing restored" "$CO22" "restored"
+lacks "M22c: …nothing moved to trash" "$CO22" "moved to"
+has "M22c: …a hint points at kit guard status" "$CO22" "kit guard status"
+eq "M22c: …the trash is empty" "$(st_trash "$ST22")" "0"
+echo "x" > "$R/x.txt"; g "$R" add x.txt; HO="$(cd "$R" && git commit -qm x 2>&1)"
+GS="$(cd "$R" && python3 "$KIT_ROOT/bin/kit" guard status 2>&1)"
+lacks "M22c: a later commit trashes nothing" "$HO" "moved to"
+eq "M22c: …nor kit guard status (trash still empty)" "$(st_trash "$ST22")" "0"
+has "M22c: kit guard status names the earlier clone's store" "$GS" "earlier clone"
+ASIDE="$(ls -d "$ST22".* 2>/dev/null | head -n 1)"
+has "M22c: …which still holds the owner's files" "$(cat "${ASIDE:-/nonexistent}/files/PROJECT.toml" 2>/dev/null)" "owner edit before the re-clone"
+# (d) a store from v5.0.1 (no remote recorded): nothing restored, nothing trashed; copying back is harmless
+R="$W/m22d"; make_v4 "$R"; km "$R" --commit >/dev/null 2>&1
+rm -rf "$R.git"; git clone -q --bare "$R" "$R.git" 2>/dev/null; g "$R" remote add origin "$R.git"
+(cd "$R" && bash "$LF" snapshot 2>/dev/null)
+ST22D="$W/state/localfiles/$(printf '%s' "$R" | sha1sum | cut -c1-12)"; rm -f "$ST22D/remotes"
+mv "$R" "$R.old"
+CO22="$(git clone -q "$R.git" "$R" 2>&1)"; RC=$?
+eq "M22d: re-clone over a store with no recorded remote exit 0" "$RC" "0"
+absent "M22d: …nothing restored" "$R/PROJECT.toml"
+lacks "M22d: …nothing moved to trash" "$CO22" "moved to"
+has "M22d: …a hint points at kit guard status" "$CO22" "kit guard status"
+eq "M22d: …the trash is empty" "$(st_trash "$ST22D")" "0"
+rsync -a --exclude .git "$R.old/" "$R/"
+SO="$(cd "$R" && bash "$LF" snapshot --report 2>&1)"
+lacks "M22d: rsync back + snapshot: nothing moved to trash" "$SO" "moved to"
+eq "M22d: …the trash is still empty" "$(st_trash "$ST22D")" "0"
+exists "M22d: …and the new store protects the copied-back files" "$ST22D/files/PROJECT.toml"
+git config --file "$W/gitconfig" --unset core.hooksPath
+
 # ---- M15 (review O8): an owner edit to a file migrate wrote, between --apply and --commit
 R="$W/m15"; make_v4 "$R"; km "$R" --apply >/dev/null
 echo "owner tweak after apply" >> "$R/AGENTS.md"

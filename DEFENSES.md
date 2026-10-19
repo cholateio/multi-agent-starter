@@ -293,6 +293,15 @@ claude 啟動時的環境)。
   `<store>/trash/<path>.~<時間戳>~`,**每個路徑保留最近 5 代**、內容相同不重複存(review R4-4);
   checkout 不會再放回(review N2);每個快照呼叫端(post-* hook、`kit migrate`、`kit guard status`、
   session start 的 context)都用一行說搬了什麼;還原訊息附 store 那份的時間(review N4)。
+  **同一路徑重新 clone**(v5.0.2,實際回報):store 以**路徑**為鍵(`sha1(toplevel)`),把舊 clone 移走、
+  在同一個目錄 `git clone`,clone 自己的 post-checkout 會看到前一個 clone 的 store——舊版把那些「不在
+  工作樹」的檔當 owner 刪的搬進 trash。現在 post-checkout 的前一個 HEAD 是 null(新 clone / 新 worktree
+  的第一次 checkout)且這個路徑已有 store 時**一律不 prune、不進 trash**:每次快照都把 repo 的 remote URL
+  (去掉帳密、結尾 `/` 與 `.git`)記進 `<store>/remotes`,新 clone 的 remote 在其中 → store 裡 clone 缺的
+  檔**複製**回工作樹(不是 hard link——舊 clone 保有自己的 inode;已存在的路徑、經過 symlink 或檔案的
+  父路徑一律不碰),一行說放回了哪些;remote 不同或不明(v5.0.1 以前的 store 沒有記錄)→ 什麼都不放回,
+  整個 store 改名成 `<store>.aside.<時間戳>` 保留,印一行提示 `kit guard status`(它會列出這個目錄)。
+  之後把同樣的檔 rsync / cp 回來無害:內容相同,下一次快照只是重新 link,不進 `prev/`、不進 trash。
 
 **Bypass(user-only)**:`kit guard bypass "<reason>"` 只在有 TTY 的終端機執行
 (agent 的非互動 shell 沒有 TTY → 拒絕);寫 `bypass-<repo-id>` 並記一筆
@@ -389,6 +398,10 @@ recorded」。雜湊工具本身只用固定絕對路徑(`/usr/bin/sha256sum`、
    存的修改不在裡面(`<store>/prev/` 留前一版);沒有每個 prompt 都快照(成本),也沒有包裝
    `reset` 的指令(git 沒有可掛的 pre-reset hook)。
    超過 8 MiB / 第 2000 個之後的檔不受保護,只有警告(review R3-3)。根治是改寫歷史(design §12 步驟 6)。
+   **同一路徑重新 clone**(v5.0.2):只認「第一次 checkout」(post-checkout 前一個 HEAD 為 null);
+   `git clone --no-checkout` 之後再 checkout、或不經 clone 直接把別的 `.git` 搬進同一路徑,hook 分不出
+   是新 clone,照「誰刪的」規則走(可能進 trash,可從 trash 複製回來)。remote 比對是字串比對:同一個
+   repo 用 https 與 ssh 兩種 URL clone 算「不同」→ store 被保留在 `.aside.*`、不自動放回(安全側)。
 12. guard-preserve 已知誤擋:`chmod` 算寫入(`chmod -x` 會讓 shim 靜默失效),所以模型照 doctor
    建議跑 `chmod 600 privacy.local.toml` 也會被 deny(交給 user);在 kit repo 自己的開發裡,
    `sed -i plugin/guard/*.sh`、`sed -i plugin/hooks/*.sh` 被 deny(那份就是線上的 guard / hook),改用 Edit(轉 ask)。

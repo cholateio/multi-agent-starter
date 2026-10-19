@@ -32,6 +32,13 @@
 # Trash keeps the last 5 generations per path (an identical copy is not stored twice), and
 # every snapshot caller says so in one line (review R4-4).
 # The store root is mode 700 (review R3-9).
+# A fresh clone (or new worktree) at a path that already has a store (v5.0.2): the store is keyed
+# by PATH, so it is an earlier clone's — its files are not "gone", they were never checked out. On
+# that initial checkout (post-checkout, previous HEAD = null): when the store's recorded remote URLs
+# (<store>/remotes, written at every snapshot) include one of the new clone's, every store file the
+# clone lacks is COPIED back (never over an existing path; one line says what); otherwise (another
+# repository, or a store from an older kit with no record) the store is set aside whole as
+# <store>.aside.<timestamp> — nothing restored, nothing trashed — and `kit guard status` lists it.
 #
 #   localfiles.sh snapshot [--report]         kit migrate / kit guard status (--report) / session start
 #   localfiles.sh post-commit                 (snapshot)
@@ -151,6 +158,22 @@ lf_git_removed() {
         | paste "$STORE/touched.kit-tmp" - | awk -F'\t' '$NF == "blob" && !seen[$1]++ { print $1 }'
     rm -f "$STORE/touched.kit-tmp"
 }
+# lf_remotes: this repo's remote URLs, normalised (credentials, trailing / and .git dropped), sorted
+lf_remotes() {
+    git config --get-regexp '^remote\..*\.url$' 2>/dev/null | cut -d' ' -f2- \
+        | sed -E 's#^([A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@#\1#; s#/+$##; s#\.git$##; s#/+$##' | awk 'NF' | sort -u
+}
+# lf_parent_ok <path>: every parent inside the work tree is a real directory or absent (never write
+# through a symlink or over a file)
+lf_parent_ok() {
+    local d="$1"
+    while [[ "$d" == */* ]]; do
+        d="${d%/*}"
+        [[ -L "$d" ]] && return 1
+        [[ -e "$d" && ! -d "$d" ]] && return 1
+    done
+    return 0
+}
 lf_store_list() { find "$FILES" \( -type f -o -type l \) ! -name '*.kit-tmp' -print0 2>/dev/null; }
 lf_when() { date -r "$1" '+%Y-%m-%d %H:%M' 2>/dev/null || stat -c %y "$1" 2>/dev/null | cut -c1-16; }
 
@@ -173,8 +196,13 @@ snapshot() {
         fi
         lf_link "$p" "$FILES/$p"
     done < <(git -c core.quotePath=false ls-files -z --others -- "${LF_PATHS[@]}" 2>/dev/null)
-    prune
-    [[ -d "$FILES" ]] && { printf '%s\n' "$TOP" > "$STORE/repo" 2>/dev/null; lf_mark; }
+    [[ -n "${LF_NOPRUNE:-}" ]] || prune
+    if [[ -d "$FILES" ]]; then
+        printf '%s\n' "$TOP" > "$STORE/repo" 2>/dev/null; lf_mark
+        # which repository this store belongs to (v5.0.2: a fresh clone at the same path checks it)
+        local rem; rem="$(lf_remotes)"
+        [[ -n "$rem" ]] && printf '%s\n' "$rem" > "$STORE/remotes.kit-tmp" 2>/dev/null && mv -f "$STORE/remotes.kit-tmp" "$STORE/remotes" 2>/dev/null
+    fi
     # files the store does NOT protect: never silent (review R3-3)
     local list="" old=""
     [[ ${#omitted[@]} -gt 0 ]] && list="$(printf '%s\n' "${omitted[@]}")"
@@ -258,9 +286,48 @@ prune() {  # store entries gone from the work tree while HEAD does not track the
     return 0
 }
 
+# fresh_clone: the initial checkout of a new clone / worktree at a path that already has a store
+# (an earlier clone's — the store is keyed by path). Nothing here was deleted by the owner: never trash.
+fresh_clone() {
+    local p rec="" cur t aside
+    local -a back=()
+    [[ -f "$STORE/remotes" ]] && rec="$(cat "$STORE/remotes" 2>/dev/null)"
+    cur="$(lf_remotes)"
+    if [[ -n "$rec" && -n "$cur" ]] && printf '%s\n' "$rec" | grep -qxF -f <(printf '%s\n' "$cur"); then
+        # same repository: copy (not link — the old clone keeps its own inode) what the clone lacks
+        while IFS= read -r -d '' p; do
+            p="${p#"$FILES"/}"
+            lf_here "$p" && continue
+            lf_parent_ok "$p" || continue
+            mkdir -p "$(dirname "$p")" 2>/dev/null || continue
+            rm -f "$p.kit-tmp"
+            cp -P -p "$FILES/$p" "$p.kit-tmp" 2>/dev/null && ! lf_here "$p" && mv -f "$p.kit-tmp" "$p" && back+=("$p")
+            rm -f "$p.kit-tmp"
+        done < <(lf_store_list)
+        if [[ ${#back[@]} -gt 0 ]]; then
+            echo "kit: fresh clone of the same remote at this path — restored ${#back[@]} local-only file(s) from the earlier clone's store (${back[*]:0:4}${back[4]:+ …}; files the clone already has are left alone$([[ -f "$STORE/mark" ]] && echo "; last snapshot $(lf_when "$STORE/mark")")) — $STORE" >&2
+        fi
+        LF_NOPRUNE=1 snapshot
+        return 0
+    fi
+    # another repository, or a store from an older kit that recorded no remote: set it aside whole
+    t="$(date +%Y%m%dT%H%M%S)"; aside="$STORE.aside.$t"
+    while [[ -e "$aside" ]]; do aside="$aside.$$"; done
+    if mv "$STORE" "$aside" 2>/dev/null; then
+        echo "kit: this path had a local-only store from an earlier clone ($([[ -n "$rec" ]] && echo "of another remote: $(printf '%s\n' "$rec" | head -n 1)" || echo "remote unknown")) — not applied to this clone and nothing trashed: kept whole at $aside (copy back from its files/ what you want) — see: kit guard status" >&2
+        snapshot
+    else
+        echo "kit: this path has a local-only store from an earlier clone that could not be set aside ($STORE) — not applied to this clone; see: kit guard status" >&2
+        LF_NOPRUNE=1 snapshot
+    fi
+    return 0
+}
+
 restore() {  # $1 = previous HEAD (may be empty), $2… = more commits the operation went through
     local prev="$1" p kept=() blob=(); shift
     LF_EXTRA=("$@")
+    # initial checkout of a fresh clone / worktree (v5.0.2)
+    [[ "$MODE" == post-checkout && "$prev" =~ ^0+$ && -d "$STORE" ]] && { fresh_clone; return 0; }
     [[ -n "$prev" && ! "$prev" =~ ^0+$ ]] || { snapshot; return 0; }
     LF_EXTRA+=("$prev")
     local -A now=() before=()
@@ -305,6 +372,11 @@ restore() {  # $1 = previous HEAD (may be empty), $2… = more commits the opera
 }
 
 trash_note() {  # `kit guard status`: what the owner deleted is still recoverable — say where
+    local a
+    for a in "$STORE".aside.*; do   # stores of an earlier clone at this path, set aside (v5.0.2)
+        [[ -d "$a" ]] || continue
+        echo "kit: a local-only store of an earlier clone at this path was set aside (another or unknown remote): $a — $(find "$a/files" \( -type f -o -type l \) 2>/dev/null | wc -l | tr -d ' ') file(s) in its files/; copy back what you want, then delete it" >&2
+    done
     [[ -d "$STORE/trash" ]] || return 0
     local p g=0
     local -A t=()
