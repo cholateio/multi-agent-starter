@@ -227,9 +227,20 @@ claude 啟動時的環境)。
 - 失效模式 fail-loud:`config.toml` / `kit_root` / guard 腳本缺 → shim
   `KIT GUARD: not configured` 並 **exit 1**;讀不到 staged diff / 推送範圍 → block。
   `privacy.local.toml` 缺 → R4/R5 跳過 + warn(R3 仍認得 OS user)。
-- 審計:每次 block / bypass 寫 `~/.local/state/kit/guard/audit.jsonl`。
+- 審計:每次 block / bypass / 被用掉的 `kit-privacy: allow` 寫 `~/.local/state/kit/guard/audit.jsonl`。
+- 拿掉 kit.toml 不會關掉 R2:commit 時從 HEAD 讀 kit.toml(並 warn),push 時遠端舊 tip / 範圍邊界 /
+  範圍內任何 commit 有 kit.toml 就仍算 kit repo,而且「移除 kit.toml」本身 block(只有 user bypass 放行)。
 - 速度(Phase 4 實測):小 diff pre-commit 中位數 52ms 不含 gitleaks、270ms 含(final-review 修正後重測);
-  7-commit push 320ms 含 gitleaks;8,000 行 email CSV(8k 個 R6 warn)< 1s。
+  7-commit push 320ms 含 gitleaks;8,000 行 email CSV(8k 個 R6 warn)< 1s;每條規則只列前 50 筆、
+  其餘計數成一行,20 萬行 email CSV 約 1.3s(review F8)。push 時 `git ls-remote` 上限 5 秒、
+  ssh BatchMode、不跳密碼提示;失敗就說原因並改掃完整歷史。
+- **本機專屬檔案(review F3)**:migrate 後 PROJECT.toml / LESSONS / plans / `.claude/` 已不追蹤,
+  但遷移前的每個 commit 仍追蹤它們——`git checkout <舊 ref>` 會蓋掉、切回來會刪掉。git 沒有
+  pre-checkout hook,所以 `plugin/guard/localfiles.sh` 把這些檔 **hard link** 進
+  `~/.local/state/kit/localfiles/<repo-id>/files/`(git 換檔是 unlink + 新建,store 那份保留內容,
+  包含上次快照後的就地修改);post-checkout / post-merge / post-rewrite shim 把被刪的放回(沒有
+  store 時用前一個 commit 的 blob,只限 owner 內容、不含 `.claude/` 的 v4 kit 檔),post-commit /
+  `kit migrate` / `kit guard status` / session start 更新快照。
 
 **Bypass(user-only)**:`kit guard bypass "<reason>"` 只在有 TTY 的終端機執行
 (agent 的非互動 shell 沒有 TTY → 拒絕);寫 `bypass-<repo-id>` 並記一筆
@@ -237,11 +248,18 @@ claude 啟動時的環境)。
 會被擋的** commit 或 push 單次放行並記 audit(乾淨的 commit 不消耗;commit 與 push
 各需一次)。`KIT_GUARD=off` 不被承認。模型這一側由 tool-breaker 的 guard-preserve
 (所有目錄都跑)deny:`--no-verify`、`commit -n`、改 / 清空 `core.hooksPath`、
-`HOME=` / `XDG_CONFIG_HOME=` / `GIT_CONFIG_*=` / `KIT_STATE_HOME=` / `PATH=` 前綴的
-commit/push、`git send-pack`(不跑 pre-push)、`kit guard bypass`(含 `script` /
-`unbuffer` / `pty.spawn` 包裝)、以重導向或 cp/mv/rm/sed 等寫 guard 狀態檔、
-git-hooks shim 或 git config 檔;gitleaks 優先用釘版的 `~/.local/bin/gitleaks`;
-protect-paths 對 Edit/Write 到 `~/.config/kit`、`<state>/guard`、git config 檔轉 ask。
+`HOME=` / `XDG_CONFIG_HOME=` / `GIT_CONFIG_*=` / `KIT_STATE_HOME=` 前綴的
+commit/push、`env -i` / `env -` / `env -u HOME` / `--ignore-environment` / `--unset=HOME` /
+先 `unset HOME` 再 commit/push、`-c` / `--config-env` 的 `include.path=` / `includeIf.*.path=`
+(含 `GIT_CONFIG_KEY_n` 與 `git config include.path` 寫入)、`git send-pack`(不跑 pre-push)、
+`kit guard bypass`(含 `script` / `unbuffer` / `pty.spawn` 包裝),以及**直接寫** guard 的輸入:
+重導向目標、或寫入型指令(rm/mv/touch/truncate/chmod/tee:任一運算元;cp/ln/install/rsync:
+目的地;sed/perl/ruby:僅 `-i`;dd `of=`;`--output=`)的運算元是 guard 狀態檔、git-hooks shim、
+git config 檔、`privacy.local.toml`、kit `config.toml` 或 `plugin/guard/`——只讀(`sed -n`、
+`cat … | sed`)與「同一行別處提到」不算(review F1/F6/F7)。`PATH=` 不再攔:gitleaks 走
+`config.toml tools_dir`(預設 `~/.local/bin`)優先於 PATH 的單一解析器(guard、session start、
+doctor、`kit guard status` 共用)。protect-paths 對 Edit/Write 到 `~/.config/kit`、
+`<state>/guard`、git config 檔轉 ask。
 
 **已知繞道與殘餘(誠實條款)**:
 1. 人用 `git --no-verify` → guard 擋不了;事後由 `kit audit`(A1–A5)抓內容。
@@ -251,18 +269,43 @@ protect-paths 對 Edit/Write 到 `~/.config/kit`、`<state>/guard`、git config 
    `kit doctor`(在該 repo 內跑)FAIL、`kit guard status` 標 OVERRIDDEN、`kit audit` A16 HIGH。
 4. 推送目標**已有**的內容不會在 push 時重查:同一個 remote 從私人翻公開時,舊的
    public-only 字面值要靠 `kit audit` A2/A6。
-5. 含 NUL 的檔案段落整段不掃內容(二進位裡的字面值、或刻意塞一個 NUL 的文字檔);
+5. **含 NUL 的檔案段落整段不掃內容**(review F5/O7):二進位裡的字面值,或刻意
+   `printf '\0' >>` 一個 NUL 的文字檔,整個檔案就跳過 R1 與 R3–R7(gitleaks 的 git 模式
+   本來也看不到 → R1 與上游同等;R3–R7 是 kit 自己的損失)。不擋 NUL 檔,因為那會擋掉
+   每個真的二進位檔;
    `gitleaks stdin` 不套用 gitleaks 的路徑型 allowlist(lockfile 可能多出誤報);
    commit 訊息在 commit 時還不存在,只在 push 時掃;作者 / committer email 不掃;
    `reference-transaction` / `post-index-change` 沒有鏈接 shim。
 6. 同一個 commit 可以順手放寬 `kit.toml`(`allow_literals`、`visibility`)——diff 可見,
    且 kit.toml 是 Stop gate 的敏感路徑,必過 review 或 user 之口。
 7. 模型威脅邊界同 v4.9:持 Bash 的模型用變數、alias、腳本仍能拼出繞道
-   (anti-footgun,不是 anti-evasion);bypass 檔與 audit log 只是摩擦 + 留痕。
+   (anti-footgun,不是 anti-evasion);bypass 檔與 audit log 只是摩擦 + 留痕。逐條明列:
+   - **變數 / 間接的 `--no-verify`**(review O6):`f=--no-verify; git push "$f"`、
+     `git push $(echo --no-verify)`、`NV=--no-verify; git commit $NV` 都不會被 deny;
+     guard-preserve 只看命令字面。
+   - **間接改寫 guard 的輸入**(review F6 殘餘):直接形式(重導向、sed -i、cp 到該路徑…)
+     已 deny,但 `python3 -c 'open(...).write(...)'`、自己寫的腳本、變數拼出的路徑、
+     `cd ~/.config/kit && sed -i … config.toml`(相對檔名)、編輯器等仍能改
+     `privacy.local.toml`、`config.toml`、`plugin/guard/*.sh`、git config。
+   - 行尾 `kit-privacy: allow` 模型可以自己寫,但只豁免 warn 級規則,且每次都 WARN + audit。
 8. 權限基線殘餘(§13 #8):`git log --output=`、`git diff --output=` 可寫檔,
    被 `Bash(git log *)` / `Bash(git diff *)` 放行——低風險(只寫文字檔),接受。基線一律
    「空格 + `*`」:無空格的 `Bash(git diff*)` 是前綴比對,會連 `git difftool --extcmd=` 一起放行
    (任意執行),`Bash(ls*)` 會放行 lsof(review F2;kit setup 重跑時移除舊的無空格寫法)。
+9. **R2 只錨在 repo 根目錄**(review F10):`sub/.claude/settings.local.json`、
+   `fixtures/.superpowers/…` 這種巢狀路徑不擋;`kit audit` A4 會以 INFO 列出巢狀 `.claude/`。
+10. **上線順序**(review F9):沒有 kit.toml 的 repo 一律當公開——public-only 字面值 block、
+   `.env*` 照擋。`kit setup` 裝好全域 hook 後,私人 v4 repo 要**緊接著** `kit migrate`;在那之前,
+   提到其他私人專案名的私人 repo 會推不上去(要嘛先 migrate、要嘛 user bypass)。
+11. **本機專屬檔案保護的縫**(review F3 殘餘):hard link 只保住「就地」修改;用 rename 存檔的
+   編輯器(`sed -i`、原子存檔)在上次快照後、下一次破壞性 checkout 前的修改會遺失(回來的是
+   較舊的 store 版本);repo 與 `~/.local/state` 不在同一個檔案系統時只能複製,同一個縫。
+   `git reset --hard <舊>`、`git stash`、`git clean` 不觸發 post-checkout——內容留在 store,
+   `kit guard status` 會列出「工作樹缺、store 有」的檔案,要自己複製回來。回到舊 ref 再回來時,
+   遷移後被 owner 刪掉的 plan 可能重新出現(未追蹤、已 ignore)。根治是改寫歷史(design §12 步驟 6)。
+12. guard-preserve 已知誤擋:`chmod` 算寫入(`chmod -x` 會讓 shim 靜默失效),所以模型照 doctor
+   建議跑 `chmod 600 privacy.local.toml` 也會被 deny(交給 user);在 kit repo 自己的開發裡,
+   `sed -i plugin/guard/*.sh` 被 deny(那份就是線上的 guard),改用 Edit(轉 ask)。
 
 ## 四、誠實條款:這套 harness 的能力極限
 

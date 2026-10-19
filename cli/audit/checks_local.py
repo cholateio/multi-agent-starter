@@ -175,6 +175,13 @@ def a4(t, ctx, tracked):
             out.append(Finding(t.name, "A4", _sev(ctx, "HIGH", "MEDIUM"), hits[0], None,
                                f"{len(hits)} tracked file(s) under {label}",
                                f"git rm -r --cached {label.rstrip('*')} (kit migrate does this)"))
+    # the guard's R2 is root-anchored (documented residual, review F10): name nested .claude/ dirs
+    nested = [p for p in files if "/.claude/" in p and not p.startswith(".claude/")]
+    if nested:
+        out.append(Finding(t.name, "A4", "INFO", nested[0], None,
+                           f"{len(nested)} tracked file(s) under a nested .claude/ — the guard's R2 is "
+                           "root-anchored and does not block these",
+                           "check none is local state (settings.local.json, scratch); git rm --cached if so"))
     return out
 
 

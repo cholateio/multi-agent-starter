@@ -147,6 +147,16 @@ class TestLocalChecks(IsolatedTestCase):
         a2 = checks(self.run_local(repo, ctx()), "A2")
         self.assertEqual([(x.path, x.line) for x in a2], [("x.txt", 1)])
 
+    def test_a4_notes_nested_claude_dirs(self):
+        """Review F10 (documented residual): the guard's R2 is root-anchored, so audit at least
+        names tracked files under a nested .claude/ (INFO, not a block-level finding)."""
+        repo = self.make_repo("proj-b", dict(CLEAN_FILES, **{"sub/.claude/settings.local.json": "{}\n"}))
+        self.git(repo, "add", "-f", "sub/.claude/settings.local.json")
+        self.git(repo, "commit", "-q", "-m", "nested")
+        a4 = checks(self.run_local(repo, ctx()), "A4")
+        self.assertEqual([(x.severity, x.path) for x in a4], [("INFO", "sub/.claude/settings.local.json")])
+        self.assertIn("root-anchored", a4[0].snippet)
+
     def test_a4_env_files_follow_the_guard(self):
         """Review F4: .env / .env.<name> are A4, templates and .envrc are not; allow_paths exempts."""
         files = dict(CLEAN_FILES, **{".env.sample": "K=\n", ".envrc": "export A=1\n", ".env.local.example": "K=\n",
