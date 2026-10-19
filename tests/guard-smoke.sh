@@ -222,7 +222,7 @@ AUDIT="$KIT_STATE_HOME/guard/audit.jsonl"
 # (PROJECT.toml tracked from the start, like a v4 repo); kit.toml unless "none"
 newrepo() {
   rm -rf "$1"; git init -q "$1"
-  printf 'status = "active"\n' > "$1/PROJECT.toml"; echo "# r" > "$1/README.md"
+  [ "${3:-}" = noproj ] || printf 'status = "active"\n' > "$1/PROJECT.toml"; echo "# r" > "$1/README.md"
   if [ "${2:-public}" != none ]; then printf 'kit = 5\nvisibility = "%s"\nprotected = [\n]\n' "${2:-public}" > "$1/kit.toml"; fi
   git -C "$1" add -A && git -C "$1" -c core.hooksPath=/dev/null commit -q -m init
 }
@@ -446,6 +446,177 @@ git -C "$QN" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null   # .en
 printf 'x\n' > "$QN/.env.local"; git -C "$QN" add -f .env.local; nc "$QN"
 psh "$QN" "" origin main
 eq   "C16: no kit.toml → .env* in the pushed tree is R2" "$PC" "1"
+
+# ============================================================ D. shim / chaining / bypass
+echo "--- D. shim, chaining, bypass"
+SHIMS="$KIT_CONFIG_HOME/git-hooks"; mkdir -p "$SHIMS"
+mkshims() { for h in "$@"; do sed "s/__HOOK__/$h/g" "$KIT_ROOT/plugin/guard/shim.sh" > "$SHIMS/$h"; chmod 755 "$SHIMS/$h"; done; }
+mkshims pre-commit pre-push commit-msg post-commit
+git config --file "$GIT_CONFIG_GLOBAL" core.hooksPath "$SHIMS"
+KIT="python3 $KIT_ROOT/bin/kit"
+# gcm <repo> [extra git args…] → GO, GC : a plain `git commit` through the GLOBAL hooksPath, with a hang timeout
+gcm() { local r="$1"; shift; GO="$(cd "$r" && PATH="$GL_PATH" timeout 30 git commit -q -m t "$@" 2>&1)"; GC=$?; }
+gpu() { local r="$1"; shift; GO="$(cd "$r" && PATH="$GL_PATH" timeout 30 git push -q "$@" 2>&1)"; GC=$?; }
+lacks "D4: shim never resolves hooks via --git-path (it would recurse into itself)" "$(grep -v '^#' "$KIT_ROOT/plugin/guard/shim.sh")" "--git-path"
+has  "D4: shim chains via --git-common-dir" "$(cat "$KIT_ROOT/plugin/guard/shim.sh")" "--git-common-dir"
+
+printf 'kit_root = "%s"\nprofile = "full"\n' "$KIT_ROOT" > "$KIT_CONFIG_HOME/config.toml"
+S1="$W/sd"; newrepo "$S1" public noproj
+eq   "D4: under a global hooksPath, --git-path hooks points at the shim dir (the trap)" "$(cd "$S1" && git rev-parse --git-path hooks)" "$SHIMS"
+echo a > "$S1/a.txt"; git -C "$S1" add a.txt; gcm "$S1"
+eq   "D1-: configured shim → clean commit passes" "$GC" "0"
+mv "$KIT_CONFIG_HOME/config.toml" "$W/cfg.off" 2>/dev/null
+echo b > "$S1/b.txt"; git -C "$S1" add b.txt; gcm "$S1"
+eq   "D1: config.toml missing → commit blocked" "$GC" "1"
+has  "D1: …KIT GUARD: not configured" "$GO" "KIT GUARD: not configured"
+printf 'kit_root = "%s"\nprofile = "full"\n' "$KIT_ROOT" > "$KIT_CONFIG_HOME/config.toml"
+printf 'kit_root = "%s"\n' "$W/no-such-kit" > "$KIT_CONFIG_HOME/config.toml"; gcm "$S1"
+eq   "D1: kit_root without guard scripts → blocked" "$GC" "1"
+printf 'kit_root = "%s"\nprofile = "full"\n' "$KIT_ROOT" > "$KIT_CONFIG_HOME/config.toml"
+gcm "$S1"
+eq   "D1: config restored → passes" "$GC" "0"
+
+printf '#!/bin/sh\necho ran > "%s/local-pc"\nexit 0\n' "$W" > "$S1/.git/hooks/pre-commit"; chmod +x "$S1/.git/hooks/pre-commit"
+echo c > "$S1/c.txt"; git -C "$S1" add c.txt; rm -f "$W/local-pc"; gcm "$S1"
+eq   "D2: guard passes, then the repo-local pre-commit runs" "$(cat "$W/local-pc" 2>/dev/null)" "ran"
+printf '#!/bin/sh\necho local-hook-says-no >&2\nexit 3\n' > "$S1/.git/hooks/pre-commit"
+echo d > "$S1/d.txt"; git -C "$S1" add d.txt; gcm "$S1"
+eq   "D2: repo-local hook failure blocks the commit" "$GC" "1"
+has  "D2: …its output is shown" "$GO" "local-hook-says-no"
+printf 'p /home/testuser/x\n' > "$S1/e.txt"; git -C "$S1" add e.txt; rm -f "$W/local-pc"
+printf '#!/bin/sh\necho ran > "%s/local-pc"\n' "$W" > "$S1/.git/hooks/pre-commit"; gcm "$S1"
+eq   "D2: guard block stops before the local hook" "$(cat "$W/local-pc" 2>/dev/null)" ""
+git -C "$S1" reset -q e.txt; rm -f "$S1/e.txt"; git -C "$S1" add d.txt; gcm "$S1"
+printf '#!/bin/sh\ngrep -q JIRA "$1" || { echo "commit-msg: need JIRA" >&2; exit 1; }\n' > "$S1/.git/hooks/commit-msg"; chmod +x "$S1/.git/hooks/commit-msg"
+echo f > "$S1/f.txt"; git -C "$S1" add f.txt; gcm "$S1"
+eq   "D10: chain-only shim runs the repo-local commit-msg hook" "$GC" "1"
+has  "D10: …with its message" "$GO" "commit-msg: need JIRA"
+mv "$KIT_CONFIG_HOME/config.toml" "$W/cfg.off"
+GO="$(cd "$S1" && PATH="$GL_PATH" timeout 30 bash "$SHIMS/commit-msg" /dev/null 2>&1)"; GC=$?
+eq   "D10: chain-only hooks do not need kit config" "$GC" "1"
+lacks "D10: …and never say not configured" "$GO" "not configured"
+mv "$W/cfg.off" "$KIT_CONFIG_HOME/config.toml"
+rm -f "$S1/.git/hooks/commit-msg"; gcm "$S1"
+
+git -C "$S1" worktree add -q "$W/sd-wt" -b wt 2>/dev/null
+rm -f "$W/local-pc"; echo w > "$W/sd-wt/w.txt"; git -C "$W/sd-wt" add w.txt; gcm "$W/sd-wt"
+eq   "D3: commit in a linked worktree passes" "$GC" "0"
+eq   "D3: …and chains to the MAIN repo's hook (--git-common-dir)" "$(cat "$W/local-pc" 2>/dev/null)" "ran"
+printf 'p /home/testuser/x\n' > "$W/sd-wt/x.txt"; git -C "$W/sd-wt" add x.txt; gcm "$W/sd-wt"
+eq   "D3: the guard runs in a linked worktree too" "$GC" "1"
+git -C "$W/sd-wt" reset -q x.txt
+
+ln -sf "$SHIMS/pre-commit" "$S1/.git/hooks/pre-commit"
+echo g > "$S1/g.txt"; git -C "$S1" add g.txt; gcm "$S1"
+eq   "D11: a repo-local hook that IS the shim does not recurse (no hang)" "$GC" "0"
+rm -f "$S1/.git/hooks/pre-commit"
+
+# pre-push: guard and the local hook both see the full stdin
+rm -rf "$S1.git"; git init -q --bare "$S1.git"; git -C "$S1" remote add origin "$S1.git"
+printf '#!/bin/sh\ncat > "%s/local-pp-stdin"\necho "$1 $2" > "%s/local-pp-args"\n' "$W" "$W" > "$S1/.git/hooks/pre-push"; chmod +x "$S1/.git/hooks/pre-push"
+gpu "$S1" origin main wt
+eq   "D7: push through the global shim passes" "$GC" "0"
+eq   "D7: local pre-push got one stdin line per ref" "$(wc -l < "$W/local-pp-stdin" | tr -d ' ')" "2"
+has  "D7: …in <lref> <lsha> <rref> <rsha> form" "$(cat "$W/local-pp-stdin")" "refs/heads/main $(git -C "$S1" rev-parse main) refs/heads/main 0000000000000000000000000000000000000000"
+eq   "D7: …and the remote name/url args" "$(cat "$W/local-pp-args")" "origin $S1.git"
+
+# the shim pins its own config dir: KIT_CONFIG_HOME in the commit's env cannot hide privacy.local.toml
+printf 'uid 11111111-2222-3333-4444-555555555555\n' > "$S1/u.txt"; git -C "$S1" add u.txt
+GO="$(cd "$S1" && KIT_CONFIG_HOME="$W/empty" PATH="$GL_PATH" timeout 30 git commit -q -m t 2>&1)"; GC=$?
+eq   "D14: KIT_CONFIG_HOME override does not switch off R4" "$GC" "1"
+git -C "$S1" reset -q u.txt; rm -f "$S1/u.txt"
+
+# bypass: user-only (needs a TTY), single-use, audited, 10 minutes
+mkdir -p "$S1/.claude"; echo x > "$S1/.claude/x"; git -C "$S1" add -f .claude/x
+BO="$(cd "$S1" && $KIT guard bypass "agent wants it" </dev/null 2>&1)"; BC=$?
+eq   "D8: bypass without a TTY is refused" "$BC" "1"
+has  "D8: …as user-only" "$BO" "USER-only"
+BO="$(cd "$S1" && script -qec "$KIT guard bypass ''" /dev/null 2>&1)"; BC=$?
+eq   "D9: empty reason → exit 2" "$BC" "2"
+BO="$(cd "$S1" && script -qec "$KIT guard bypass 'vendor fixture, reviewed'" /dev/null 2>&1)"; BC=$?
+eq   "D5: bypass from a terminal → exit 0" "$BC" "0"
+has  "D5: …says it is armed" "$BO" "armed"
+SO="$(cd "$S1" && $KIT guard status 2>&1)"
+has  "D13: status shows the active bypass" "$SO" "bypass: active"
+gcm "$S1"
+eq   "D5: the blocked commit goes through once" "$GC" "0"
+has  "D5: …saying the bypass was consumed" "$GO" "bypass consumed — vendor fixture, reviewed"
+has  "D5: audit.jsonl records the bypass" "$(cat "$AUDIT")" '"action":"bypass"'
+has  "D5: …with its reason" "$(cat "$AUDIT")" '"reason":"vendor fixture, reviewed"'
+mkdir -p "$S1/.claude"; echo y > "$S1/.claude/y"; git -C "$S1" add -f .claude/y; gcm "$S1"
+eq   "D5: single-use — the next block blocks again" "$GC" "1"
+BO="$(cd "$S1" && script -qec "$KIT guard bypass 'late'" /dev/null 2>&1)"
+BF="$(ls "$KIT_STATE_HOME"/guard/bypass-* 2>/dev/null | head -1)"
+[ -n "$BF" ] && sed -i -E 's/"expires": *[0-9]+/"expires": 1000/' "$BF"
+gcm "$S1"
+eq   "D6: an expired bypass does not apply" "$GC" "1"
+[ ! -e "$BF" ] && pass "D6: …and is removed" || fail "D6: …and is removed" "still there"
+BO="$(cd "$S1" && script -qec "$KIT guard bypass 'clean run'" /dev/null 2>&1)"
+git -C "$S1" rm -q --cached .claude/y; echo h > "$S1/h.txt"; git -C "$S1" add h.txt; gcm "$S1"
+SO="$(cd "$S1" && $KIT guard status 2>&1)"
+has  "D5: a clean commit does not burn the bypass" "$SO" "bypass: active"
+rm -f "$KIT_STATE_HOME"/guard/bypass-*
+
+SO="$(cd "$S1" && PATH="$GL_PATH" $KIT guard status 2>&1)"; SC=$?
+eq   "D13: guard status exit 0" "$SC" "0"
+has  "D13: status shows the global hooksPath" "$SO" "hooksPath: $SHIMS"
+has  "D13: status shows the repo visibility" "$SO" "visibility: public"
+has  "D13: status shows privacy counts (no values)" "$SO" "1 usernames, 1 emails, 3 literals"
+lacks "D13: status never prints literal values" "$SO" "11111111"
+has  "D13: status shows gitleaks" "$SO" "gitleaks:"
+git -C "$S1" config core.hooksPath .husky
+SO="$(cd "$S1" && $KIT guard status 2>&1)"
+has  "D12: status flags a repo-local core.hooksPath override" "$SO" "OVERRIDDEN"
+DO="$(cd "$S1" && $KIT doctor 2>&1)"
+has  "D12: kit doctor FAILs the override in the current repo" "$DO" "FAIL repo hooksPath"
+git -C "$S1" config --unset core.hooksPath
+
+# submodule: the guard runs inside it and chains to its own hooks dir
+SUB="$W/subsrc"; newrepo "$SUB" none
+git -C "$S1" -c protocol.file.allow=always submodule -q add "$SUB" sub >/dev/null 2>&1
+git -C "$S1" -c core.hooksPath=/dev/null commit -q -m sub
+printf 'p /home/testuser/s\n' > "$S1/sub/s.txt"; git -C "$S1/sub" add s.txt; gcm "$S1/sub"
+eq   "D15: guard runs inside a submodule" "$GC" "1"
+git -C "$S1/sub" reset -q s.txt; rm -f "$S1/sub/s.txt"
+
+# ============================================================ E. end-to-end: kit setup + bare remote
+echo "--- E. end-to-end (kit setup, global hooksPath, bare remote)"
+EM="$W/e2e"; mkdir -p "$EM/home" "$EM/fakebin"
+printf '#!/bin/sh\ncase "$*" in "--version") echo "2.1.303 (Claude Code)";; *"--json"*) echo "[]";; esac\nexit 0\n' > "$EM/fakebin/claude"; chmod +x "$EM/fakebin/claude"
+: > "$EM/gitconfig"
+e2e() { env HOME="$EM/home" KIT_CONFIG_HOME="$EM/home/.config/kit" KIT_STATE_HOME="$EM/home/.local/state/kit" \
+          GIT_CONFIG_GLOBAL="$EM/gitconfig" XDG_CONFIG_HOME="$EM/home/.config" PATH="$EM/fakebin:$GL_PATH" "$@"; }
+SETUP_OUT="$(e2e python3 "$KIT_ROOT/bin/kit" setup --bin-dir "$EM/home/.local/bin" 2>&1)"
+eq   "E0: kit setup sets the global hooksPath" "$(GIT_CONFIG_GLOBAL="$EM/gitconfig" git config --global core.hooksPath)" "$EM/home/.config/kit/git-hooks"
+cp "$PRIV" "$EM/home/.config/kit/privacy.local.toml"; chmod 600 "$EM/home/.config/kit/privacy.local.toml"
+ER="$W/e2e-repo"; rm -rf "$ER" "$ER.git"; git init -q --bare "$ER.git"; git init -q "$ER"; git -C "$ER" remote add origin "$ER.git"
+printf 'kit = 5\nvisibility = "public"\n' > "$ER/kit.toml"; echo "# e2e" > "$ER/README.md"; git -C "$ER" add -A
+ec() { EO2="$(cd "$ER" && e2e timeout 30 git commit -q -m "$1" 2>&1)"; EC2=$?; }
+ec init
+eq   "E1: a clean first commit passes (a real kit setup no longer blocks every commit)" "$EC2" "0"
+if [ -n "$GITLEAKS" ]; then
+  printf 'aws_key = "%s"\n' "$FAKE_AWS" > "$ER/aws.txt"; git -C "$ER" add aws.txt; ec aws
+  eq  "E2: fake AWS key → commit blocked" "$EC2" "1"; has "E2: [R1 secret]" "$EO2" "[R1 secret]"
+  git -C "$ER" reset -q aws.txt; rm -f "$ER/aws.txt"
+else skip "E2: fake AWS key" "no gitleaks"; fi
+printf 'status = "active"\n' > "$ER/PROJECT.toml"; git -C "$ER" add -f PROJECT.toml; ec manifest
+eq   "E3: PROJECT.toml → commit blocked" "$EC2" "1"; has "E3: [R2]" "$EO2" "[R2 forbidden-path] PROJECT.toml"
+git -C "$ER" reset -q PROJECT.toml
+printf 'data = "/home/%s/x"\n' "$(id -un)" > "$ER/p.txt"; git -C "$ER" add p.txt; ec path
+eq   "E4: /home/<this user>/x → commit blocked" "$EC2" "1"; has "E4: [R3]" "$EO2" "[R3 local-path]"
+git -C "$ER" reset -q p.txt; rm -f "$ER/p.txt"
+echo "hello" > "$ER/clean.txt"; git -C "$ER" add clean.txt; ec clean
+eq   "E5: clean commit passes" "$EC2" "0"
+EP="$(cd "$ER" && e2e timeout 60 git push -q origin main 2>&1)"; EPC=$?
+eq   "E5: clean push to the bare remote passes" "$EPC" "0"
+git -C "$ER" add -f PROJECT.toml; git -C "$ER" -c core.hooksPath=/dev/null commit -q -m "long ago, before the guard"
+echo "more" >> "$ER/clean.txt"; git -C "$ER" add clean.txt; ec later
+git -C "$ER" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null   # PROJECT.toml reached the remote pre-guard
+echo "again" >> "$ER/clean.txt"; git -C "$ER" add clean.txt; ec again
+EP="$(cd "$ER" && e2e timeout 60 git push origin main 2>&1)"; EPC=$?
+eq   "E6: push of a tree with a long-tracked PROJECT.toml → blocked" "$EPC" "1"
+has  "E6: [R2] tree-wide" "$EP" "[R2 forbidden-path] PROJECT.toml"
+eq   "E6: …and the remote did not move" "$(git -C "$ER.git" rev-parse main)" "$(git -C "$ER" rev-parse HEAD~1)"
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1

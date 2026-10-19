@@ -1237,6 +1237,11 @@ run_hook "$PP" "$(pp_json "$FAKE_HOME/.config/git/config")"
 assert_eq "b-v5: Edit of ~/.config/git/config escalates to ask" "$(pp_decision)" "ask"
 run_hook "$PP" "$(pp_json "$R4/src/git/config")"
 assert_eq "b-v5: an ordinary file named config is not escalated" "$OUT" ""
+# Phase 4: the guard's state dir holds bypass files and the audit log (Edit/Write route)
+run_hook "$PP" "$(pp_json "$FAKE_HOME/.local/state/kit/guard/bypass-0123456789ab")"
+assert_eq "b-v5: Write of a guard bypass file escalates to ask" "$(pp_decision)" "ask"
+run_hook "$PP" "$(pp_json "$WORK/kstate/guard/audit.jsonl")" full KIT_STATE_HOME="$WORK/kstate"
+assert_eq "b-v5: Edit of the guard audit log (KIT_STATE_HOME) escalates to ask" "$(pp_decision)" "ask"
 
 # P-v5-2: a leftover v4 .claude/protected-paths is no longer read
 echo "src/legacy/" > "$R4/.claude/protected-paths"
@@ -1577,6 +1582,20 @@ bgp ""   "ls of the git binary allowed"                              'ls -l /usr
 bgp deny "core.hooksPath set to empty \"\" denied"                   'git config --global core.hooksPath ""'
 bgp deny "core.hooksPath set to empty '' denied"                     "git config core.hooksPath ''"
 bgp ""   "commit with an empty message still allowed"                'git commit --allow-empty-message -m ""'
+# Phase 4: the bypass itself is USER-only (design §7.4) — the model may not arm one
+bgp deny "kit guard bypass denied (user-only)"                       'kit guard bypass "need it"'
+bgp deny "bin/kit guard bypass denied"                               'python3 bin/kit guard bypass "x"'
+bgp deny "~/.local/bin/kit guard bypass denied"                      '~/.local/bin/kit guard bypass x'
+bgp deny "script -c wrapping kit guard bypass denied"                'script -qec "kit guard bypass x" /dev/null'
+bgp deny "hand-written bypass file denied"                           'echo "{\"expires\":9999999999}" > ~/.local/state/kit/guard/bypass-0123456789ab'
+bgp deny "copying a bypass file into place denied"                   'cp /tmp/f ~/.local/state/kit/guard/bypass-0123456789ab'
+bgp deny "KIT_STATE_HOME= before git commit denied"                  'KIT_STATE_HOME=/tmp/s git commit -m x'
+bgp deny "export KIT_STATE_HOME then git push denied"                'export KIT_STATE_HOME=/tmp/s; git push origin main'
+bgp ""   "kit guard status allowed"                                  'kit guard status'
+bgp ""   "commit message naming kit guard bypass allowed"            'git commit -m "docs: explain kit guard bypass"'
+bgp ""   "grepping the code for guard/bypass- allowed"                "grep -rn 'guard/bypass-' plugin/"
+bgp ""   "reading the guard audit log allowed"                       'tail -n 5 ~/.local/state/kit/guard/audit.jsonl'
+bgp ""   "isolated test run with KIT_STATE_HOME= allowed"            'KIT_STATE_HOME=/tmp/s bash tests/guard-smoke.sh'
 
 # ===========================================================================
 # B-scope - guard-preserve runs in EVERY directory (orchestrator ruling

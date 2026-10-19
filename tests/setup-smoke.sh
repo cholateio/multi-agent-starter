@@ -58,7 +58,11 @@ has "s1: config.toml [audit] exclude" "$(cat "$(CFG)/config.toml")" "exclude = [
 for h in pre-commit pre-push; do
   [ -x "$(CFG)/git-hooks/$h" ] && pass "s1: shim $h executable" || fail "s1: shim $h executable" "missing"
 done
+for h in commit-msg post-checkout post-receive; do
+  [ -x "$(CFG)/git-hooks/$h" ] && pass "s1: chain-only shim $h executable" || fail "s1: chain-only shim $h executable" "missing"
+done
 lacks "s1: shim placeholder replaced" "$(cat "$(CFG)/git-hooks/pre-push")" "__HOOK__"
+has "s1: shim chains via --git-common-dir" "$(cat "$(CFG)/git-hooks/commit-msg")" "--git-common-dir"
 has "s1: shim runs its own hook" "$(cat "$(CFG)/git-hooks/pre-push")" "pre-push"
 eq "s1: global core.hooksPath" "$(hp)" "$(CFG)/git-hooks"
 eq "s1: privacy mode 600" "$(stat -c %a "$(CFG)/privacy.local.toml")" "600"
@@ -106,6 +110,7 @@ OUT="$(ks --uninstall)"; CODE=$?
 eq "s5: uninstall exit 0" "$CODE" "0"
 eq "s5: hooksPath unset" "$(hp)" ""
 [ ! -e "$(CFG)/git-hooks/pre-commit" ] && pass "s5: shims removed" || fail "s5: shims removed" "still there"
+[ ! -e "$(CFG)/git-hooks/commit-msg" ] && pass "s5: chain-only shims removed" || fail "s5: chain-only shims removed" "still there"
 [ ! -L "$M/home/.local/bin/kit" ] && pass "s5: kit symlink removed" || fail "s5: kit symlink removed" "still there"
 eq "s5: settings.json unchanged" "$(cksum < "$M/home/.claude/settings.json")" "$SUM_BEFORE"
 [ -f "$(CFG)/privacy.local.toml" ] && pass "s5: privacy kept" || fail "s5: privacy kept" "removed"

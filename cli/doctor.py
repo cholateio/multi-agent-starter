@@ -207,10 +207,24 @@ def run_checks() -> Report:
         rep.add("OK", "hooksPath", got)
     else:
         rep.add("FAIL", "hooksPath", f"git config --global core.hooksPath is {got or 'unset'}, want {want} — run: kit setup")
-    missing = [h for h in ("pre-commit", "pre-push")
-               if not os.access(cfg_dir / "git-hooks" / h, os.X_OK)]
-    rep.add("FAIL" if missing else "OK", "shims",
-            f"missing/not executable: {', '.join(missing)} in {want}" if missing else f"pre-commit, pre-push in {want}")
+    from cli.setup_cmd import GUARD_HOOKS, HOOKS
+    missing = [h for h in HOOKS if not os.access(cfg_dir / "git-hooks" / h, os.X_OK)]
+    if any(h in GUARD_HOOKS for h in missing):
+        rep.add("FAIL", "shims", f"missing/not executable: {', '.join(missing)} in {want} — run: kit setup")
+    elif missing:
+        rep.add("WARN", "shims", f"chain-only shims missing ({', '.join(missing)}) — repo-local hooks of "
+                "those names do not run — run: kit setup")
+    else:
+        rep.add("OK", "shims", f"pre-commit, pre-push + {len(HOOKS) - 2} chain-only in {want}")
+    # the current repo: a repo-local core.hooksPath (husky-style) silently disables the global guard
+    try:
+        r = subprocess.run(["git", "config", "--local", "--get", "core.hooksPath"], capture_output=True, text=True)
+        local_hp = r.stdout.strip() if r.returncode == 0 else ""
+    except OSError:
+        local_hp = ""
+    if local_hp:
+        rep.add("FAIL", "repo hooksPath", f"this repo sets core.hooksPath = {local_hp}: the global kit guard does NOT "
+                "run here — git config --local --unset core.hooksPath (chain your hooks from .git/hooks)")
 
     # tools
     for name in ("gitleaks", "osv-scanner"):

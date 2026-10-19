@@ -7,7 +7,8 @@
 #   1. kit-owned files (v5): anything under the kit plugin root
 #      ($CLAUDE_PLUGIN_ROOT, plus this hook's own plugin dir as a fallback)
 #      or the kit's machine config (~/.config/kit, and $KIT_CONFIG_HOME when
-#      set: config.toml, privacy.local.toml, git-hooks shims) — escalated
+#      set: config.toml, privacy.local.toml, git-hooks shims) and the git
+#      guard's state (<state>/guard: bypass files, audit.jsonl) — escalated
 #      to the USER via permissionDecision "ask": the model may not modify
 #      the harness that governs it on its own (kit-evolution rules), but a
 #      present user can approve a legitimate edit with one click.
@@ -115,7 +116,8 @@ case "$ABS" in
     *)
         SELF_PLUGIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
         if in_dir "$ABS" "${CLAUDE_PLUGIN_ROOT:-}" || in_dir "$ABS" "$SELF_PLUGIN" \
-           || in_dir "$ABS" "${KIT_CONFIG_HOME:-}" || in_dir "$ABS" "${HOME:+$HOME/.config/kit}"; then
+           || in_dir "$ABS" "${KIT_CONFIG_HOME:-}" || in_dir "$ABS" "${HOME:+$HOME/.config/kit}" \
+           || in_dir "$ABS" "${KIT_STATE_HOME:+$KIT_STATE_HOME/guard}" || in_dir "$ABS" "${HOME:+$HOME/.local/state/kit/guard}"; then
             ask "kit protect-paths: '$ABS' is a kit-owned file (kit plugin or ~/.config/kit) — the model may not modify the harness that governs it on its own (kit-evolution rules). USER: approve ONLY if you explicitly asked for this exact change; otherwise deny — edit it in the kit repo, then /reload-plugins. Unattended sessions: this stays blocked, as intended."
         fi
         ;;

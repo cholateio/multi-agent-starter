@@ -60,7 +60,9 @@ hash_stdin() {
 # dry run and stays allowed), KIT_GUARD= (never honored by the guard anyway),
 # any core.hooksPath touch, and overriding the config that carries it
 # (GIT_CONFIG_GLOBAL/COUNT/PARAMETERS=, HOME=/XDG_CONFIG_HOME= on a
-# commit/push). The only model route is asking the USER for
+# commit/push; KIT_STATE_HOME= too — it moves where the guard looks for a
+# bypass file), arming a bypass (`kit guard bypass`, any command naming a
+# guard/bypass-<id> file). The only model route is asking the USER for
 # `kit guard bypass "<reason>"` (10-minute, single-use, audited). Humans
 # keep `--no-verify` — the audit catches that after the fact.
 # Scope (Phase 3 ruling R-guard-scope): the global git guard covers EVERY
@@ -101,7 +103,7 @@ GP_SEP='(^|[;&|(`[:space:]])'
 GP_GSEP='(^|[;&|(`[:space:]]|/)'
 GP_GLOBAL='([[:space:]]+(-[Cc][[:space:]]+[^[:space:];&|]+|--[A-Za-z][A-Za-z-]*(=[^[:space:];&|]*)?|-[A-Za-z]))*'
 GP_CFG="${GP_GSEP}git${GP_GLOBAL}[[:space:]]+config[[:space:]]([^;&|]*[[:space:]])?"
-GP_ENVV='(HOME|XDG_CONFIG_HOME|GIT_CONFIG_(GLOBAL|COUNT|PARAMETERS))'
+GP_ENVV='(HOME|XDG_CONFIG_HOME|KIT_STATE_HOME|GIT_CONFIG_(GLOBAL|COUNT|PARAMETERS))'
 GP_GITCP="([^[:space:];&|]*/)?git([[:space:]][^;&|]*)?[[:space:]](commit|push)([[:space:]]|\$)"
 guard_preserve_hit() {  # $1 = flattened text → 0 if it bypasses the guard
     local t="$1"
@@ -109,6 +111,12 @@ guard_preserve_hit() {  # $1 = flattened text → 0 if it bypasses the guard
     printf '%s' "$t" | grep -qE "${GP_GSEP}git[[:space:]]([^;&|]*[[:space:]])?--no-veri[a-z]*([=[:space:]]|\$)" && return 0
     # git commit -n (= --no-verify), clustered short flags included
     printf '%s' "$t" | grep -qE "${GP_GSEP}git${GP_GLOBAL}[[:space:]]+commit([[:space:]]+[^;&|]*)?[[:space:]]-[A-Za-z]*n[A-Za-z]*([[:space:]]|\$)" && return 0
+    # the bypass itself is USER-only (design §7.4): `kit guard bypass`, or
+    # forging its state file (<state>/guard/bypass-<repo-id>) by hand
+    printf '%s' "$t" | grep -qE "${GP_GSEP}kit[[:space:]]+guard[[:space:]]+bypass([[:space:]]|\$)" && return 0
+    if printf '%s' "$t" | grep -qE 'guard/bypass-'; then   # … written by a redirect / copy-like command
+        printf '%s' "$t" | grep -qE "(>|${GP_GSEP}(cp|mv|ln|tee|install|touch|dd|rsync|sed|python3?|perl)([[:space:]]|\$))" && return 0
+    fi
     # KIT_GUARD= as an assignment (prefix, export, env) — a grep for it is fine
     printf '%s' "$t" | grep -qE '(^|[;&|(`])[[:space:]]*((export|env|declare[[:space:]]+-x)[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*KIT_GUARD=' && return 0
     # core.hooksPath WRITES only (reads like `git config --get` stay allowed):
@@ -134,7 +142,7 @@ guard_preserve_cmd_hit() {  # $1 = raw Bash command → 0 if it bypasses the gua
     flat=$(printf '%s' "$cmd" | guard_flatten)
     guard_preserve_hit "$flat" && return 0
     # nested shell code (bash/sh -c, eval, xargs): scan it fully unquoted too
-    if printf '%s' "$flat" | grep -qE "${GP_SEP}((bash|sh|zsh|dash|ksh)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*c|eval|xargs)([[:space:]]|\$)"; then
+    if printf '%s' "$flat" | grep -qE "${GP_SEP}((bash|sh|zsh|dash|ksh)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*c|eval|xargs|script)([[:space:]]|\$)"; then
         guard_preserve_hit "$(printf '%s' "$cmd" | tr '\n' ';' | tr -d "\"'\\\\")" && return 0
     fi
     return 1

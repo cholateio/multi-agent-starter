@@ -21,7 +21,17 @@ PLUGIN_ID = "kit@multi-agent-kit"
 MARKETPLACE = "multi-agent-kit"
 BASELINE = ["Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)", "Bash(ls*)"]
 DROP = ["Bash(timeout *)"]
-HOOKS = ("pre-commit", "pre-push")
+GUARD_HOOKS = ("pre-commit", "pre-push")
+# chain-only shims: with a global core.hooksPath git looks for EVERY hook in the
+# shim dir, so without these the repo-local ones (git-lfs post-checkout, commit-msg
+# linters, a bare repo's post-receive, …) would silently stop running.
+# reference-transaction / post-index-change are left out on purpose: they fire on
+# every ref update / index write, and a shim there would tax every git command.
+CHAIN_HOOKS = ("applypatch-msg", "pre-applypatch", "post-applypatch", "pre-merge-commit",
+               "prepare-commit-msg", "commit-msg", "post-commit", "pre-rebase", "post-checkout",
+               "post-merge", "post-rewrite", "pre-auto-gc", "push-to-checkout", "sendemail-validate",
+               "pre-receive", "update", "post-receive", "post-update")
+HOOKS = GUARD_HOOKS + CHAIN_HOOKS
 
 
 class Setup:
@@ -188,7 +198,7 @@ class Setup:
                                           and (self.hooks_dir / h).read_text() == self.shim_text(h)
                                           and os.access(self.hooks_dir / h, os.X_OK))]
         if not todo:
-            self.say("skip", step, f"{', '.join(HOOKS)} up to date")
+            self.say("skip", step, f"{len(HOOKS)} shims up to date")
         elif self.dry:
             for h in todo:
                 self.would_write(self.hooks_dir / h, "shim, mode 755")
@@ -198,7 +208,7 @@ class Setup:
                 p = self.hooks_dir / h
                 p.write_text(self.shim_text(h))
                 p.chmod(0o755)
-            self.say("done", step, f"{', '.join(todo)} in {self.hooks_dir}")
+            self.say("done", step, f"{len(todo)} shims in {self.hooks_dir}")
         # global hooksPath
         step = "core.hooksPath"
         cmd = ["git", "config", "--global", "core.hooksPath", str(self.hooks_dir)]
