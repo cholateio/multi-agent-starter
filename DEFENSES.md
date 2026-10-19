@@ -181,6 +181,72 @@ claude 啟動時的環境)。
 
 ---
 
+## v5 guard(本機 git guard:commit / push 的洩漏邊界)
+
+設計權威:`docs/design-history/2026-10-19-kit-v5-design.md §7`。全域
+`core.hooksPath` 指向 `kit setup` 生成的 shim(`~/.config/kit/git-hooks/`),
+所以**機器上每個 repo、人或 AI 的每次 commit/push** 都先過
+`plugin/guard/pre-commit.sh` / `pre-push.sh`,再鏈到 repo 自己的 hook
+(`git rev-parse --git-common-dir`,worktree 共用主 repo 的 hooks;**絕不**用
+`--git-path hooks`——它尊重 hooksPath、指回 shim 自己、無限遞迴)。其他 hook 名
+(commit-msg、post-checkout、post-receive…)裝的是只鏈接不檢查的 shim,repo
+本地的 git-lfs / linter hook 照常跑。
+
+| # | 規則 | pre-commit(staged diff 的**新增行**) | pre-push(推送樹 + 推送範圍每個 commit 的新增行) | 沒有 kit.toml 的 repo |
+|---|---|---|---|---|
+| R1 | gitleaks(內建規則 + `plugin/guard/gitleaks.toml`) | block | block | 照跑 |
+| R2 | 禁推路徑 `.claude/` `.superpowers/` `PROJECT.toml` `docs/LESSONS.md` `docs/plans/` `docs/superpowers/plans/` `docs/decisions/` `*.local.toml` `CLAUDE.local.md` `.env*`(除 `.env.example`) | block(A/C/M/R/T;刪除放行) | block:整棵推送樹(抓**長期 tracked**)+ 範圍內曾新增過(加了又刪也會留在遠端歷史) | 只查 `.env*` |
+| R3 | 本機路徑 `/home/<u>`、`/mnt/c/Users/<u>`、`/Users/<u>`、`C:\Users\<u>`(`<u>` = privacy usernames ∪ 目前 OS user) | block | block | 照跑 |
+| R3b | 其他 `/home/<x>/` | warn | warn | 照跑 |
+| R4 | `tier="always"` 個人字面值 + privacy emails(名稱 `email`) | block | block | 照跑 |
+| R5 | `tier="public-only"` 字面值 | block,除非 kit.toml `visibility="private"` | 同左(讀**推送樹**裡的 kit.toml) | 當公開處理(fail-closed)→ block |
+| R6 / R7 | 一般 email / `/tmp/claude-<uid>/` | warn | warn | 照跑 |
+| R8 | gitleaks 不在 PATH 或崩潰 | warn(大字橫幅) | **block** | 照跑 |
+
+- 推送範圍 = 本地 sha 減去**這個 remote** 已有的 commit(它的 remote-tracking
+  refs + 舊值);只存在於另一個 remote(例如私人鏡像)的 commit 仍會為這個
+  remote 再掃一次。merge 的衝突解法用 remerge diff 掃。ref 刪除永遠放行。
+- 內容規則一律 fixed-string、不分大小寫、字面值 <4 字元忽略;輸出**永不印出**
+  被攔的值(字面值以 `<name>` 代稱、使用者名以 `<user>`)。二進位檔(NUL)跳過
+  內容規則;repo 內 `.gitattributes` 不能把文字檔標成 binary 來躲(屬性改讀空樹)。
+- 誤報出口(都在 diff 裡留痕):行尾 `kit-privacy: allow`;`gitleaks:allow` /
+  `.gitleaksignore`;`kit.toml [privacy] allow_paths`(跳 R3–R7,不跳 R1/R2);
+  `allow_literals = ["<name>"]` **以名稱**豁免 R4/R5,寫值不算數(guard 與
+  `kit audit` A2/A3 同一套語意)。
+- 失效模式 fail-loud:`config.toml` / `kit_root` / guard 腳本缺 → shim
+  `KIT GUARD: not configured` 並 **exit 1**;讀不到 staged diff / 推送範圍 → block。
+  `privacy.local.toml` 缺 → R4/R5 跳過 + warn(R3 仍認得 OS user)。
+- 審計:每次 block / bypass 寫 `~/.local/state/kit/guard/audit.jsonl`。
+- 速度(Phase 4 實測):小 diff pre-commit 中位數 44ms 不含 gitleaks、264ms 含;
+  7-commit push 320ms 含 gitleaks。
+
+**Bypass(user-only)**:`kit guard bypass "<reason>"` 只在有 TTY 的終端機執行
+(agent 的非互動 shell 沒有 TTY → 拒絕);寫 `bypass-<repo-id>`,10 分鐘內**下一次
+會被擋的** commit 或 push 單次放行並記 audit(乾淨的 commit 不消耗;commit 與 push
+各需一次)。`KIT_GUARD=off` 不被承認。模型這一側由 tool-breaker 的 guard-preserve
+(所有目錄都跑)deny:`--no-verify`、`commit -n`、改 / 清空 `core.hooksPath`、
+`HOME=` / `XDG_CONFIG_HOME=` / `GIT_CONFIG_*=` / `KIT_STATE_HOME=` 前綴的
+commit/push、`kit guard bypass`(含 `script -c` 包裝)、手寫 `guard/bypass-*` 檔;
+protect-paths 對 Edit/Write 到 `~/.config/kit`、`<state>/guard`、git config 檔轉 ask。
+
+**已知繞道與殘餘(誠實條款)**:
+1. 人用 `git --no-verify` → guard 擋不了;事後由 `kit audit`(A1–A5)抓內容。
+2. 其他機器、GitHub 網頁編輯、bot commit → 本機 guard 看不到;公開 repo 由
+   CI 層(§7.6)與 GitHub push protection 兜底。
+3. repo 本地 `core.hooksPath`(husky 類)蓋掉全域 shim → 該 repo **零 guard 且無訊息**;
+   `kit doctor`(在該 repo 內跑)FAIL、`kit guard status` 標 OVERRIDDEN、`kit audit` A16 HIGH。
+4. 已在遠端的內容不會在 push 時重查:私人 repo 翻公開時,舊的 public-only 字面值
+   要靠 `kit audit` A2/A6;偽造 remote-tracking ref(`git update-ref refs/remotes/<r>/…`)
+   可讓 commit 看起來「已推過」而略過內容掃描(R2 整棵樹檢查不受影響)。
+5. gitleaks 不掃 merge commit 自己的 diff(隱私規則有掃 remerge diff);二進位檔
+   內的字面值不掃;`reference-transaction` / `post-index-change` 沒有鏈接 shim。
+6. 同一個 commit 可以順手放寬 `kit.toml`(`allow_literals`、`visibility`)——diff 可見,
+   且 kit.toml 是 Stop gate 的敏感路徑,必過 review 或 user 之口。
+7. 模型威脅邊界同 v4.9:持 Bash 的模型用變數、alias、腳本仍能拼出繞道
+   (anti-footgun,不是 anti-evasion);bypass 檔與 audit log 只是摩擦 + 留痕。
+8. 權限基線殘餘(§13 #8):`git log --output=`、`git diff --output=` 可寫檔,
+   被 `Bash(git log*)` / `Bash(git diff*)` 放行——低風險(只寫文字檔),接受。
+
 ## 四、誠實條款:這套 harness 的能力極限
 
 防線的價值是**摩擦 + 審計痕跡**,不是密碼學防偽。明列邊界(完整版見
