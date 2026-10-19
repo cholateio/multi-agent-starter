@@ -158,6 +158,71 @@ if [[ "$TOOL" == "Bash" && -n "$CMD" ]] \
     fi
 fi
 
+# ------------------------------------------------- guard-preserve (D13, v5)
+# The global git guard (core.hooksPath → kit shims → plugin/guard) cannot
+# stop git's own bypasses. The model's Bash calls ARE visible here, so its
+# routes around the guard are denied: --no-verify (any git subcommand,
+# abbreviations included), `git commit -n` (= --no-verify; `git push -n` is a
+# dry run and stays allowed), KIT_GUARD= (never honored by the guard anyway),
+# any core.hooksPath touch, and overriding the config that carries it
+# (GIT_CONFIG_GLOBAL/COUNT/PARAMETERS=, HOME=/XDG_CONFIG_HOME= on a
+# commit/push). The only model route is asking the USER for
+# `kit guard bypass "<reason>"` (10-minute, single-use, audited). Humans
+# keep `--no-verify` — the audit catches that after the fact.
+# Runs independently of the pipe-guard waivers (an echo/heredoc/pipefail
+# prefix exempts nothing here). Text is flattened first: a quoted span that
+# is ONE plain token is unquoted (`"--no-verify"`, `--no-"verify"` reach git
+# as the flag) while a span with spaces becomes placeholder Q (a commit
+# message mentioning the flag is data); backslash escapes are resolved.
+# When a nested shell / eval / xargs is involved, the fully unquoted text is
+# scanned too (deny direction). Anti-footgun, not anti-evasion: variables,
+# aliases and scripts are out of scope (v4.9 threat boundary).
+guard_flatten() {  # stdin: raw command → stdout: flattened single line
+    tr '\n' ';' | awk '
+        function flush(tok) { if (tok ~ /^[A-Za-z0-9_.=\/:@+,-]*$/) return tok; return "Q" }
+        { out=""; st=0; tok=""; len=length($0)
+          for(i=1;i<=len;i++){ c=substr($0,i,1)
+            if(st==0){
+              if(c=="\\"){i++; out=out substr($0,i,1); continue}
+              if(c=="$" && substr($0,i+1,1)=="\047"){st=3; i++; tok=""; continue}
+              if(c=="\047"){st=1; tok=""; continue}
+              if(c=="\""){st=2; tok=""; continue}
+              out=out c; continue }
+            if(st==1){ if(c=="\047"){st=0; out=out flush(tok)} else tok=tok c; continue }
+            if(st==2){ if(c=="\\"){i++; tok=tok substr($0,i,1); continue}
+                       if(c=="\""){st=0; out=out flush(tok)} else tok=tok c; continue }
+            if(st==3){ if(c=="\\"){i++; tok=tok substr($0,i,1); continue}
+                       if(c=="\047"){st=0; out=out flush(tok)} else tok=tok c; continue }
+          }
+          if(st!=0) out=out "Q"
+          print out }' 2>/dev/null
+}
+GP_SEP='(^|[;&|(`[:space:]])'
+GP_GLOBAL='([[:space:]]+(-[Cc][[:space:]]+[^[:space:];&|]+|--[A-Za-z][A-Za-z-]*(=[^[:space:];&|]*)?|-[A-Za-z]))*'
+guard_preserve_hit() {  # $1 = flattened text → 0 if it bypasses the guard
+    printf '%s' "$1" | grep -qE "${GP_SEP}git[[:space:]]([^;&|]*[[:space:]])?--no-veri[a-z]*([=[:space:]]|\$)" && return 0
+    printf '%s' "$1" | grep -qE "${GP_SEP}git${GP_GLOBAL}[[:space:]]+commit([[:space:]]+[^;&|]*)?[[:space:]]-[A-Za-z]*n[A-Za-z]*([[:space:]]|\$)" && return 0
+    printf '%s' "$1" | grep -qE '(^|[^A-Za-z0-9_])KIT_GUARD=' && return 0
+    printf '%s' "$1" | grep -qiE 'core\.hookspath' && return 0
+    printf '%s' "$1" | grep -qE '(^|[^A-Za-z0-9_])GIT_CONFIG_(GLOBAL|COUNT|PARAMETERS)=' && return 0
+    printf '%s' "$1" | grep -qE "${GP_SEP}(HOME|XDG_CONFIG_HOME)=[^[:space:]]*[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*git([[:space:]][^;&|]*)?[[:space:]](commit|push)([[:space:]]|\$)" && return 0
+    return 1
+}
+if [[ "$TOOL" == "Bash" && -n "$CMD" ]]; then
+    GP_HIT=0
+    GP_FLAT=$(printf '%s' "$CMD" | guard_flatten)
+    guard_preserve_hit "$GP_FLAT" && GP_HIT=1
+    if [[ $GP_HIT -eq 0 ]] && printf '%s' "$GP_FLAT" | grep -qE "${GP_SEP}(bash|sh|zsh|dash|ksh|eval|xargs)([[:space:]]|\$)"; then
+        guard_preserve_hit "$(printf '%s' "$CMD" | tr '\n' ';' | tr -d "\"'\\\\")" && GP_HIT=1
+    fi
+    if [[ $GP_HIT -eq 1 ]]; then
+        log_event "deny" "$HASH" "$N" "guard-preserve"
+        jq -n --arg r 'kit guard-preserve: bypassing the commit/push guard is USER-only. If this is genuinely needed, ask the user to run: kit guard bypass "<reason>" (10-minute, single-use, audited). Do not retry with --no-verify, KIT_GUARD=, or core.hooksPath.' \
+          '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
+        exit 0
+    fi
+fi
+
 if [[ "$N" -ge 3 ]]; then
     log_event "deny" "$HASH" "$N"
     jq -n --arg r "CIRCUIT BREAKER (kit tool-breaker): this is consecutive IDENTICAL call #${N} to ${TOOL} — same tool, exact same arguments, nothing else in between. Two identical attempts already failed to give you what you wanted; a third repetition will not either. Before ANY further tool call: (1) state in one sentence why the previous attempts did not satisfy you; (2) change something real — different arguments, a different tool, or escalate per kit-delegation.md (2 strikes on one subtask → hand it up WITH the error log). This exact call stays blocked until it differs." \

@@ -1176,6 +1176,20 @@ assert_eq "p-v5-7: ~/.config/kit stays kit-owned even with KIT_CONFIG_HOME set" 
 run_hook "$PP" "$(pp_json "$FAKE_HOME/.config/kitchen/x.toml")"
 assert_eq "p-v5-7: sibling dir sharing the prefix is not kit-owned" "$OUT" ""
 
+# B-v5 Edit-tool side door: git config files carry core.hooksPath (a local
+# hooksPath silently overrides the global guard) -> escalate to the USER
+run_hook "$PP" "$(pp_json "$R4/.git/config")"
+assert_eq "b-v5: Edit of .git/config escalates to ask" "$(pp_decision)" "ask"
+assert_contains "b-v5: .git/config ask names the guard" "$(pp_reason)" "core.hooksPath"
+run_hook "$PP" "$(pp_json "$R4/.git/worktrees/wt1/config.worktree")"
+assert_eq "b-v5: Edit of a worktree config.worktree escalates to ask" "$(pp_decision)" "ask"
+run_hook "$PP" "$(pp_json "$FAKE_HOME/.gitconfig")"
+assert_eq "b-v5: Edit of ~/.gitconfig escalates to ask" "$(pp_decision)" "ask"
+run_hook "$PP" "$(pp_json "$FAKE_HOME/.config/git/config")"
+assert_eq "b-v5: Edit of ~/.config/git/config escalates to ask" "$(pp_decision)" "ask"
+run_hook "$PP" "$(pp_json "$R4/src/git/config")"
+assert_eq "b-v5: an ordinary file named config is not escalated" "$OUT" ""
+
 # P-v5-2: a leftover v4 .claude/protected-paths is no longer read
 echo "src/legacy/" > "$R4/.claude/protected-paths"
 run_hook "$PP" "$(pp_json "$R4/src/legacy/deep/pay.py")"
@@ -1429,6 +1443,54 @@ assert_eq "v24: real commit with escaped-quote message denied" "$(tb_decision)" 
 
 run_hook "$TB" "$(tbv v25 "pytest -q | grep -F \$'foo\\' && git commit'")"
 assert_eq "v25: ANSI-C quoted apostrophe stays data" "$(tb_decision)" ""
+
+# ===========================================================================
+# B-v5 - guard-preserve (D13, in tool-breaker.sh). The global git guard
+# (core.hooksPath shims) cannot stop `git --no-verify`; a model's Bash call
+# is visible here, so the model-side bypasses are denied and routed to the
+# USER-only `kit guard bypass "<reason>"`. Anti-footgun with cheap hardening
+# (quoted single tokens, abbreviations, nested shells); variables, aliases
+# and scripts stay out of scope (v4.9 threat boundary).
+# ===========================================================================
+bgp_reason() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null; }
+BN=0
+bgp() {  # $1 = expected decision ("deny" or "")  $2 = label  $3 = command
+  BN=$((BN + 1))
+  run_hook "$TB" "$(tbv "bgp$BN" "$3")"
+  assert_eq "b-v5: $2" "$(tb_decision)" "$1"
+}
+bgp deny "commit --no-verify denied"                    'git commit -m x --no-verify'
+assert_contains "b-v5: reason routes to kit guard bypass (user-only)" "$(bgp_reason)" 'kit guard bypass "<reason>"'
+assert_contains "b-v5: deny audited as k:guard-preserve" "$(cat "$(VLOG_SID "bgp$BN")" 2>/dev/null)" '"k":"guard-preserve"'
+bgp deny "push --no-verify denied"                      'git push --no-verify origin main'
+bgp deny "commit -n (= --no-verify) denied"             'git commit -n -m "x"'
+bgp deny "KIT_GUARD= prefix denied"                     'KIT_GUARD=off git commit -m x'
+bgp deny "global core.hooksPath edit denied"            'git config --global core.hooksPath /x'
+bgp deny "git -C <dir> commit --no-verify denied"       'git -C repo commit --no-verify -m x'
+bgp deny "clustered short flag -nm denied"              'git commit -nm x'
+bgp deny "quoted single-token --no-verify denied"       'git commit "--no-verify" -m x'
+bgp deny "split-quoted --no-\"verify\" denied"          'git commit --no-"verify" -m x'
+bgp deny "abbreviated --no-verif denied"                'git commit --no-verif -m x'
+bgp deny "merge --no-verify denied"                     'git merge --no-verify feature'
+bgp deny "case-folded core.hookspath denied"            'git config core.hookspath /dev/null'
+bgp deny "per-command -c core.hooksPath denied"         'git -c core.hooksPath=/dev/null commit -m x'
+bgp deny "quoted key \"core.hooksPath\" denied"         'git config "core.hooksPath" /x'
+bgp deny "nested bash -c --no-verify denied"            'bash -c "git commit --no-verify -m x"'
+bgp deny "GIT_CONFIG_GLOBAL override denied"            'GIT_CONFIG_GLOBAL=/dev/null git commit -m x'
+bgp deny "HOME= override before git push denied"        'HOME=/tmp/x git push origin main'
+bgp deny "echo prefix does not exempt"                  'echo hi; git commit --no-verify -m x'
+bgp ""   "quoted --no-verify inside a message allowed"  'git commit -m "no --no-verify here"'
+bgp ""   "push -n (dry-run) allowed"                    'git push -n origin main'
+bgp ""   "log -n allowed"                               'git log -n 5'
+bgp ""   "echo core allowed"                            'echo core'
+bgp ""   "plain push allowed"                           'git push origin main'
+bgp ""   "commit --amend --no-edit allowed"             'git commit --amend --no-edit'
+bgp ""   "log --grep commit -n allowed"                 'git log --grep commit -n 3'
+bgp ""   "grep for the flag text (no git) allowed"      'grep -rn -- "--no-verify" docs/'
+bgp ""   "fetch --no-verbose allowed (not --no-verify)"  'git fetch --no-verbose origin'
+bgp ""   "KIT_GUARD= inside a message allowed"          'git commit -m "fix: KIT_GUARD= is ignored"'
+run_hook "$TB" "$(tbv bgpoff 'git commit --no-verify -m x')" full KIT_BREAKER=off
+assert_eq "b-v5: KIT_BREAKER=off (user-only) disables guard-preserve" "$OUT" ""
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"

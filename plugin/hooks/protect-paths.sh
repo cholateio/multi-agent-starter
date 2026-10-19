@@ -20,6 +20,9 @@
 #      kit.toml is deliberately NOT kit-owned: it is project-owned and the
 #      workflow requires the model to ADD protected entries; loosening it
 #      is caught by the Stop gate (kit.toml is a sensitive path there).
+#   1b. git config files (.git/config, ~/.gitconfig, $XDG_CONFIG_HOME/git/
+#      config) — ask: they can set core.hooksPath and silently disable the
+#      global commit/push guard (D13; tool-breaker covers the Bash routes).
 #   2. project-declared no-touch zones: kit.toml `protected = [...]`, one
 #      quoted glob per line (lib.sh kit_toml_protected; a malformed array
 #      fails OPEN to "no zones" with a stderr diagnosis — kit doctor flags
@@ -112,6 +115,17 @@ case "$ABS" in
            || in_dir "$ABS" "${KIT_CONFIG_HOME:-}" || in_dir "$ABS" "${HOME:+$HOME/.config/kit}"; then
             ask "kit protect-paths: '$ABS' is a kit-owned file (kit plugin or ~/.config/kit) — the model may not modify the harness that governs it on its own (kit-evolution rules). USER: approve ONLY if you explicitly asked for this exact change; otherwise deny — edit it in the kit repo, then /reload-plugins. Unattended sessions: this stays blocked, as intended."
         fi
+        ;;
+esac
+
+# --- 1b. git config files (v5 guard-preserve, D13 Edit-tool side door) ---
+# They can carry core.hooksPath; a repo-local value silently overrides the
+# global kit guard. tool-breaker.sh denies the Bash routes; this is the
+# Edit/Write route. Escalate, don't hard-deny: the user may want the edit.
+XDG_GIT="${XDG_CONFIG_HOME:-${HOME:-/nonexistent}/.config}/git/config"
+case "$ABS" in
+    */.git/config|*/.git/config.worktree|*/.git/worktrees/*/config.worktree|"${HOME:-/nonexistent}/.gitconfig"|"$(norm_path "$XDG_GIT")")
+        ask "kit protect-paths: '$ABS' is a git config file — it can set core.hooksPath and silently switch off the commit/push guard. USER: approve ONLY if you explicitly asked for this exact change. Model: do not route around this; a guard bypass is USER-only (kit guard bypass \"<reason>\")."
         ;;
 esac
 
