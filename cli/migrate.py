@@ -240,14 +240,14 @@ class Migration:
     visibility_override: str | None = None
     results: list[Result] = field(default_factory=list)
     _visibility: str | None = None
-    written: dict = field(default_factory=dict)   # rel path → sha256 of what migrate wrote
+    written: dict = field(default_factory=dict)   # rel path → _fingerprint of what migrate wrote
 
     def write(self, rel: str, text: str):
         """All tracked-file writes go through here so --commit stages only what migrate wrote."""
         p = self.p(rel)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text, encoding="utf-8")
-        self.written[rel] = _file_sha(p)
+        self.written[rel] = _fingerprint(p)
 
     def r(self, status, step, detail="", diff="", change=None):
         if change is None:
@@ -487,16 +487,25 @@ def _manifest(root: Path) -> Path:
     return Path(gd) / "kit-migrate-written.json"
 
 
-def _file_sha(p: Path) -> str | None:
+def _fingerprint(p: Path) -> str | None:
+    """What migrate wrote, as type + mode + content (review R3-4): `f:<mode>:<sha256>` for a
+    regular file, `l:<target>` for a symlink — a chmod or a same-bytes symlink swap by the
+    owner no longer looks untouched. None = missing / unreadable / other type."""
     import hashlib
+    import stat as _stat
     try:
-        return hashlib.sha256(p.read_bytes()).hexdigest()
+        st = p.lstat()
+        if _stat.S_ISLNK(st.st_mode):
+            return "l:" + os.readlink(p)
+        if _stat.S_ISREG(st.st_mode):
+            return f"f:{_stat.S_IMODE(st.st_mode):o}:" + hashlib.sha256(p.read_bytes()).hexdigest()
     except OSError:
-        return None
+        pass
+    return None
 
 
 def _load_written(root: Path) -> dict:
-    """{path: sha256}. A manifest from an older kit (a bare path list) maps to None:
+    """{path: fingerprint}. A manifest from an older kit (a bare path list) maps to None:
     unverifiable, so those paths count as the owner's (review O8)."""
     try:
         data = json.loads(_manifest(root).read_text())
@@ -517,13 +526,13 @@ def _save_written(root: Path, written: dict):
 def _ours(root: Path, written: dict, path: str) -> bool:
     """True when `path` still holds exactly what migrate wrote there."""
     h = written.get(path)
-    return h is not None and _file_sha(root / path) == h
+    return h is not None and _fingerprint(root / path) == h
 
 
 def _dirty_outside_managed(root: Path, written: dict) -> tuple[list[str], list[str]]:
     """(dirty paths, staged paths) that are the OWNER's: everything except the local-only
     untrack set (never committed by migrate) and files an earlier migrate run wrote that
-    still hash to what it wrote (.git/kit-migrate-written.json: path → sha256) — so a
+    still hash to what it wrote (.git/kit-migrate-written.json: path → type + mode + sha256) — so a
     resumed run is not 'dirty', but an owner's own AGENTS.md / LICENSE / docs/DEVELOPMENT.md
     edits are, including an edit to a file migrate wrote (review O8)."""
     dirty, staged = [], []

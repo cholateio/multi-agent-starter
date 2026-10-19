@@ -334,6 +334,21 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); json.dump(sorted(d)
 OUT="$(km "$R" --commit)"; CODE=$?
 eq "M16: legacy (hash-less) manifest → stop for review (exit 1)" "$CODE" "1"
 
+# ---- M18 (review R3-4): the resume fingerprint covers file type and mode, not only bytes
+R="$W/m18"; make_v4 "$R"; km "$R" --apply >/dev/null
+chmod +x "$R/AGENTS.md"; HEAD0="$(g "$R" rev-parse HEAD)"
+OUT="$(km "$R" --commit)"; CODE=$?
+eq "M18: mode-only owner change to migrate output → refused (exit 1)" "$CODE" "1"
+has "M18: …names the file" "$OUT" "AGENTS.md"
+eq "M18: …nothing committed" "$(g "$R" rev-parse HEAD)" "$HEAD0"
+R="$W/m18b"; make_v4 "$R"; km "$R" --apply >/dev/null
+cp "$R/AGENTS.md" "$W/m18-agents"; rm "$R/AGENTS.md"; ln -s "$W/m18-agents" "$R/AGENTS.md"
+OUT="$(km "$R" --commit)"; CODE=$?
+eq "M18: migrate output replaced by a symlink to identical bytes → refused (exit 1)" "$CODE" "1"
+R="$W/m18c"; make_v4 "$R"; km "$R" --apply >/dev/null
+OUT="$(km "$R" --commit)"; CODE=$?
+eq "M18: untouched migrate output still resumes (exit 0)" "$CODE" "0"
+
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1
