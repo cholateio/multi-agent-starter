@@ -1,0 +1,10 @@
+{ "hooks": {
+  "SessionStart": [ { "matcher": "startup|resume|clear|compact|fork", "hooks": [
+      { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"", "timeout": 5 } ] } ],
+  "UserPromptSubmit":   [ { "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/classify-task.sh\"", "timeout": 5 } ] } ],
+  "PreToolUse": [
+      { "matcher": "Edit|MultiEdit|Write|NotebookEdit", "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/protect-paths.sh\"", "timeout": 5 } ] },
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/tool-breaker.sh\"", "timeout": 5 } ] } ],
+  "PostToolUseFailure": [ { "matcher": "*", "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/tool-breaker.sh\"", "timeout": 5 } ] } ],
+  "Stop": [ { "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/verify-final-review.sh\"", "timeout": 10 } ] } ]
+} }
