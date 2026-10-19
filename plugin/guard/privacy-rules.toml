@@ -1,0 +1,61 @@
+# plugin/guard/privacy-rules.toml — generic privacy rules shipped with kit (design §7.2).
+# Personal values (user names, uids, project names) never live here: they come
+# from ~/.config/kit/privacy.local.toml at run time.
+#
+# Read by plugin/guard/lib-privacy.sh with awk — keep the format flat:
+#   one `key = 'value'` per line, single-quoted (TOML literal strings, so regex
+#   backslashes stay raw), one [[rule]] block per pattern (an id may repeat).
+# pattern  POSIX ERE, matched against each ADDED line (LC_ALL=C grep -E).
+#          __USER__ expands to (u1|u2|…) = privacy.local.toml usernames + the OS
+#          user running git (a rule with __USER__ is skipped when that set is empty).
+# action   block | warn
+# icase    'true' → case-insensitive match
+# exclude  comma-separated rule ids: lines already hit by them are not reported again
+# except   ERE tested (lower-cased) against each match; a matching hit is dropped
+# why      the message — never the matched text (block lines must not echo values)
+
+[[rule]]
+id = 'R3'
+tag = 'local-path'
+pattern = '/home/__USER__([^A-Za-z0-9_.-]|$)'
+action = 'block'
+why = 'local path of a configured user (/home/<user>) — use $HOME or a relative path'
+
+[[rule]]
+id = 'R3'
+tag = 'local-path'
+pattern = '/(mnt/[a-z]/)?Users/__USER__([^A-Za-z0-9_.-]|$)'
+action = 'block'
+icase = 'true'
+why = 'local path of a configured user (/mnt/c/Users/<user>, /Users/<user>) — use $HOME or a relative path'
+
+[[rule]]
+id = 'R3'
+tag = 'local-path'
+pattern = '[A-Za-z]:[\/]+Users[\/]+__USER__([^A-Za-z0-9_.-]|$)'
+action = 'block'
+icase = 'true'
+why = 'local path of a configured user (C:\Users\<user>) — use %USERPROFILE% or a relative path'
+
+[[rule]]
+id = 'R3b'
+tag = 'other-home-path'
+pattern = '/home/[a-z_][a-z0-9_-]*/'
+action = 'warn'
+exclude = 'R3'
+why = 'home path /home/<x>/ — fine for /home/node-style container paths; make sure it is not personal'
+
+[[rule]]
+id = 'R6'
+tag = 'email'
+pattern = '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+action = 'warn'
+except = '(^git@|no-?reply|@example\.(com|org|net)$|@users\.noreply\.github\.com$)'
+why = 'email address — prefer a noreply / example address'
+
+[[rule]]
+id = 'R7'
+tag = 'claude-tmp-path'
+pattern = '/tmp/claude-[0-9]+/'
+action = 'warn'
+why = 'Claude scratch path /tmp/claude-<uid>/ — machine-specific, usually a leaked log/path'

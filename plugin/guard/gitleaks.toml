@@ -1,0 +1,14 @@
+# plugin/guard/gitleaks.toml — gitleaks config for the kit guard (R1) and kit audit (A1).
+# Extends gitleaks' built-in rule set; kit adds rules it does not ship.
+# FP outlets stay native and diff-visible: `gitleaks:allow` on the line, .gitleaksignore.
+title = "kit guard"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "kit-supabase-service-key"
+description = "Supabase service-role key (JWT on a line that mentions service)"
+regex = '''(?i)service[^\n]{0,80}?\b(eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})'''
+secretGroup = 1
+keywords = ["service"]
