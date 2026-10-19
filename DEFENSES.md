@@ -308,6 +308,9 @@ claude 啟動時的環境)。
   訊息只說「a different remote」或 hosted repo 的 `host/owner/repo`,從不印記錄的 URL,
   整個 store 改名成 `<store>.aside.<時間戳>` 保留,印一行提示 `kit guard status`(它會列出這個目錄)。
   之後把同樣的檔 rsync / cp 回來無害:內容相同,下一次快照只是重新 link,不進 `prev/`、不進 trash。
+  **放回工作樹的寫法**(v5.0.2 review):暫存檔一律在 store 根目錄下 `mktemp -d` 的目錄裡做,不在工作樹
+  留可預測的 `<path>.kit-tmp`(那可能是 owner 追蹤的檔);放進去前再確認目標不存在、父路徑都是真的目錄,
+  用不覆蓋的 `ln` / `mv -n` 放,從不 `rm` 工作樹裡的任何路徑。
 
 **Bypass(user-only)**:`kit guard bypass "<reason>"` 只在有 TTY 的終端機執行
 (agent 的非互動 shell 沒有 TTY → 拒絕);寫 `bypass-<repo-id>` 並記一筆

@@ -98,15 +98,39 @@ lf_same() {  # same inode (hard link), or two symlinks with the same target
 lf_differs() {  # content (or link target) differs
     if [[ -L "$1" || -L "$2" ]]; then ! lf_same "$1" "$2"; else ! cmp -s "$1" "$2"; fi
 }
-lf_link() {  # $1 src $2 dest: hard link (atomic replace), else copy; a symlink is copied as a symlink
+# temp files live in a fresh mktemp dir under the store root (mode 700, the stores' filesystem) —
+# never at a predictable path next to the destination (a tracked "<p>.kit-tmp" is the owner's)
+lf_tmpdir() { mktemp -d "$STATE/localfiles/.tmp.$RID.XXXXXXXX" 2>/dev/null; }
+lf_link() {  # $1 src $2 dest IN THE STORE: hard link (atomic replace), else copy; a symlink is copied as a symlink
+    local d rc=1
     mkdir -p "$(dirname "$2")" 2>/dev/null || return 1
-    rm -f "$2.kit-tmp"
+    d="$(lf_tmpdir)" || return 1
     if [[ -L "$1" ]]; then
-        cp -P "$1" "$2.kit-tmp" 2>/dev/null || return 1
+        cp -P "$1" "$d/f" 2>/dev/null && mv -f -T "$d/f" "$2" 2>/dev/null && rc=0
     else
-        ln "$1" "$2.kit-tmp" 2>/dev/null || cp -p "$1" "$2.kit-tmp" 2>/dev/null || return 1
+        { ln "$1" "$d/f" 2>/dev/null || cp -p "$1" "$d/f" 2>/dev/null; } && mv -f -T "$d/f" "$2" 2>/dev/null && rc=0
     fi
-    mv -f "$2.kit-tmp" "$2"
+    rm -rf "$d"
+    return $rc
+}
+# lf_install <src> <work-tree path> [link]: put src at the path only while nothing is there and every
+# parent is a real directory (re-checked right before): a no-replace hard link (`link`, same
+# filesystem) or a copy made in a store temp dir and moved in with `mv -n` — never replaces a file,
+# never writes through a symlink, never creates or removes anything else in the work tree. 0 = installed
+lf_install() {
+    local src="$1" p="$2" d rc=1
+    lf_here "$p" && return 1
+    lf_parent_ok "$p" || return 1
+    mkdir -p "$(dirname "$p")" 2>/dev/null || return 1
+    lf_parent_ok "$p" || return 1
+    if [[ "${3:-}" == link && ! -L "$src" ]] && ln -T "$src" "$p" 2>/dev/null; then return 0; fi
+    d="$(lf_tmpdir)" || return 1
+    if cp -P -p "$src" "$d/f" 2>/dev/null && ! lf_here "$p" && lf_parent_ok "$p"; then
+        mv -n -T "$d/f" "$p" 2>/dev/null
+        lf_here "$d/f" || rc=0   # moved (mv -n leaves the source when the path appeared meanwhile)
+    fi
+    rm -rf "$d"
+    return $rc
 }
 # lf_busy: a rebase (or git am) is in progress. Only these: git runs post-merge with
 # MERGE_HEAD and a cherry-pick's post-commit with CHERRY_PICK_HEAD still present, and each
@@ -223,7 +247,7 @@ lf_parent_ok() {
     done
     return 0
 }
-lf_store_list() { find "$FILES" \( -type f -o -type l \) ! -name '*.kit-tmp' -print0 2>/dev/null; }
+lf_store_list() { find "$FILES" \( -type f -o -type l \) -print0 2>/dev/null; }
 lf_when() { date -r "$1" '+%Y-%m-%d %H:%M' 2>/dev/null || stat -c %y "$1" 2>/dev/null | cut -c1-16; }
 
 snapshot() {
@@ -324,7 +348,7 @@ prune() {  # store entries gone from the work tree while HEAD does not track the
     while IFS= read -r p; do [[ -n "$p" ]] && bygit[$p]=1; done < <(lf_git_removed "${gone[@]}")
     for p in "${gone[@]}"; do
         if [[ -n "${bygit[$p]:-}" ]]; then
-            lf_link "$FILES/$p" "$p" && { back+=("$p"); when+=("$p as of $(lf_when "$FILES/$p")"); }
+            lf_install "$FILES/$p" "$p" link && { back+=("$p"); when+=("$p as of $(lf_when "$FILES/$p")"); }
         else
             lf_to_trash "$p" && moved+=("$p")
         fi
@@ -351,12 +375,7 @@ fresh_clone() {
         # same repository: copy (not link — the old clone keeps its own inode) what the clone lacks
         while IFS= read -r -d '' p; do
             p="${p#"$FILES"/}"
-            lf_here "$p" && continue
-            lf_parent_ok "$p" || continue
-            mkdir -p "$(dirname "$p")" 2>/dev/null || continue
-            rm -f "$p.kit-tmp"
-            cp -P -p "$FILES/$p" "$p.kit-tmp" 2>/dev/null && ! lf_here "$p" && mv -f "$p.kit-tmp" "$p" && back+=("$p")
-            rm -f "$p.kit-tmp"
+            lf_install "$FILES/$p" "$p" && back+=("$p")
         done < <(lf_store_list)
         if [[ ${#back[@]} -gt 0 ]]; then
             echo "kit: fresh clone of the same remote at this path — restored ${#back[@]} local-only file(s) from the earlier clone's store (${back[*]:0:4}${back[4]:+ …}; files the clone already has are left alone$([[ -f "$STORE/mark" ]] && echo "; last snapshot $(lf_when "$STORE/mark")")) — $STORE" >&2
@@ -400,20 +419,19 @@ restore() {  # $1 = previous HEAD (may be empty), $2… = more commits the opera
     # clone) — owner content only, never .claude/ (that would resurrect v4 kit files);
     # a tracked symlink (mode 120000) comes back as a symlink. Never from trash/: the
     # owner deleted those on purpose.
-    local mode
+    local mode d
     for p in "${!before[@]}"; do
         [[ -n "${now[$p]:-}" ]] && continue
         lf_here "$p" || lf_here "$FILES/$p" || lf_here "$STORE/trash/$p" || lf_trashed "$p" && continue
         [[ "$p" =~ $LF_BLOB_RE ]] || continue
-        mkdir -p "$(dirname "$p")" 2>/dev/null
         mode="$(git ls-tree "$prev" -- "$p" 2>/dev/null | cut -d' ' -f1)"
-        rm -f "$p.kit-tmp"
+        d="$(lf_tmpdir)" || continue
         if [[ "$mode" == 120000 ]]; then
-            ln -s "$(git cat-file blob "$prev:$p" 2>/dev/null)" "$p.kit-tmp" 2>/dev/null && mv -f "$p.kit-tmp" "$p" && blob+=("$p")
+            ln -s "$(git cat-file blob "$prev:$p" 2>/dev/null)" "$d/f" 2>/dev/null
         else
-            git cat-file blob "$prev:$p" > "$p.kit-tmp" 2>/dev/null && mv -f "$p.kit-tmp" "$p" && blob+=("$p")
-        fi
-        rm -f "$p.kit-tmp"
+            git cat-file blob "$prev:$p" > "$d/f" 2>/dev/null
+        fi && lf_install "$d/f" "$p" && blob+=("$p")
+        rm -rf "$d"
     done
     snapshot
     if [[ ${#blob[@]} -gt 0 ]]; then

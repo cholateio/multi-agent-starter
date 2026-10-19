@@ -606,6 +606,24 @@ absent "M23e: another remote: nothing restored" "$R/PROJECT.toml"
 has "M23e: …the message says 'a different remote'" "$CO23" "a different remote"
 lacks "M23e: …and never prints the recorded URL" "$CO23$GS" "example.invalid"
 lacks "M23e: …nor the token" "$CO23$GS" "token"
+# ---- M24 (v5.0.2 review): restoring into the work tree never uses a predictable temp path there —
+# a TRACKED file named <path>.kit-tmp survives every restore untouched
+R="$W/m24"; make_v4 "$R"; km "$R" --commit >/dev/null 2>&1
+echo "tracked-tmp" > "$R/PROJECT.toml.kit-tmp"; g "$R" add PROJECT.toml.kit-tmp; g "$R" commit -qm "a tracked .kit-tmp" 2>/dev/null
+rm -rf "$R.git"; git clone -q --bare "$R" "$R.git" 2>/dev/null; g "$R" remote add origin "$R.git"
+printf 'name = "m24-owner"\n' > "$R/PROJECT.toml"; (cd "$R" && bash "$LF" snapshot 2>/dev/null)
+eq "M24: setup — PROJECT.toml.kit-tmp is tracked" "$(g "$R" ls-files PROJECT.toml.kit-tmp)" "PROJECT.toml.kit-tmp"
+# (a) git removes PROJECT.toml (checkout of the v4 commit and back) → it comes back from the store
+g "$R" checkout -q HEAD~2 2>/dev/null; g "$R" checkout -q main 2>/dev/null
+has "M24a: checkout back: PROJECT.toml restored from the store" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "m24-owner"
+eq "M24a: …the tracked PROJECT.toml.kit-tmp untouched" "$(cat "$R/PROJECT.toml.kit-tmp" 2>/dev/null)" "tracked-tmp"
+eq "M24a: …tree clean" "$(g "$R" status --porcelain)" ""
+# (b) a fresh clone of the same remote at the same path
+mv "$R" "$R.old"; CO24="$(git clone -q "$R.git" "$R" 2>&1)"
+has "M24b: re-clone: PROJECT.toml restored" "$(cat "$R/PROJECT.toml" 2>/dev/null)" "m24-owner"
+eq "M24b: …the tracked PROJECT.toml.kit-tmp untouched" "$(cat "$R/PROJECT.toml.kit-tmp" 2>/dev/null)" "tracked-tmp"
+eq "M24b: …tree clean" "$(g "$R" status --porcelain)" ""
+eq "M24b: …no temp dir left under the store root" "$(find "$W/state/localfiles" -maxdepth 1 -name '.tmp.*' 2>/dev/null | wc -l | tr -d ' ')" "0"
 git config --file "$W/gitconfig" --unset core.hooksPath
 
 # ---- M15 (review O8): an owner edit to a file migrate wrote, between --apply and --commit
