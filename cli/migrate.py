@@ -574,7 +574,7 @@ def _snapshot_local(root: Path) -> str:
     try:
         r = subprocess.run(["bash", str(script), "snapshot", "--report"], cwd=root, capture_output=True, text=True, timeout=60)
         for line in r.stderr.splitlines():
-            if "NOT protected" in line:
+            if "NOT protected" in line or "moved to" in line:   # review R4-4: every caller reports
                 print(line)
     except (OSError, subprocess.TimeoutExpired):
         print("warning: the local-only file snapshot failed — pre-migration checkouts are NOT protected (kit guard status retries)")

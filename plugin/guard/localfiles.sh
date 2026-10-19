@@ -22,8 +22,11 @@
 # <store>/omitted and named in a WARNING (when the list changes, and on every
 # `kit guard status`) — the store never claims to protect them (review R3-3).
 # A stored file that is gone from the work tree while HEAD does not track it was
-# deleted by the owner: it moves to <store>/trash/ (one generation) and is never put
-# back by a checkout (review N2). The store root is mode 700 (review R3-9).
+# deleted by the owner — or removed by a reset / stash / clean that runs no hook: it
+# moves to <store>/trash/<path>.~<timestamp>~ and is never put back by a checkout
+# (review N2). Trash keeps the last 5 generations per path (an identical copy is not
+# stored twice), and every snapshot caller says so in one line (review R4-4).
+# The store root is mode 700 (review R3-9).
 #
 #   localfiles.sh snapshot [--report]         kit migrate / kit guard status (--report) / session start
 #   localfiles.sh post-commit                 (snapshot)
@@ -45,6 +48,7 @@ LF_PATHS=(.claude PROJECT.toml CLAUDE.local.md docs/LESSONS.md docs/plans docs/s
 LF_BLOB_RE='^(PROJECT\.toml|CLAUDE\.local\.md|docs/LESSONS\.md|docs/plans/.+|docs/superpowers/plans/.+|docs/decisions/.+)$'
 LF_MAX_BYTES=$((8 * 1024 * 1024))
 LF_MAX_FILES=2000
+LF_TRASH_KEEP=5
 
 TOP="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 [[ -n "$TOP" ]] || exit 0
@@ -125,16 +129,54 @@ snapshot() {
     return 0
 }
 
-prune() {  # store entries the owner deleted (gone from the work tree, HEAD does not track) → trash/
+# lf_trash_gens <path> → its trash generations, oldest first (names sort by timestamp)
+lf_trash_gens() {
+    local d b f
+    d="$(dirname "$STORE/trash/$1")"; b="$(basename "$1")"
+    [[ -d "$d" ]] || return 0
+    for f in "$d/$b".~*~; do [[ -e "$f" || -L "$f" ]] && printf '%s\n' "$f"; done | sort
+}
+lf_trashed() { [[ -n "$(lf_trash_gens "$1")" ]]; }
+# lf_to_trash <path>: move the store copy to a new trash generation (unless the newest one
+# is identical), then drop all but the newest LF_TRASH_KEEP generations
+lf_to_trash() {
+    local p="$1" t last n
+    mkdir -p "$(dirname "$STORE/trash/$p")" 2>/dev/null || return 1
+    # a single-generation trash from an older kit (trash/<path> itself) becomes the oldest one
+    if [[ -f "$STORE/trash/$p" || -L "$STORE/trash/$p" ]]; then
+        mv -f "$STORE/trash/$p" "$STORE/trash/$p.~00000000T000000000000000~" 2>/dev/null
+    fi
+    last="$(lf_trash_gens "$p" | tail -n 1)"
+    if [[ -n "$last" ]] && lf_same_content "$FILES/$p" "$last"; then
+        rm -f "$FILES/$p"
+    else
+        t="$(date +%Y%m%dT%H%M%S%N 2>/dev/null)"; [[ "$t" =~ ^[0-9]{8}T[0-9]{15}$ ]] || t="$(date +%Y%m%dT%H%M%S)000000000"
+        while [[ -e "$STORE/trash/$p.~$t~" || -L "$STORE/trash/$p.~$t~" ]]; do t="${t%?????????}$(printf '%09d' $(( 10#${t: -9} + 1 )))"; done
+        mv -f "$FILES/$p" "$STORE/trash/$p.~$t~" 2>/dev/null || return 1
+    fi
+    n="$(lf_trash_gens "$p" | wc -l)"
+    if [[ $n -gt $LF_TRASH_KEEP ]]; then
+        lf_trash_gens "$p" | head -n $((n - LF_TRASH_KEEP)) | while IFS= read -r t; do rm -f "$t"; done
+    fi
+    return 0
+}
+lf_same_content() {  # two symlinks with one target, or two regular files with the same bytes
+    if [[ -L "$1" || -L "$2" ]]; then lf_same "$1" "$2"; else cmp -s "$1" "$2"; fi
+}
+
+prune() {  # store entries gone from the work tree while HEAD does not track them → trash/
     [[ -d "$FILES" ]] || return 0
     local p now
+    local -a moved=()
     now="$(lf_tracked_in HEAD)"
     while IFS= read -r -d '' p; do
         p="${p#"$FILES"/}"
         lf_here "$p" && continue
         printf '%s\n' "$now" | grep -qxF -- "$p" && continue
-        mkdir -p "$(dirname "$STORE/trash/$p")" 2>/dev/null && rm -f "$STORE/trash/$p" && mv -f "$FILES/$p" "$STORE/trash/$p" 2>/dev/null
+        lf_to_trash "$p" && moved+=("$p")
     done < <(lf_store_list)
+    # one line from every snapshot caller (hooks, kit migrate, kit guard status, session start)
+    [[ ${#moved[@]} -gt 0 ]] && echo "kit: ${#moved[@]} local-only file(s) gone from the work tree moved to $STORE/trash (${moved[*]:0:4}${moved[4]:+ …}; last $LF_TRASH_KEEP copies per file kept) — copy back what you still want; a checkout never restores them" >&2
     return 0
 }
 
@@ -164,7 +206,7 @@ restore() {  # $1 = previous HEAD (may be empty)
     local mode
     for p in "${!before[@]}"; do
         [[ -n "${now[$p]:-}" ]] && continue
-        lf_here "$p" || lf_here "$FILES/$p" || lf_here "$STORE/trash/$p" && continue
+        lf_here "$p" || lf_here "$FILES/$p" || lf_here "$STORE/trash/$p" || lf_trashed "$p" && continue
         [[ "$p" =~ $LF_BLOB_RE ]] || continue
         mkdir -p "$(dirname "$p")" 2>/dev/null
         mode="$(git ls-tree "$prev" -- "$p" 2>/dev/null | cut -d' ' -f1)"
@@ -192,10 +234,13 @@ restore() {  # $1 = previous HEAD (may be empty)
 
 trash_note() {  # `kit guard status`: what the owner deleted is still recoverable — say where
     [[ -d "$STORE/trash" ]] || return 0
-    local p t=()
-    while IFS= read -r -d '' p; do t+=("${p#"$STORE/trash"/}"); done \
-        < <(find "$STORE/trash" \( -type f -o -type l \) -print0 2>/dev/null)
-    [[ ${#t[@]} -gt 0 ]] && echo "kit: ${#t[@]} local-only file(s) gone from the work tree (deleted, or removed by a reset / stash / clean that runs no hook) are kept in $STORE/trash (${t[*]:0:4}${t[4]:+ …}) — copy back what you still want; a checkout never restores them" >&2
+    local p g=0
+    local -A t=()
+    while IFS= read -r -d '' p; do
+        p="${p#"$STORE/trash"/}"; p="${p%.~*~}"; t[$p]=1; g=$((g + 1))
+    done < <(find "$STORE/trash" \( -type f -o -type l \) -print0 2>/dev/null)
+    local names=("${!t[@]}")
+    [[ ${#names[@]} -gt 0 ]] && echo "kit: ${#names[@]} local-only file(s) gone from the work tree (deleted, or removed by a reset / stash / clean that runs no hook) are kept in $STORE/trash — $g timestamped cop$([[ $g -eq 1 ]] && echo y || echo ies), last $LF_TRASH_KEEP per file (${names[*]:0:4}${names[4]:+ …}) — copy back what you still want; a checkout never restores them" >&2
     return 0
 }
 

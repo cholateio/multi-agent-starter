@@ -305,12 +305,60 @@ rm -f "$R/docs/plans/done.md" "$R/docs/plans/p.md"; g "$R" commit -q --allow-emp
 (cd "$R" && git checkout -q v4-state 2>/dev/null && git checkout -q main 2>/dev/null)
 absent "M17: a deleted plan (snapshot taken after the delete) stays deleted after visiting an old ref" "$R/docs/plans/p.md"
 absent "M17: …an untracked-only deleted plan too" "$R/docs/plans/done.md"
-exists "M17: …but its last copy is kept in the store's trash" "$ST17/trash/docs/plans/p.md"
+TG17="$(ls -d "$ST17/trash/docs/plans/p.md".~*~ 2>/dev/null | head -n 1)"
+exists "M17: …but its last copy is kept in the store's trash (timestamped)" "${TG17:-$ST17/trash/docs/plans/p.md.~none~}"
 mkdir -p "$R/.claude/many"; for i in $(seq 1 2005); do : > "$R/.claude/many/f$i"; done
 LO="$(cd "$R" && bash "$KIT_ROOT/plugin/guard/localfiles.sh" snapshot 2>&1)"
 has "M17: files beyond the 2000-file cap are named as NOT protected" "$LO" "beyond the first 2000 files"
 has "M17: …with the full list in the store" "$(cat "$ST17/omitted" 2>/dev/null)" "(beyond the first 2000 files)"
 rm -rf "$R/.claude/many"
+git config --file "$W/gitconfig" --unset core.hooksPath
+
+# ---- M19 (review R4-4): trash keeps timestamped generations (last 5 per path) and every
+# snapshot caller reports what it moved
+git config --file "$W/gitconfig" core.hooksPath "$SHD"
+R="$W/m19"; make_v4 "$R"; g "$R" tag v4-state; km "$R" --commit >/dev/null 2>&1
+RID19="$(printf '%s' "$R" | sha1sum | cut -c1-12)"; ST19="$W/state/localfiles/$RID19"
+LF="$KIT_ROOT/plugin/guard/localfiles.sh"
+gens() { ls -d "$ST19/trash/$1".~*~ 2>/dev/null | wc -l | tr -d ' '; }
+for i in 1 2 3 4 5 6 7; do
+  echo "draft $i" > "$R/docs/plans/cycle.md"; (cd "$R" && bash "$LF" snapshot 2>/dev/null)
+  rm -f "$R/docs/plans/cycle.md"; LO="$(cd "$R" && bash "$LF" snapshot 2>&1)"
+done
+eq "M19: 7 disappear/reappear cycles with different content keep the last 5 copies" "$(gens docs/plans/cycle.md)" "5"
+NEWEST="$(ls -d "$ST19/trash/docs/plans/cycle.md".~*~ | sort | tail -n 1)"; OLDEST="$(ls -d "$ST19/trash/docs/plans/cycle.md".~*~ | sort | head -n 1)"
+eq "M19: …the newest copy is the last version" "$(cat "$NEWEST" 2>/dev/null)" "draft 7"
+eq "M19: …the oldest kept is version 3" "$(cat "$OLDEST" 2>/dev/null)" "draft 3"
+has "M19: the snapshot says what it moved (one line)" "$LO" "moved to $ST19/trash (docs/plans/cycle.md"
+eq "M19: …exactly one line" "$(printf '%s\n' "$LO" | grep -c 'moved to')" "1"
+for i in 1 2 3; do
+  echo "same" > "$R/docs/plans/same.md"; (cd "$R" && bash "$LF" snapshot 2>/dev/null)
+  rm -f "$R/docs/plans/same.md"; (cd "$R" && bash "$LF" snapshot 2>/dev/null)
+done
+eq "M19: identical content is not stored twice" "$(gens docs/plans/same.md)" "1"
+# a single-generation trash from the round-3 build becomes the oldest generation
+mkdir -p "$ST19/trash/docs/plans"; echo "legacy" > "$ST19/trash/docs/plans/old.md"
+echo "newer" > "$R/docs/plans/old.md"; (cd "$R" && bash "$LF" snapshot 2>/dev/null); rm -f "$R/docs/plans/old.md"; (cd "$R" && bash "$LF" snapshot 2>/dev/null)
+eq "M19: a legacy one-copy trash is kept as a generation" "$(gens docs/plans/old.md)" "2"
+has "M19: …with its content" "$(cat "$ST19/trash/docs/plans/old.md".~*~ 2>/dev/null)" "legacy"
+# every snapshot caller reports: the post-commit hook …
+echo "c1" > "$R/docs/plans/hook.md"; g "$R" commit -q --allow-empty -m hk1 2>/dev/null
+rm -f "$R/docs/plans/hook.md"; HO="$(cd "$R" && git commit -q --allow-empty -m hk2 2>&1)"
+has "M19: post-commit snapshot reports the move" "$HO" "moved to $ST19/trash (docs/plans/hook.md"
+# … kit guard status …
+echo "c2" > "$R/docs/plans/gs.md"; (cd "$R" && bash "$LF" snapshot 2>/dev/null); rm -f "$R/docs/plans/gs.md"
+GS="$(cd "$R" && python3 "$KIT_ROOT/bin/kit" guard status 2>&1)"
+has "M19: kit guard status reports the move" "$GS" "moved to $ST19/trash (docs/plans/gs.md"
+has "M19: …and the generations kept" "$GS" "last 5 per file"
+# … the session start (into the model's context) …
+echo "c3" > "$R/docs/plans/ss.md"; (cd "$R" && bash "$LF" snapshot 2>/dev/null); rm -f "$R/docs/plans/ss.md"
+SSO="$(printf '{"session_id":"m19s","cwd":"%s","hook_event_name":"SessionStart","source":"startup"}' "$R" \
+  | CLAUDE_PLUGIN_ROOT="$KIT_ROOT/plugin" CLAUDE_PROJECT_DIR="$R" bash "$KIT_ROOT/plugin/hooks/session-start.sh" 2>/dev/null)"
+rm -f /tmp/claude-kit-baseline-m19s
+has "M19: session start reports the move" "$SSO" "docs/plans/ss.md"
+# … and a checkout never resurrects a trashed file
+(cd "$R" && git checkout -q v4-state 2>/dev/null && git checkout -q main 2>/dev/null)
+absent "M19: trashed plans are not restored by a checkout" "$R/docs/plans/cycle.md"
 git config --file "$W/gitconfig" --unset core.hooksPath
 
 # ---- M15 (review O8): an owner edit to a file migrate wrote, between --apply and --commit

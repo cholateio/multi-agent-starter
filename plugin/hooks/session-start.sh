@@ -72,7 +72,8 @@ fi
 # --- dynamic context ---
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)}"
 # refresh the local-only file snapshot (PROJECT.toml, LESSONS, plans, .claude/ — review F3)
-( cd "$PROJ" 2>/dev/null && bash "$PLUGIN_ROOT/guard/localfiles.sh" snapshot ) >/dev/null 2>&1 || true
+# what it moved to trash / cannot protect goes into the context (review R4-4: every snapshot caller reports)
+LF_NOTE="$( { cd "$PROJ" 2>/dev/null && bash "$PLUGIN_ROOT/guard/localfiles.sh" snapshot; } 2>&1 >/dev/null | grep -E 'moved to|NOT protected' | head -n 2)" || true
 KIT_VERSION=$(jq -r '.version // empty' "$PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null)
 KIT_VERSION="${KIT_VERSION:-unknown}"
 VISIBILITY=$(kit_toml_scalar "$PROJ" visibility)
@@ -119,6 +120,8 @@ CONTEXT="KIT_CONTEXT (multi-agent kit ${KIT_VERSION})
 - Plugin root: ${PLUGIN_ROOT}
 - Project: kit.toml visibility=${VISIBILITY:-unset} protected=${PROTECTED_N}
 - Guard: hooksPath=${GUARD_HP} gitleaks=${GUARD_GL}"
+[[ -n "${LF_NOTE:-}" ]] && CONTEXT="${CONTEXT}
+- Local-only files: ${LF_NOTE//$'\n'/ | }"
 
 # RE-ANCHOR: compact/resume are when a drifting model is most dangerous —
 # the plan details and no-touch zones were just squeezed out of context.
