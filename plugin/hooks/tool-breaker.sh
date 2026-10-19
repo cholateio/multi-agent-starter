@@ -126,15 +126,16 @@ guard_unquote1() {
 GP_GSEP='(^|[;&|(`[:space:]]|/)'
 GP_GLOBAL='([[:space:]]+(-[Cc][[:space:]]+[^[:space:];&|]+|--[A-Za-z][A-Za-z-]*(=[^[:space:];&|]*)?|-[A-Za-z]))*'
 GP_CFG="${GP_GSEP}git${GP_GLOBAL}[[:space:]]+config[[:space:]]([^;&|]*[[:space:]])?"
-# PATH is not here (review F7): the guard resolves gitleaks from config.toml tools_dir
-# (default ~/.local/bin) before PATH, and `export PATH=~/.local/bin:$PATH` is routine
+# PATH is not here (review F7, R3-1): the guard resolves gitleaks ONLY from config.toml
+# tools_dir / a recorded gitleaks_path, never PATH, and `export PATH=~/.local/bin:$PATH` is routine
 GP_ENVV='(HOME|XDG_CONFIG_HOME|KIT_STATE_HOME|GIT_CONFIG_(GLOBAL|COUNT|PARAMETERS))'
 GP_GITCP="([^[:space:];&|]*/)?git([[:space:]][^;&|]*)?[[:space:]](commit|push)([[:space:]]|\$)"
 # Guard inputs a Bash command must not WRITE (reads stay allowed): the guard's state
 # (bypass-<id>, audit.jsonl), the git-hooks shims, git config files (they carry
 # core.hooksPath), privacy.local.toml, the kit config.toml (kit_root → the guard
-# scripts) and the guard scripts themselves (plugin/guard/).
-GP_PROT='(kit/guard|kit/git-hooks|guard/bypass-|bypass-[0-9a-f]{6,}|guard/audit\.jsonl|\.gitconfig|\.git/config|/git/config|config\.worktree|privacy\.local\.toml|kit/config\.toml|plugin/guard/)'
+# scripts), the guard scripts themselves (plugin/guard/) and the Claude hooks that
+# enforce all this — activation gate (lib.sh) + this breaker (plugin/hooks/; review R3-9).
+GP_PROT='(kit/guard|kit/git-hooks|guard/bypass-|bypass-[0-9a-f]{6,}|guard/audit\.jsonl|\.gitconfig|\.git/config|/git/config|config\.worktree|privacy\.local\.toml|kit/config\.toml|plugin/guard/|plugin/hooks/)'
 # guard_write_hit <flattened text>: 0 when a simple command WRITES a protected path.
 # Per command segment (split on ; && || | &): a redirect whose target is protected,
 # or a write verb whose written operand is protected — rm/mv/touch/truncate/chmod/

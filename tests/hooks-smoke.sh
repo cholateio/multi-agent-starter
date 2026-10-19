@@ -330,7 +330,12 @@ ss_ctx; assert_contains "s-v5-2: malformed protected list reported, not counted 
 printf '[core]\n\thooksPath = /x/git-hooks\n' > "$WORK/gitcfg-hooks"
 mkdir -p "$WORK/fakebin"; printf '#!/bin/sh\nexit 0\n' > "$WORK/fakebin/gitleaks"; chmod +x "$WORK/fakebin/gitleaks"
 run_hook "$SS" "{\"session_id\":\"${SID_PREFIX}-s5d\",\"cwd\":\"${R1}\"}" full GIT_CONFIG_GLOBAL="$WORK/gitcfg-hooks" PATH="$WORK/fakebin:$PATH"
-ss_ctx; assert_contains "s-v5-2: guard line sees global hooksPath + gitleaks" "$CTX" "- Guard: hooksPath=set gitleaks=ok"
+ss_ctx; assert_contains "s-v5-2: guard line sees the global hooksPath" "$CTX" "- Guard: hooksPath=set gitleaks="
+# review R3-1: a gitleaks that is only on PATH is NOT the guard's (PATH is caller-controlled)
+assert_contains "s-v5-2: PATH-only gitleaks is not used (R3-1)" "$CTX" "gitleaks=MISSING"
+mkdir -p "$WORK/kc13b"; printf 'gitleaks_path = "%s"\n' "$WORK/fakebin/gitleaks" > "$WORK/kc13b/config.toml"
+run_hook "$SS" "{\"session_id\":\"${SID_PREFIX}-s5d1\",\"cwd\":\"${R1}\"}" full GIT_CONFIG_GLOBAL="$WORK/gitcfg-hooks" KIT_CONFIG_HOME="$WORK/kc13b"
+ss_ctx; assert_contains "s-v5-2: a recorded absolute gitleaks_path is used (R3-1)" "$CTX" "- Guard: hooksPath=set gitleaks=ok"
 # review O3/F13: gitleaks in config.toml tools_dir (off PATH) is found like the guard finds it
 NOGLP=""; IFS=: read -ra _pp <<< "$PATH"; for d in "${_pp[@]}"; do [ -x "$d/gitleaks" ] || NOGLP="${NOGLP:+$NOGLP:}$d"; done
 mkdir -p "$WORK/kc13" "$WORK/tooldir13"; cp "$WORK/fakebin/gitleaks" "$WORK/tooldir13/gitleaks"
@@ -1610,9 +1615,13 @@ bgp deny "python pty spawning kit guard bypass denied"                "python3 -
 bgp deny "unbuffer kit guard bypass denied"                           'unbuffer kit guard bypass x'
 bgp deny "cd into the guard dir then write a bypass file denied"      "cd ~/.local/state/kit/guard && printf '{}' > bypass-0123456789ab"
 bgp deny "writing the guard audit log denied"                         'echo x >> ~/.local/state/kit/guard/audit.jsonl'
-# review fix F7: PATH is not a guard input any more (the guard resolves gitleaks from
-# config.toml tools_dir / ~/.local/bin before PATH), so PATH= on a push is routine
-bgp ""   "PATH= before git push allowed (gitleaks resolved from tools_dir first)" 'PATH=/tmp/fake:$PATH git push origin main'
+# review fix F7 / R3-1: PATH is not a guard input (the guard resolves gitleaks ONLY from
+# config.toml tools_dir / a recorded gitleaks_path, never PATH), so PATH= on a push is routine
+bgp ""   "PATH= before git push allowed (the guard never resolves gitleaks from PATH)" 'PATH=/tmp/fake:$PATH git push origin main'
+# review R3-9 (Fable N5): plugin/hooks/ (activation gate + this breaker) is a guard input too
+bgp deny "sed -i on plugin/hooks/lib.sh denied"                       "sed -i 's/foo/bar/' plugin/hooks/lib.sh"
+bgp deny "redirect into plugin/hooks/tool-breaker.sh denied"          'echo "exit 0" > plugin/hooks/tool-breaker.sh'
+bgp ""   "reading plugin/hooks/lib.sh allowed"                        'sed -n 1,20p plugin/hooks/lib.sh'
 bgp deny "removing a kit git-hooks shim denied"                       'rm ~/.config/kit/git-hooks/pre-commit'
 bgp deny "moving a kit git-hooks shim denied"                         'mv ~/.config/kit/git-hooks/pre-push /tmp/x'
 bgp deny "sed -i on ~/.gitconfig denied"                              "sed -i 's/hooksPath/x/' ~/.gitconfig"

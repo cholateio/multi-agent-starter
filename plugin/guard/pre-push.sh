@@ -118,7 +118,7 @@ while read -r lref lsha rref rsha; do
 done
 
 if [[ $scanned -eq 1 && $gl_missing -eq 1 ]]; then
-    guard_add BLOCK "R8 gitleaks-missing" "(push)" "gitleaks required for push (${GL_STATUS:-gitleaks not in PATH}) — secrets cannot be scanned at the leak boundary"
+    guard_add BLOCK "R8 gitleaks-missing" "(push)" "gitleaks required for push (${GL_STATUS:-gitleaks not found}) — secrets cannot be scanned at the leak boundary"
 fi
 T_SPENT=$(( $(date +%s) - T_START ))
 [[ $T_SPENT -gt 10 ]] && echo "KIT GUARD: slow push scan (${T_SPENT}s)" >&2

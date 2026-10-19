@@ -99,7 +99,7 @@ guard_kit_toml_before() {
     return 1
 }
 
-guard_gitleaks_bin() {  # the pinned install (config.toml tools_dir, default ~/.local/bin) wins over PATH (I4, O3)
+guard_gitleaks_bin() {  # config.toml tools_dir (default ~/.local/bin) or recorded gitleaks_path — never PATH (I4, O3, R3-1)
     kit_tool_path gitleaks "$CFG_DIR"
 }
 
@@ -114,7 +114,7 @@ guard_gitleaks_bin() {  # the pinned install (config.toml tools_dir, default ~/.
 # Return 0 = scanned, 2 = gitleaks missing / crashed (caller applies R8).
 guard_gitleaks_stream() {
     local stream="$1" ign="${2:-}" gl rc td
-    gl="$(guard_gitleaks_bin)" || { GL_STATUS="gitleaks not in $(kit_tools_dir "$CFG_DIR") or PATH"; return 2; }
+    gl="$(guard_gitleaks_bin)" || { GL_STATUS="gitleaks not in $(kit_tools_dir "$CFG_DIR") and no gitleaks_path recorded in config.toml (the guard never uses PATH)"; return 2; }
     td="$(mktemp -d "${TMPDIR:-/tmp}/kit-guard-gl.XXXXXX")" || { GL_STATUS="mktemp failed"; return 2; }
     mkdir -p "$td/noignore"
     awk -v M="$td/meta" -v C="$td/content" '{

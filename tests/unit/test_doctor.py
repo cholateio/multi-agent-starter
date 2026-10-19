@@ -143,3 +143,55 @@ class TestToolsAndPlatform(IsolatedTestCase):
         self.assertEqual(text.count("tools_dir"), 1)
         self.assertLess(text.index("tools_dir"), text.index("[audit]"))
         self.assertEqual(paths.load_config()["tools_dir"], "/opt/u")
+
+    def test_find_tool_never_uses_path(self):
+        """Review R3-1: the resolver never trusts the caller's PATH (a fake gitleaks there would
+        turn R1 off) — only tools_dir or an absolute <tool>_path recorded by setup / doctor."""
+        os.environ["PATH"] = str(self.tmp / "fakebin")
+        self.fake_tool(self.tmp / "fakebin", "gitleaks", "8.30.1")
+        self.assertIsNone(paths.find_tool("gitleaks"))
+        self.assertIsNone(doctor.tool_version("gitleaks"))
+        cfg = paths.config_path()
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('kit_root = "/x"\ngitleaks_path = "fakebin/gitleaks"\n')
+        self.assertIsNone(paths.find_tool("gitleaks"), "a relative recorded path is ignored")
+        exe = self.fake_tool(self.tmp / "elsewhere", "osv-scanner", "2.7.0")
+        cfg.write_text(f'kit_root = "/x"\nosv_scanner_path = "{exe}"\n')
+        self.assertEqual(paths.find_tool("osv-scanner"), str(exe))
+
+    def test_relative_tools_dir_is_ignored(self):
+        cfg = paths.config_path()
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('tools_dir = "tools"\n')
+        self.assertEqual(paths.tools_dir(), self.home / ".local" / "bin")
+
+    def test_install_missing_records_a_pinned_version_found_on_path(self):
+        """Review R3-1: a correct-version tool on PATH at setup / doctor --install time is recorded
+        as an absolute <tool>_path (after the version check) instead of being re-downloaded."""
+        gl = self.fake_tool(self.tmp / "pathbin", "gitleaks", "8.30.1")
+        osv = self.fake_tool(self.tmp / "pathbin", "osv-scanner", "2.7.0")
+        os.environ["PATH"] = str(self.tmp / "pathbin")
+        called = []
+        orig = doctor.install_tool
+        doctor.install_tool = lambda *a, **k: called.append(a)
+        try:
+            self.assertTrue(doctor.install_missing(paths.tools_dir(), log=lambda m: None))
+        finally:
+            doctor.install_tool = orig
+        self.assertEqual(called, [])
+        cfg = paths.load_config()
+        self.assertEqual(cfg.get("gitleaks_path"), str(gl))
+        self.assertEqual(cfg.get("osv_scanner_path"), str(osv))
+        os.environ["PATH"] = str(self.tmp / "emptybin")
+        self.assertEqual(paths.find_tool("gitleaks"), str(gl))
+
+    def test_install_missing_does_not_record_a_wrong_version_on_path(self):
+        self.fake_tool(self.tmp / "pathbin", "gitleaks", "1.0.0")
+        os.environ["PATH"] = str(self.tmp / "pathbin")
+        orig_inst, orig_plat = doctor.install_tool, doctor.platform_ok
+        doctor.install_tool = lambda pin, d: (_ for _ in ()).throw(OSError("offline"))
+        try:
+            self.assertFalse(doctor.install_missing(paths.tools_dir(), log=lambda m: None))
+        finally:
+            doctor.install_tool, doctor.platform_ok = orig_inst, orig_plat
+        self.assertNotIn("gitleaks_path", paths.load_config())

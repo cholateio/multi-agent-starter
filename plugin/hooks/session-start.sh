@@ -82,7 +82,7 @@ else
     PROTECTED_N="MALFORMED (protect-paths enforces nothing; run: kit doctor)"
 fi
 [[ -n "$(git config --global core.hooksPath 2>/dev/null)" ]] && GUARD_HP="set" || GUARD_HP="UNSET"
-# the guard's own resolver: config.toml tools_dir (default ~/.local/bin), then PATH (review O3/F13)
+# the guard's own resolver: config.toml tools_dir (default ~/.local/bin) or a recorded gitleaks_path — never PATH (review O3/F13, R3-1)
 source "$PLUGIN_ROOT/guard/lib-tools.sh" 2>/dev/null
 if declare -F kit_tool_path >/dev/null && kit_tool_path gitleaks "${KIT_CONFIG_HOME:-${HOME:-}/.config/kit}" >/dev/null; then
     GUARD_GL="ok"

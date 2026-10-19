@@ -90,20 +90,41 @@ def expand(p: str) -> Path:
 
 def tools_dir() -> Path:
     """Where the pinned tools live: config.toml `tools_dir` (written by kit setup --bin-dir /
-    kit doctor --install --bin-dir), else ~/.local/bin. Same rule as plugin/guard/lib-tools.sh."""
+    kit doctor --install --bin-dir), else ~/.local/bin. Same rule as plugin/guard/lib-tools.sh.
+    A relative value is ignored (it would depend on the caller's cwd)."""
     try:
         d = load_config().get("tools_dir")
     except Exception:  # malformed config: doctor reports it; fall back to the default
         d = None
-    return expand(d) if isinstance(d, str) and d else home() / ".local" / "bin"
+    p = expand(d) if isinstance(d, str) and d else None
+    return p if p is not None and p.is_absolute() else home() / ".local" / "bin"
+
+
+def tool_key(name: str) -> str:
+    """config.toml key of a recorded tool binary: gitleaks → gitleaks_path, osv-scanner → osv_scanner_path."""
+    return name.replace("-", "_") + "_path"
+
+
+def _exe(p: Path) -> bool:
+    return p.is_file() and os.access(p, os.X_OK)
 
 
 def find_tool(name: str) -> str | None:
-    """THE tool resolver (guard, session start, doctor, guard status): tools_dir first, then PATH."""
+    """THE tool resolver (guard, session start, doctor, guard status): <tools_dir>/<name>, else
+    the absolute `<name>_path` that setup / doctor --install recorded after a version check.
+    NEVER the caller's PATH (review R3-1: a stub `gitleaks` on PATH would switch R1 off)."""
     p = tools_dir() / name
-    if p.is_file() and os.access(p, os.X_OK):
+    if _exe(p):
         return str(p)
-    return shutil.which(name)
+    try:
+        rec = load_config().get(tool_key(name))
+    except Exception:
+        rec = None
+    if isinstance(rec, str) and rec:
+        r = expand(rec)
+        if r.is_absolute() and _exe(r):
+            return str(r)
+    return None
 
 
 def set_config_value(key: str, value: str) -> None:

@@ -238,7 +238,13 @@ def run_checks() -> Report:
         v = tool_version(name)
         pin = TOOL_PINS[name]
         if v is None:
-            rep.add("WARN", name, f"not in {paths.tools_dir()} or on PATH (pinned {pin.version}) — run: kit doctor --install")
+            onpath = shutil.which(name)
+            if onpath:
+                rep.add("WARN", name, f"{onpath} is on PATH but not recorded — the guard never uses PATH tools "
+                        f"(pinned {pin.version}) — run: kit doctor --install")
+            else:
+                rep.add("WARN", name, f"not in {paths.tools_dir()} and no {paths.tool_key(name)} recorded "
+                        f"(pinned {pin.version}) — run: kit doctor --install")
         elif v != pin.version:
             rep.add("WARN", name, f"version {v or 'unknown'} != pinned {pin.version} — run: kit doctor --install")
         else:
@@ -310,6 +316,14 @@ def install_missing(bin_dir: Path, log=print) -> bool:
         v = tool_version(name, str(here)) if here.exists() else tool_version(name)
         if v == pin.version:
             log(f"[skip] {name} {pin.version} already installed")
+            continue
+        # the pinned version already on PATH: record its absolute path (the guard never
+        # searches PATH at hook time — review R3-1) instead of downloading a second copy
+        onpath = shutil.which(name)
+        if onpath and tool_version(name, os.path.abspath(onpath)) == pin.version:
+            paths.set_config_value(paths.tool_key(name), os.path.abspath(onpath))
+            log(f"[skip] {name} {pin.version} found at {os.path.abspath(onpath)} — recorded as "
+                f"{paths.tool_key(name)} in {paths.config_path()}")
             continue
         if not supported:
             ok = False

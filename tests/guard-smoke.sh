@@ -232,6 +232,19 @@ if [ -n "$GITLEAKS" ]; then ln -sf "$GITLEAKS" "$W/glbin/gitleaks"
 else printf '#!/bin/sh\nexit 0\n' > "$W/glbin/gitleaks"; chmod +x "$W/glbin/gitleaks"; fi   # no real gitleaks: a clean stand-in (R1 assertions SKIP)
 GL_PATH="$W/glbin:$NOGL_PATH"
 AUDIT="$KIT_STATE_HOME/guard/audit.jsonl"
+# glsel <PATH>: the guard never resolves gitleaks from PATH (review R3-1), only from
+# config.toml tools_dir / gitleaks_path — so the test's "which gitleaks" choice is made
+# there: GL_PATH → glbin, NOGL_PATH → an empty dir, crashgl → crashgl; any other PATH
+# → no tools_dir line (the default ~/.local/bin)
+mkdir -p "$W/nogl"
+glsel() {
+  local cfg="${KIT_GUARD_CONFIG_DIR:-$KIT_CONFIG_HOME}/config.toml" sel=""
+  case "$1" in
+    "$GL_PATH") sel="$W/glbin" ;; "$NOGL_PATH") sel="$W/nogl" ;; "$W/crashgl:$NOGL_PATH") sel="$W/crashgl" ;;
+  esac
+  mkdir -p "$(dirname "$cfg")"; touch "$cfg"
+  { [ -n "$sel" ] && printf 'tools_dir = "%s"\n' "$sel"; grep -v '^tools_dir' "$cfg"; } > "$cfg.new"; mv "$cfg.new" "$cfg"
+}
 
 # newrepo <dir> [visibility|none]: repo with an initial commit made WITHOUT hooks
 # (PROJECT.toml tracked from the start, like a v4 repo); kit.toml unless "none"
@@ -243,6 +256,7 @@ newrepo() {
 }
 # cmt <repo> [PATH] → CO (combined output), CC (exit code); commits staged changes through the guard
 cmt() {
+  glsel "${2:-$GL_PATH}"
   CO="$(cd "$1" && PATH="${2:-$GL_PATH}" git -c core.hooksPath="$TH" commit -q -m t 2>&1)"; CC=$?
 }
 R="$W/rb"
@@ -370,6 +384,7 @@ pushrepo() {
 # psh <repo> <PATH|""> <push args…> → PO, PC
 psh() {
   local r="$1" p="${2:-$GL_PATH}"; shift 2
+  glsel "$p"
   PO="$(cd "$r" && PATH="$p" git -c core.hooksPath="$TH" push -q "$@" 2>&1)"; PC=$?
 }
 nc() { git -C "$1" -c core.hooksPath=/dev/null commit -q -m "${2:-c}"; }   # commit without the guard
@@ -470,8 +485,8 @@ mkshims pre-commit pre-push commit-msg post-commit
 git config --file "$GIT_CONFIG_GLOBAL" core.hooksPath "$SHIMS"
 KIT="python3 $KIT_ROOT/bin/kit"
 # gcm <repo> [extra git args…] → GO, GC : a plain `git commit` through the GLOBAL hooksPath, with a hang timeout
-gcm() { local r="$1"; shift; GO="$(cd "$r" && PATH="$GL_PATH" timeout 30 git commit -q -m t "$@" 2>&1)"; GC=$?; }
-gpu() { local r="$1"; shift; GO="$(cd "$r" && PATH="$GL_PATH" timeout 30 git push -q "$@" 2>&1)"; GC=$?; }
+gcm() { local r="$1"; shift; glsel "$GL_PATH"; GO="$(cd "$r" && PATH="$GL_PATH" timeout 30 git commit -q -m t "$@" 2>&1)"; GC=$?; }
+gpu() { local r="$1"; shift; glsel "$GL_PATH"; GO="$(cd "$r" && PATH="$GL_PATH" timeout 30 git push -q "$@" 2>&1)"; GC=$?; }
 lacks "D4: shim never resolves hooks via --git-path (it would recurse into itself)" "$(grep -v '^#' "$KIT_ROOT/plugin/guard/shim.sh")" "--git-path"
 has  "D4: shim chains via --git-common-dir" "$(cat "$KIT_ROOT/plugin/guard/shim.sh")" "--git-common-dir"
 
@@ -856,12 +871,44 @@ eq   "G-F8: …clean history still passes" "$PC" "0"
 
 # O3/F13: the guard finds gitleaks in config.toml tools_dir (kit setup --bin-dir), off PATH
 G10="$W/g10"; newrepo "$G10" none noproj; mkdir -p "$W/customtools"; cp -P "$W/glbin/gitleaks" "$W/customtools/gitleaks"
-cp "$KIT_CONFIG_HOME/config.toml" "$W/cfg.bak" 2>/dev/null || : > "$W/cfg.bak"
+glsel default; cp "$KIT_CONFIG_HOME/config.toml" "$W/cfg.bak" 2>/dev/null || : > "$W/cfg.bak"
 printf 'tools_dir = "%s"\n' "$W/customtools" >> "$KIT_CONFIG_HOME/config.toml"
-echo ok > "$G10/ok.txt"; git -C "$G10" add ok.txt; cmt "$G10" "$NOGL_PATH"
+echo ok > "$G10/ok.txt"; git -C "$G10" add ok.txt
+CO="$(cd "$G10" && PATH="$NOGL_PATH" git -c core.hooksPath="$TH" commit -q -m t 2>&1)"; CC=$?
 eq   "G-F13: gitleaks in tools_dir (not on PATH) → commit passes" "$CC" "0"
 lacks "G-F13: …and no R8 gitleaks-missing" "$CO" "R8 gitleaks-missing"
 cp "$W/cfg.bak" "$KIT_CONFIG_HOME/config.toml"
+
+# ============================================================ H. round-3 review fixes
+echo "--- H. round-3 review fixes"
+# R3-1: a fake gitleaks on the caller's PATH is never run — the guard resolves it ONLY from
+# config.toml tools_dir / an absolute gitleaks_path recorded by kit setup / doctor --install
+mkdir -p "$W/fakepath"; printf '#!/bin/sh\ntouch "%s/fake-gl-ran"\nexit 0\n' "$W" > "$W/fakepath/gitleaks"; chmod +x "$W/fakepath/gitleaks"
+H1="$W/h1"; pushrepo "$H1" none noproj
+printf 'aws_key = "%s"\n' "$FAKE_AWS" > "$H1/k.txt"; git -C "$H1" add k.txt; nc "$H1"
+h1fresh() { rm -rf "$H1.git"; git init -q --bare "$H1.git"; git -C "$H1" -c core.hooksPath=/dev/null push -q origin main~1:refs/heads/main 2>/dev/null; }
+h1fresh; glsel "$NOGL_PATH"; rm -f "$W/fake-gl-ran"
+PO="$(cd "$H1" && PATH="$W/fakepath:$NOGL_PATH" git -c core.hooksPath="$TH" push -q origin main 2>&1)"; PC=$?
+eq   "H-R3-1: fake gitleaks on PATH + nothing in tools_dir → push blocked" "$PC" "1"
+has  "H-R3-1: …as R8 (the PATH binary is not the guard's)" "$PO" "[R8 gitleaks-missing]"
+absent_f() { if [ ! -e "$2" ]; then pass "$1"; else fail "$1" "exists $2"; fi; }
+absent_f "H-R3-1: …and the fake was never executed" "$W/fake-gl-ran"
+if [ -n "$GITLEAKS" ]; then
+  h1fresh; glsel "$GL_PATH"; rm -f "$W/fake-gl-ran"
+  PO="$(cd "$H1" && PATH="$W/fakepath:$NOGL_PATH" git -c core.hooksPath="$TH" push -q origin main 2>&1)"; PC=$?
+  eq  "H-R3-1: fake gitleaks first on PATH + real one in tools_dir → push blocked" "$PC" "1"
+  has "H-R3-1: …by R1 (the real scan ran)" "$PO" "[R1 secret] k.txt:1"
+  absent_f "H-R3-1: …fake never executed" "$W/fake-gl-ran"
+  h1fresh; glsel "$NOGL_PATH"; printf 'gitleaks_path = "%s"\n' "$GITLEAKS" >> "$KIT_CONFIG_HOME/config.toml"
+  PO="$(cd "$H1" && PATH="$W/fakepath:$NOGL_PATH" git -c core.hooksPath="$TH" push -q origin main 2>&1)"; PC=$?
+  eq  "H-R3-1: a recorded absolute gitleaks_path is used (tools_dir empty)" "$PC" "1"
+  has "H-R3-1: …R1 found the key" "$PO" "[R1 secret] k.txt:1"
+else skip "H-R3-1: real gitleaks via tools_dir / gitleaks_path" "no gitleaks"; fi
+glsel "$NOGL_PATH"; grep -v '^gitleaks_path' "$KIT_CONFIG_HOME/config.toml" > "$W/c.new"; mv "$W/c.new" "$KIT_CONFIG_HOME/config.toml"
+printf 'gitleaks_path = "fakepath/gitleaks"\n' >> "$KIT_CONFIG_HOME/config.toml"; h1fresh
+PO="$(cd "$W" && cd "$H1" && PATH="$NOGL_PATH" git -c core.hooksPath="$TH" push -q origin main 2>&1)"; PC=$?
+has  "H-R3-1: a RELATIVE gitleaks_path is ignored (R8)" "$PO" "[R8 gitleaks-missing]"
+grep -v '^gitleaks_path' "$KIT_CONFIG_HOME/config.toml" > "$W/c.new"; mv "$W/c.new" "$KIT_CONFIG_HOME/config.toml"
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"
