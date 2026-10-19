@@ -132,8 +132,20 @@ eng public "nope" "uid: 11111111-2222-3333-4444-555555555555"
 has  "A8: unknown name → stderr warn" "$EE" "unknown literal name"
 has  "A8: unknown name → others still block" "$EO" $'BLOCK\tR4 personal-literal'
 
+# review O9: the inline marker covers WARN-level rules only (R3b/R6/R7); block-level
+# exceptions go through kit.toml (allow_literals by name / allow_paths)
 eng public "" "uid: 11111111-2222-3333-4444-555555555555 $HP/testuser/ # kit-privacy: allow"
-eq   "A9: 'kit-privacy: allow' line skipped" "$EO" ""
+has  "A9: marker does not exempt an always literal (R4)" "$EO" $'BLOCK\tR4 personal-literal'
+has  "A9: marker does not exempt a configured user path (R3)" "$EO" $'BLOCK\tR3 local-path'
+has  "A9: …and the block says why" "$EO" "warn-level rules only"
+eng public "" "name proj-a-secret-name # kit-privacy: allow"
+has  "A9: marker does not exempt a public-only literal (R5)" "$EO" $'BLOCK\tR5 public-only-literal'
+eng public "" "mail a.person@corp-mail.dev # kit-privacy: allow"
+lacks "A9: marker suppresses the R6 email warning" "$EO" $'WARN\tR6 email'
+has  "A9: …but the consumed marker is reported" "$EO" $'WARN\tR6 allow-marker\tf.txt:1'
+eq   "A9: …exit 0" "$EC" "0"
+eng public "" "WORKDIR $HP/node/app # kit-privacy: allow"
+has  "A9: R3b consumed marker reported" "$EO" $'WARN\tR3b allow-marker'
 eng public "" $'mail a@b.co\nbot x@users.noreply.github.com\nnoreply@example.com\nsee git@github.com:o/r'
 has  "A10: generic email WARN R6" "$EO" $'WARN\tR6 email\tf.txt:1'
 lacks "A10: noreply / example / git@ not flagged" "$EO" "f.txt:2"
@@ -808,6 +820,18 @@ done
 for f in .env.example .env.sample .env.template .env.dist .env.defaults .env.local.example .envrc; do
   git -C "$GI" check-ignore -q "$f" && fail "G-F4: template .gitignore keeps $f addable" "ignored" || pass "G-F4: template .gitignore keeps $f addable"
 done
+
+# O9: consumed allow markers are never silent (WARN + audit.jsonl)
+G7="$W/g7"; newrepo "$G7" public noproj
+echo 'contact a.person@corp-mail.dev # kit-privacy: allow' > "$G7/m.txt"; git -C "$G7" add m.txt; cmt "$G7"
+eq   "G-O9: warn-level hit with a marker commits" "$CC" "0"
+has  "G-O9: …and prints the consumed marker" "$CO" "KIT GUARD WARN [R6 allow-marker] m.txt:1"
+has  "G-O9: …and logs it to audit.jsonl" "$(cat "$AUDIT")" '"action":"allow-marker"'
+printf 'p '"$HP"'/testuser/x # kit-privacy: allow\n' > "$G7/b.txt"; git -C "$G7" add b.txt; cmt "$G7"
+eq   "G-O9: block-level hit with a marker is still blocked" "$CC" "1"
+has  "G-O9: …R3" "$CO" "[R3 local-path] b.txt:1"
+printf 'kit = 5\nvisibility = "public"\n\n[privacy]\nallow_paths = ["b.txt"]\n' > "$G7/kit.toml"; git -C "$G7" add kit.toml b.txt; cmt "$G7"
+eq   "G-O9: the kit.toml allow_paths route still works for block-level rules" "$CC" "0"
 
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"

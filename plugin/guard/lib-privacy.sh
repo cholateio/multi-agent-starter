@@ -18,8 +18,11 @@
 #
 # Contract: literals match as FIXED strings, case-insensitively, and only when
 # >= 4 characters; output never carries a matched value (literals are named
-# <name>, user names are <user>); a line containing `kit-privacy: allow` is
-# skipped; allow_paths globs (bash [[ == ]], `*` crosses `/`) skip R3–R7.
+# <name>, user names are <user>); a line containing `kit-privacy: allow` skips
+# WARN-level rules only (R3b/R6/R7) and every marker that suppresses a hit is
+# reported as `WARN <rule> allow-marker` (review O9: never silent); BLOCK-level
+# rules (R3/R4/R5) are exempted only by kit.toml — allow_paths globs (bash
+# [[ == ]], `*` crosses `/`) skip R3–R7, allow_literals exempts by NAME.
 # kit.toml [privacy] allow_literals exempts a literal by NAME only — a value
 # written there is not a name and exempts nothing (design 修訂 #2). Emails
 # from privacy.local.toml are always-tier literals named `email`, exactly as
@@ -191,7 +194,7 @@ privacy_scan_stream() {
     local -A said_allowed=() hitlines=() allowline=()
     # lines carrying `kit-privacy: allow`, once (no per-hit re-read: final review I5)
     while IFS=: read -r num _; do allowline[$num]=1; done < <(grep -n -a -i -F 'kit-privacy: allow' "$td/content" 2>/dev/null)
-    local num path lno tag text low disp
+    local num path lno tag text low disp marked
     _priv_emit() {  # $1 action  $2 "Rn tag"  $3 why
         disp="$path:$lno"; [[ -n "$tag" ]] && disp+=" @${tag:0:7}"
         printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$disp" "$3"
@@ -201,8 +204,8 @@ privacy_scan_stream() {
         grep -n -a -i -F -f "$td/pats" "$td/content" 2>/dev/null | _priv_join > "$td/lhits"
         while IFS=$'\x1f' read -r num path lno tag text; do
             low="${text,,}"
-            [[ -n "${allowline[$num]:-}" ]] && continue
             _priv_path_allowed "$path" "${allow_paths[@]}" && continue
+            marked=""; [[ -n "${allowline[$num]:-}" ]] && marked=" ('kit-privacy: allow' covers warn-level rules only — use kit.toml [privacy] allow_literals / allow_paths)"
             for i in "${!ln[@]}"; do
                 [[ "${act[$i]}" == "off" ]] && continue
                 [[ "$low" == *"${lv[$i],,}"* ]] || continue
@@ -212,9 +215,9 @@ privacy_scan_stream() {
                         said_allowed[${ln[$i]}]=1
                     fi
                 elif [[ "${lt[$i]}" == "public-only" ]]; then
-                    _priv_emit BLOCK "R5 public-only-literal" "public-only literal <${ln[$i]}> in a repo treated as public (kit.toml visibility=${vis:-unset})"
+                    _priv_emit BLOCK "R5 public-only-literal" "public-only literal <${ln[$i]}> in a repo treated as public (kit.toml visibility=${vis:-unset})$marked"
                 else
-                    _priv_emit BLOCK "R4 personal-literal" "personal literal <${ln[$i]}>"
+                    _priv_emit BLOCK "R4 personal-literal" "personal literal <${ln[$i]}>$marked"
                 fi
             done
         done < "$td/lhits"
@@ -243,7 +246,6 @@ privacy_scan_stream() {
                 low="${text,,}"                              # -o: text is the match itself
                 [[ "$low" =~ ${RULE_EXCEPT[$i]} ]] && continue
             fi
-            [[ -n "${allowline[$num]:-}" ]] && continue
             _priv_path_allowed "$path" "${allow_paths[@]}" && continue
             skip=0
             for ex in ${RULE_EXCL[$i]//,/ }; do [[ -n "${hitlines[$ex:$num]:-}" ]] && skip=1; done
@@ -251,6 +253,14 @@ privacy_scan_stream() {
             [[ -n "${hitlines[${RULE_ID[$i]}:$num]:-}" ]] && continue   # same id, another pattern
             hitlines[${RULE_ID[$i]}:$num]=1
             last="$num"
+            if [[ -n "${allowline[$num]:-}" ]]; then
+                if [[ "$action" == WARN ]]; then
+                    _priv_emit WARN "${RULE_ID[$i]} allow-marker" "'kit-privacy: allow' suppressed ${RULE_ID[$i]} ${RULE_TAG[$i]} (logged)"
+                    continue
+                fi
+                _priv_emit "$action" "${RULE_ID[$i]} ${RULE_TAG[$i]}" "${RULE_WHY[$i]} ('kit-privacy: allow' covers warn-level rules only — use kit.toml [privacy] allow_paths)"
+                continue
+            fi
             _priv_emit "$action" "${RULE_ID[$i]} ${RULE_TAG[$i]}" "${RULE_WHY[$i]}"
         done < "$td/rhits"
     done

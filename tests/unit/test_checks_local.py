@@ -141,6 +141,12 @@ class TestLocalChecks(IsolatedTestCase):
         a5 = checks(self.run_local(repo, ctx()), "A5")
         self.assertEqual([(x.path, x.line) for x in a5], [("c.txt", 1)])
 
+    def test_allow_marker_does_not_exempt_a2_literal(self):
+        """Review O9: block-level literals are exempted by kit.toml only, never by the inline marker."""
+        repo = self.make_repo("proj-b", dict(CLEAN_FILES, **{"x.txt": f"id {UID} # kit-privacy: allow\n"}))
+        a2 = checks(self.run_local(repo, ctx()), "A2")
+        self.assertEqual([(x.path, x.line) for x in a2], [("x.txt", 1)])
+
     def test_a4_env_files_follow_the_guard(self):
         """Review F4: .env / .env.<name> are A4, templates and .envrc are not; allow_paths exempts."""
         files = dict(CLEAN_FILES, **{".env.sample": "K=\n", ".envrc": "export A=1\n", ".env.local.example": "K=\n",

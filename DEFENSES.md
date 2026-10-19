@@ -215,9 +215,13 @@ claude 啟動時的環境)。
   被攔的值(字面值以 `<name>` 代稱、使用者名以 `<user>`)。diff 一律 `--text`,
   任何 attributes(repo 內、`.git/info/attributes`、`core.attributesFile`)都不能把
   文字檔標成 binary 來躲;真正含 NUL 的檔案段落才跳過內容規則(含一個 NUL 就整段跳過)。
-- 誤報出口(都在 diff 裡留痕):行尾 `kit-privacy: allow`;`gitleaks:allow` /
+- 誤報出口(都在 diff 裡留痕):行尾 `kit-privacy: allow` **只豁免 warn 級規則**
+  (R3b/R6/R7),每個被用掉的標記都印 `WARN [<rule> allow-marker]` 並寫一行
+  audit.jsonl(action `allow-marker`)——block 級(R3/R4/R5)寫了標記照擋,例外只走
+  kit.toml(review O9);`gitleaks:allow` /
   **已 commit 的** `.gitleaksignore`(未追蹤的不算——指紋 `path:rule:line` 或
-  `commit:path:rule:line`);`kit.toml [privacy] allow_paths`(跳 R3–R7,不跳 R1/R2);
+  `commit:path:rule:line`);`kit.toml [privacy] allow_paths`(跳 R3–R7 與單一 `.env`
+  檔的 R2,不跳 R1 與其他 R2 路徑);
   `allow_literals = ["<name>"]` **以名稱**豁免 R4/R5,寫值不算數(guard 與
   `kit audit` A2/A3 同一套語意)。
 - 失效模式 fail-loud:`config.toml` / `kit_root` / guard 腳本缺 → shim

@@ -58,7 +58,7 @@ The guard runs on every commit and push on the machine, whether a person or an A
 | Local paths and your personal literals from `~/.config/kit/privacy.local.toml` | block |
 | Other home paths, emails, scratch paths | warn |
 
-Your personal literals (names of private projects, cloud ids, emails) live only in `~/.config/kit/privacy.local.toml` (mode 600) and are never printed back. A deliberate exception is a `kit-privacy: allow` comment on the line, or `allow_literals` in `kit.toml` by name. `kit guard status` shows the install state; `kit guard bypass "<reason>"` is a single-use, audited override that only a person at a terminal can run.
+Your personal literals (names of private projects, cloud ids, emails) live only in `~/.config/kit/privacy.local.toml` (mode 600) and are never printed back. A deliberate exception goes in `kit.toml` (`allow_literals` by name, or `allow_paths`); a `kit-privacy: allow` comment on the line only silences warning-level rules (other home paths, emails, scratch paths) and is itself reported and logged. `kit guard status` shows the install state; `kit guard bypass "<reason>"` is a single-use, audited override that only a person at a terminal can run.
 
 `kit audit` scans every repo under your configured root and GitHub settings: leaked history, personal literals in the tree and in history, tracked forbidden paths, README hygiene, workflow pinning, vulnerable lockfiles. It prints a table and exits non-zero on CRITICAL or HIGH findings. Add `--html` for a report and `--baseline <file>` to see only new findings.
 

@@ -104,7 +104,8 @@ def a2_a3(t, ctx):
     seen: dict[tuple, list] = {}
     for line in r.stdout.splitlines():
         m = re.match(r"^(.*?):(\d+):(.*)$", line)
-        if not m or ALLOW_MARK in m.group(3) or _allowed_path(m.group(1), ctx):
+        # literals are block-level: kit.toml allow_literals / allow_paths only, never the inline marker (O9)
+        if not m or _allowed_path(m.group(1), ctx):
             continue
         low = m.group(3).lower()
         for l in active:

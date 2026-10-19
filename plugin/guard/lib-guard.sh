@@ -210,7 +210,7 @@ guard_fix_line() {  # $1 rule id → one fix line
     case "$1" in
         R1) echo "fix: remove the secret (rotate it if it ever left this machine); false positive → 'gitleaks:allow' on the line or a .gitleaksignore entry" ;;
         R2) echo "fix: keep it local — git rm --cached <path> (the kit .gitignore block lists these paths)" ;;
-        R3|R4|R5) echo "fix: remove the value (use \$HOME / env vars / a placeholder); deliberate → 'kit-privacy: allow' on the line, or kit.toml [privacy] allow_paths / allow_literals (by NAME)" ;;
+        R3|R4|R5) echo "fix: remove the value (use \$HOME / env vars / a placeholder); deliberate → kit.toml [privacy] allow_paths / allow_literals (by NAME) — 'kit-privacy: allow' covers warn-level rules only" ;;
         R8) echo "fix: kit doctor --install   (pinned, sha256-verified gitleaks)" ;;
     esac
 }
@@ -232,6 +232,13 @@ guard_finish() {
         shown=$((shown + 1))
         if [[ "$act" == BLOCK ]]; then echo "KIT GUARD BLOCKED [$tag] $where — $why" >&2
         else echo "KIT GUARD WARN [$tag] $where — $why" >&2; fi
+    done
+    # consumed inline allow markers are never silent (review O9): one audit line each
+    local nm=0
+    for f in "${G_FIND[@]}"; do
+        IFS=$'\x1f' read -r act tag where why <<< "$f"
+        [[ "$tag" == *" allow-marker" ]] || continue
+        nm=$((nm + 1)); [[ $nm -le 200 ]] && guard_audit "${tag%% *}" "$where" "allow-marker"
     done
     [[ $nb -eq 0 ]] && return 0
     if guard_bypass_consume; then

@@ -222,8 +222,13 @@ class TestRendered(Rendered):
         self.assertIn("::warning::", r.stdout)
         self.stage(d, "doc.txt", "see /mnt/" + "c/Users/someone/x\n")
         self.assertNotEqual(run().returncode, 0)
+        # review O9: the inline marker covers warnings only; a Windows user path is an error → kit.toml allow_paths
         self.stage(d, "doc.txt", "see /mnt/" + "c/Users/someone/x  # kit-privacy: allow\n")
-        self.assertEqual(run().returncode, 0)
+        self.assertNotEqual(run().returncode, 0)
+        kt = (d / "kit.toml").read_text() + '\n[privacy]\nallow_paths = ["doc.txt"]\n'
+        self.stage(d, "kit.toml", kt)
+        r = run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_ci_privacy_step_passes_on_fresh_project_and_catches_leaks(self):
         d = self.init()
