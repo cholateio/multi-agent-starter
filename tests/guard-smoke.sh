@@ -214,7 +214,9 @@ for h in pre-commit pre-push; do printf '#!/usr/bin/env bash\nexec bash "%s/%s.s
 # PATH without gitleaks (drop any PATH dir that has one) / with the pinned one first
 NOGL_PATH=""; IFS=: read -ra _pp <<< "$PATH"
 for d in "${_pp[@]}"; do [ -x "$d/gitleaks" ] || NOGL_PATH="${NOGL_PATH:+$NOGL_PATH:}$d"; done
-mkdir -p "$W/glbin"; [ -n "$GITLEAKS" ] && ln -sf "$GITLEAKS" "$W/glbin/gitleaks"
+mkdir -p "$W/glbin"
+if [ -n "$GITLEAKS" ]; then ln -sf "$GITLEAKS" "$W/glbin/gitleaks"
+else printf '#!/bin/sh\nexit 0\n' > "$W/glbin/gitleaks"; chmod +x "$W/glbin/gitleaks"; fi   # no real gitleaks: a clean stand-in (R1 assertions SKIP)
 GL_PATH="$W/glbin:$NOGL_PATH"
 AUDIT="$KIT_STATE_HOME/guard/audit.jsonl"
 
@@ -617,6 +619,122 @@ EP="$(cd "$ER" && e2e timeout 60 git push origin main 2>&1)"; EPC=$?
 eq   "E6: push of a tree with a long-tracked PROJECT.toml → blocked" "$EPC" "1"
 has  "E6: [R2] tree-wide" "$EP" "[R2 forbidden-path] PROJECT.toml"
 eq   "E6: …and the remote did not move" "$(git -C "$ER.git" rev-parse main)" "$(git -C "$ER" rev-parse HEAD~1)"
+
+# ============================================================ F. final-review fixes (adversarial review, Phase 4)
+echo "--- F. final-review fixes"
+git config --file "$GIT_CONFIG_GLOBAL" --unset core.hooksPath   # back to the explicit test hooks dir
+# C1: remote-tracking refs are not what a (new / extra) push URL has
+F1="$W/f1"; pushrepo "$F1" none; git -C "$F1" rm -q --cached PROJECT.toml; nc "$F1"
+printf 'p /home/testuser/x\nuid 11111111-2222-3333-4444-555555555555\n' > "$F1/old.txt"; git -C "$F1" add old.txt; nc "$F1"
+git -C "$F1" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null; git -C "$F1" fetch -q origin
+git -C "$F1" rm -q old.txt; nc "$F1"
+rm -rf "$F1.pub.git"; git init -q --bare "$F1.pub.git"; git -C "$F1" remote set-url origin "$F1.pub.git"
+psh "$F1" "" origin main
+eq   "F-C1: after set-url to a new remote, history already on the OLD remote is scanned" "$PC" "1"
+has  "F-C1: …finding the deleted leak" "$PO" "[R3 local-path] old.txt:1"
+eq   "F-C1: …and the new remote stays empty" "$(git -C "$F1.pub.git" rev-parse -q --verify main)" ""
+git -C "$F1" remote set-url origin "$F1.git"
+rm -rf "$F1.pp.git"; git init -q --bare "$F1.pp.git"
+git -C "$F1" remote set-url --add --push origin "$F1.git"; git -C "$F1" remote set-url --add --push origin "$F1.pp.git"
+psh "$F1" "" origin main
+eq   "F-C1: an extra push URL (mirror) gets the full scan" "$PC" "1"
+eq   "F-C1: …and the mirror stays empty" "$(git -C "$F1.pp.git" rev-parse -q --verify main)" ""
+# C2: the caller's config cannot blind the scans
+F2="$W/f2"; newrepo "$F2" none
+printf 'p /home/testuser/x\n' > "$F2/a.txt"; git -C "$F2" add a.txt
+CO="$(cd "$F2" && PATH="$GL_PATH" git -c core.hooksPath="$TH" -c color.ui=always -c color.diff=always -c diff.noprefix=true -c diff.mnemonicPrefix=true -c diff.relative=true commit -q -m t 2>&1)"; CC=$?
+eq   "F-C2: -c color/noprefix/relative do not blind pre-commit" "$CC" "1"
+git -C "$F2" reset -q a.txt
+if [ -n "$GITLEAKS" ]; then
+  printf 'aws_key = "%s"\n' "$FAKE_AWS" > "$F2/k.txt"; git -C "$F2" add k.txt
+  CO="$(cd "$F2" && PATH="$GL_PATH" git -c core.hooksPath="$TH" -c color.ui=always commit -q -m t 2>&1)"; CC=$?
+  eq  "F-C2: color.ui=always does not blind R1 at commit" "$CC" "1"; has "F-C2: …R1" "$CO" "[R1 secret] k.txt:1"
+  git -C "$F2" -c core.hooksPath=/dev/null commit -q -m leak
+  rm -rf "$F2.git"; git init -q --bare "$F2.git"; git -C "$F2" remote add origin "$F2.git"
+  PO="$(cd "$F2" && PATH="$GL_PATH" git -c core.hooksPath="$TH" -c color.ui=always -c log.showRoot=false push -q origin main 2>&1)"; PC=$?
+  eq  "F-C2: color.ui=always + log.showRoot=false do not blind R1 at push" "$PC" "1"; has "F-C2: …R1 on push" "$PO" "[R1 secret] k.txt:1"
+else skip "F-C2: gitleaks under hostile config" "no gitleaks"; fi
+F3="$W/f3"; newrepo "$F3" none noproj; printf 'p /home/testuser/root\n' > "$F3/r.txt"; git -C "$F3" add r.txt; git -C "$F3" -c core.hooksPath=/dev/null commit -q --amend -m root
+rm -rf "$F3.git"; git init -q --bare "$F3.git"; git -C "$F3" remote add origin "$F3.git"
+PO="$(cd "$F3" && PATH="$GL_PATH" git -c core.hooksPath="$TH" -c log.showRoot=false push -q origin main 2>&1)"; PC=$?
+eq   "F-C2: log.showRoot=false does not hide the root commit" "$PC" "1"
+has  "F-C2: …root commit content found" "$PO" "[R3 local-path] r.txt:1"
+# I1: attributes from outside the tree
+F4="$W/f4"; newrepo "$F4" none
+printf '* -diff\n' > "$F4/.git/info/attributes"
+printf 'p /home/testuser/x\n' > "$F4/a.txt"; git -C "$F4" add a.txt; cmt "$F4"
+eq   "F-I1: .git/info/attributes '* -diff' cannot hide text (commit)" "$CC" "1"
+git -C "$F4" -c core.hooksPath=/dev/null commit -q -m leak; rm -rf "$F4.git"; git init -q --bare "$F4.git"; git -C "$F4" remote add origin "$F4.git"
+git -C "$F4" rm -q --cached PROJECT.toml 2>/dev/null; psh "$F4" "" origin main
+eq   "F-I1: …nor on push" "$PC" "1"
+if [ -n "$GITLEAKS" ]; then
+  printf 'aws_key = "%s"\n' "$FAKE_AWS" > "$F4/k.json"; git -C "$F4" add k.json; cmt "$F4"
+  has "F-I1: …nor from gitleaks (R1)" "$CO" "[R1 secret] k.json:1"; git -C "$F4" reset -q k.json
+fi
+rm -f "$F4/.git/info/attributes"; printf '*.json -diff\n' > "$W/gattr"
+git config --file "$GIT_CONFIG_GLOBAL" core.attributesFile "$W/gattr"
+printf '{"p":"/home/testuser/x"}\n' > "$F4/c.json"; git -C "$F4" add c.json; cmt "$F4"
+eq   "F-I1: a global attributes file cannot hide text" "$CC" "1"
+git config --file "$GIT_CONFIG_GLOBAL" --unset core.attributesFile; git -C "$F4" reset -q c.json
+# I2: commit / tag messages, file names, ref names
+F5="$W/f5"; pushrepo "$F5" public; git -C "$F5" rm -q --cached PROJECT.toml; nc "$F5"; git -C "$F5" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null
+echo ok >> "$F5/README.md"; git -C "$F5" add README.md; git -C "$F5" -c core.hooksPath=/dev/null commit -q -m "fix: see /home/testuser/proj/log.txt"
+psh "$F5" "" origin main
+eq   "F-I2: a local path in a commit MESSAGE blocks the push" "$PC" "1"
+has  "F-I2: …reported as the commit message" "$PO" "[R3 local-path] (commit message)"
+git -C "$F5" reset -q --hard origin/main
+echo n > "$F5/notes-proj-a-secret-name.md"; git -C "$F5" add notes-proj-a-secret-name.md; cmt "$F5"
+eq   "F-I2: a literal in a FILE NAME blocks the commit" "$CC" "1"
+has  "F-I2: …reported as a file name" "$CO" "[R5 public-only-literal] (file name)"
+git -C "$F5" reset -q notes-proj-a-secret-name.md; rm -f "$F5/notes-proj-a-secret-name.md"
+psh "$F5" "" origin main:proj-a-secret-name
+eq   "F-I2: a literal in the pushed REF NAME blocks" "$PC" "1"
+git -C "$F5" tag -a v2 -m "built on /home/testuser/box"
+psh "$F5" "" origin v2
+eq   "F-I2: a local path in an annotated TAG message blocks" "$PC" "1"
+git -C "$F5" tag -d v2 >/dev/null
+# I3: .gitleaksignore must be committed to count
+if [ -n "$GITLEAKS" ]; then
+  F6="$W/f6"; newrepo "$F6" none
+  printf 'aws_key = "%s"\n' "$FAKE_AWS" > "$F6/k.txt"; git -C "$F6" add k.txt
+  echo "k.txt:aws-access-token:1" > "$F6/.gitleaksignore"; echo .gitleaksignore >> "$F6/.git/info/exclude"; cmt "$F6"
+  eq  "F-I3: an UNTRACKED .gitleaksignore does not suppress R1" "$CC" "1"
+  git -C "$F6" add -f .gitleaksignore; cmt "$F6"
+  eq  "F-I3: a committed (diff-visible) .gitleaksignore fingerprint is honoured" "$CC" "0"
+else skip "F-I3: .gitleaksignore" "no gitleaks"; fi
+# I4: bypass forgery and PATH-shadowed gitleaks
+F7="$W/f7"; newrepo "$F7" public noproj; mkdir -p "$F7/.claude"; echo x > "$F7/.claude/x"; git -C "$F7" add -f .claude/x
+RID="$(printf '%s' "$F7" | sha1sum | cut -c1-12)"; mkdir -p "$KIT_STATE_HOME/guard"
+printf '{"expires": %s, "reason": "forged"}\n' "$(( $(date +%s) + 300 ))" > "$KIT_STATE_HOME/guard/bypass-$RID"; cmt "$F7"
+eq   "F-I4: a hand-written bypass (no matching bypass-armed audit entry) is rejected" "$CC" "1"
+printf '{"expires": 9999999999, "reason": "forged"}\n' > "$KIT_STATE_HOME/guard/bypass-$RID"; cmt "$F7"
+eq   "F-I4: a bypass expiring beyond 10 minutes is rejected" "$CC" "1"
+BO="$(cd "$F7" && script -qec "$KIT guard bypass 'real one'" /dev/null 2>&1)"; cmt "$F7"
+eq   "F-I4: a bypass armed by kit guard bypass still works" "$CC" "0"
+if [ -n "$GITLEAKS" ]; then
+  mkdir -p "$HOME/.local/bin" "$W/fakegl"; ln -sf "$GITLEAKS" "$HOME/.local/bin/gitleaks"
+  printf '#!/bin/sh\nexit 0\n' > "$W/fakegl/gitleaks"; chmod +x "$W/fakegl/gitleaks"
+  printf 'aws_key = "%s"\n' "$FAKE_AWS" > "$F7/k.txt"; git -C "$F7" add k.txt; cmt "$F7" "$W/fakegl:$NOGL_PATH"
+  eq  "F-I4: the pinned ~/.local/bin/gitleaks wins over a PATH-shadowing fake" "$CC" "1"
+  rm -f "$HOME/.local/bin/gitleaks"; git -C "$F7" reset -q k.txt
+fi
+# I5: many R6 hits stay fast
+F8="$W/f8"; newrepo "$F8" none
+seq 1 8000 | sed 's/.*/user&@corp-mail.test,row &/' > "$F8/emails.csv"; git -C "$F8" add emails.csv
+T0=$(date +%s%N); cmt "$F8"; MS=$(( ($(date +%s%N) - T0) / 1000000 ))
+eq   "F-I5: 8000-line email CSV passes (warn only)" "$CC" "0"
+[ "$MS" -lt 5000 ] && pass "F-I5: …in < 5s (${MS}ms)" || fail "F-I5: 8000 R6 hits < 5s" "${MS}ms"
+# M2: a path with a space keeps the line format
+printf 'p /home/testuser/x\n' > "$F8/a b.txt"; git -C "$F8" add "a b.txt"; cmt "$F8"
+has  "F-M2: path with a space reported as 'a b.txt:1'" "$CO" "[R3 local-path] a b.txt:1 —"
+git -C "$F8" reset -q "a b.txt"
+# M3: privacy.local.toml variants the bash loader must not drop
+cp "$PRIV" "$PRIV.bak"
+printf 'usernames = [\n  "otheruser",\n]\nemails = []\n\n[[ literal ]]\nname = "t-spaced"\nvalue = "zz-spaced-literal"\ntier = "always"\n' > "$PRIV"
+printf 'p /home/otheruser/x\nq zz-spaced-literal\n' > "$F8/m3.txt"; git -C "$F8" add m3.txt; cmt "$F8"
+has  "F-M3: multi-line usernames array is enforced" "$CO" "[R3 local-path] m3.txt:1"
+has  "F-M3: '[[ literal ]]' header is enforced" "$CO" "[R4 personal-literal] m3.txt:2"
+mv "$PRIV.bak" "$PRIV"; git -C "$F8" reset -q m3.txt
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1

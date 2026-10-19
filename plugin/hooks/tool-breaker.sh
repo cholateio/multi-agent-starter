@@ -103,7 +103,7 @@ GP_SEP='(^|[;&|(`[:space:]])'
 GP_GSEP='(^|[;&|(`[:space:]]|/)'
 GP_GLOBAL='([[:space:]]+(-[Cc][[:space:]]+[^[:space:];&|]+|--[A-Za-z][A-Za-z-]*(=[^[:space:];&|]*)?|-[A-Za-z]))*'
 GP_CFG="${GP_GSEP}git${GP_GLOBAL}[[:space:]]+config[[:space:]]([^;&|]*[[:space:]])?"
-GP_ENVV='(HOME|XDG_CONFIG_HOME|KIT_STATE_HOME|GIT_CONFIG_(GLOBAL|COUNT|PARAMETERS))'
+GP_ENVV='(HOME|XDG_CONFIG_HOME|KIT_STATE_HOME|PATH|GIT_CONFIG_(GLOBAL|COUNT|PARAMETERS))'
 GP_GITCP="([^[:space:];&|]*/)?git([[:space:]][^;&|]*)?[[:space:]](commit|push)([[:space:]]|\$)"
 guard_preserve_hit() {  # $1 = flattened text → 0 if it bypasses the guard
     local t="$1"
@@ -114,9 +114,15 @@ guard_preserve_hit() {  # $1 = flattened text → 0 if it bypasses the guard
     # the bypass itself is USER-only (design §7.4): `kit guard bypass`, or
     # forging its state file (<state>/guard/bypass-<repo-id>) by hand
     printf '%s' "$t" | grep -qE "${GP_GSEP}kit[[:space:]]+guard[[:space:]]+bypass([[:space:]]|\$)" && return 0
-    if printf '%s' "$t" | grep -qE 'guard/bypass-'; then   # … written by a redirect / copy-like command
-        printf '%s' "$t" | grep -qE "(>|${GP_GSEP}(cp|mv|ln|tee|install|touch|dd|rsync|sed|python3?|perl)([[:space:]]|\$))" && return 0
+    # … or writing the guard's own files (state: bypass-<id>, audit.jsonl; the
+    # git-hooks shims) or a git config file (it carries core.hooksPath) with a
+    # redirect / copy-like command (final review I4). Reads stay allowed;
+    # `2>/dev/null` is not a write.
+    if printf '%s' "$t" | grep -qE '(kit/guard|kit/git-hooks|guard/bypass-|bypass-[0-9a-f]{6,}|guard/audit\.jsonl|\.gitconfig|\.git/config|/git/config|config\.worktree)'; then
+        printf '%s' "$t" | grep -qE "((^|[^0-9&>])>|${GP_GSEP}(cp|mv|ln|rm|tee|install|touch|dd|rsync|sed|truncate|chmod|perl)([[:space:]]|\$))" && return 0
     fi
+    # git send-pack pushes without running pre-push
+    printf '%s' "$t" | grep -qE "${GP_GSEP}git(${GP_GLOBAL}[[:space:]]+|-)send-pack([[:space:]]|\$)" && return 0
     # KIT_GUARD= as an assignment (prefix, export, env) — a grep for it is fine
     printf '%s' "$t" | grep -qE '(^|[;&|(`])[[:space:]]*((export|env|declare[[:space:]]+-x)[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*KIT_GUARD=' && return 0
     # core.hooksPath WRITES only (reads like `git config --get` stay allowed):
@@ -141,6 +147,13 @@ guard_preserve_cmd_hit() {  # $1 = raw Bash command → 0 if it bypasses the gua
     local flat
     flat=$(printf '%s' "$cmd" | guard_flatten)
     guard_preserve_hit "$flat" && return 0
+    # a pseudo-terminal wrapper (pty.spawn, unbuffer, expect, script, socat)
+    # around `guard … bypass` — kit guard bypass refuses to run without a TTY
+    local bare; bare="$(printf '%s' "$cmd" | tr '\n' ';' | tr -d "\"'\\")"
+    if printf '%s' "$bare" | grep -qE 'guard[^A-Za-z0-9]{1,8}bypass' \
+       && printf '%s' "$bare" | grep -qE '(pty|unbuffer|expect|script|socat|python|perl|ruby|node)'; then
+        return 0
+    fi
     # nested shell code (bash/sh -c, eval, xargs): scan it fully unquoted too
     if printf '%s' "$flat" | grep -qE "${GP_SEP}((bash|sh|zsh|dash|ksh)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*c|eval|xargs|script)([[:space:]]|\$)"; then
         guard_preserve_hit "$(printf '%s' "$cmd" | tr '\n' ';' | tr -d "\"'\\\\")" && return 0

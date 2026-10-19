@@ -69,17 +69,23 @@ privacy_load_local() {
             }
             inlit = 0; name = ""; val = ""; tier = ""
         }
+        function emit_arr(v,   n, arr, i) {
+            n = split(v, arr, SEP)
+            for (i = 1; i <= n; i++) if (arr[i] != "") printf "%s\037%s\n", (akey == "usernames" ? "U" : "E"), arr[i]
+        }
+        function closes(s,   b) { b = s; gsub(/"([^"\\]|\\.)*"|\047[^\047]*\047/, "", b); sub(/#.*/, "", b); return index(b, "]") > 0 }
         { line = $0; sub(/^[ \t]+/, "", line) }
-        line ~ /^\[\[literal\]\]/ { flush(); inlit = 1; nlit++; next }
+        inarr { emit_arr(strings(line)); if (closes(line)) inarr = 0; next }   # multi-line array
+        line ~ /^\[\[[ \t]*literal[ \t]*\]\]/ { flush(); inlit = 1; nlit++; next }
         line ~ /^\[/              { flush(); next }
         match(line, /^[A-Za-z_]+[ \t]*=/) {
             key = substr(line, 1, RLENGTH - 1); sub(/[ \t]+$/, "", key)
             rest = substr(line, RLENGTH + 1)
-            v = strings(rest)
             if (!inlit && (key == "usernames" || key == "emails")) {
-                n = split(v, arr, SEP)
-                for (i = 1; i <= n; i++) if (arr[i] != "") printf "%s\037%s\n", (key == "usernames" ? "U" : "E"), arr[i]
-            } else if (inlit) {
+                akey = key; emit_arr(strings(rest)); if (rest ~ /^[ \t]*\[/ && !closes(rest)) inarr = 1; next
+            }
+            v = strings(rest)
+            if (inlit) {
                 if (key == "name") name = v; else if (key == "value") val = v; else if (key == "tier") tier = v
             }
         }
@@ -182,10 +188,12 @@ privacy_scan_stream() {
             { c = index($0, ":"); n = substr($0, 1, c - 1); x = m[n]; gsub(/\t/, "\037", x)
               print n "\037" x "\037" substr($0, c + 1) }'
     }
-    local -A said_allowed=() hitlines=()
+    local -A said_allowed=() hitlines=() allowline=()
+    # lines carrying `kit-privacy: allow`, once (no per-hit re-read: final review I5)
+    while IFS=: read -r num _; do allowline[$num]=1; done < <(grep -n -a -i -F 'kit-privacy: allow' "$td/content" 2>/dev/null)
     local num path lno tag text low disp
     _priv_emit() {  # $1 action  $2 "Rn tag"  $3 why
-        disp="$path:$lno"; [[ -n "$tag" ]] && disp+=" @$tag"
+        disp="$path:$lno"; [[ -n "$tag" ]] && disp+=" @${tag:0:7}"
         printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$disp" "$3"
         [[ "$1" == "BLOCK" ]] && blocked=1
     }
@@ -193,7 +201,7 @@ privacy_scan_stream() {
         grep -n -a -i -F -f "$td/pats" "$td/content" 2>/dev/null | _priv_join > "$td/lhits"
         while IFS=$'\x1f' read -r num path lno tag text; do
             low="${text,,}"
-            [[ "$low" == *"kit-privacy: allow"* ]] && continue
+            [[ -n "${allowline[$num]:-}" ]] && continue
             _priv_path_allowed "$path" "${allow_paths[@]}" && continue
             for i in "${!ln[@]}"; do
                 [[ "${act[$i]}" == "off" ]] && continue
@@ -232,11 +240,10 @@ privacy_scan_stream() {
         while IFS=$'\x1f' read -r num path lno tag text; do
             [[ "$num" == "$last" ]] && continue
             if [[ -n "${RULE_EXCEPT[$i]}" ]]; then
-                low="${text,,}"
+                low="${text,,}"                              # -o: text is the match itself
                 [[ "$low" =~ ${RULE_EXCEPT[$i]} ]] && continue
-                text="$(sed -n "${num}p" "$td/content")"   # -o gave the match; need the line
             fi
-            [[ "${text,,}" == *"kit-privacy: allow"* ]] && continue
+            [[ -n "${allowline[$num]:-}" ]] && continue
             _priv_path_allowed "$path" "${allow_paths[@]}" && continue
             skip=0
             for ex in ${RULE_EXCL[$i]//,/ }; do [[ -n "${hitlines[$ex:$num]:-}" ]] && skip=1; done

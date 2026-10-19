@@ -1596,6 +1596,21 @@ bgp ""   "commit message naming kit guard bypass allowed"            'git commit
 bgp ""   "grepping the code for guard/bypass- allowed"                "grep -rn 'guard/bypass-' plugin/"
 bgp ""   "reading the guard audit log allowed"                       'tail -n 5 ~/.local/state/kit/guard/audit.jsonl'
 bgp ""   "isolated test run with KIT_STATE_HOME= allowed"            'KIT_STATE_HOME=/tmp/s bash tests/guard-smoke.sh'
+# Phase 4 final review (I4): the next obvious model routes
+bgp deny "git send-pack (skips pre-push) denied"                      'git send-pack ../remote.git main'
+bgp deny "python pty spawning kit guard bypass denied"                "python3 -c 'import pty; pty.spawn([\"kit\",\"guard\",\"bypass\",\"x\"])'"
+bgp deny "unbuffer kit guard bypass denied"                           'unbuffer kit guard bypass x'
+bgp deny "cd into the guard dir then write a bypass file denied"      "cd ~/.local/state/kit/guard && printf '{}' > bypass-0123456789ab"
+bgp deny "writing the guard audit log denied"                         'echo x >> ~/.local/state/kit/guard/audit.jsonl'
+bgp deny "PATH= before git push denied (gitleaks shadowing)"          'PATH=/tmp/fake:$PATH git push origin main'
+bgp deny "removing a kit git-hooks shim denied"                       'rm ~/.config/kit/git-hooks/pre-commit'
+bgp deny "moving a kit git-hooks shim denied"                         'mv ~/.config/kit/git-hooks/pre-push /tmp/x'
+bgp deny "sed -i on ~/.gitconfig denied"                              "sed -i 's/hooksPath/x/' ~/.gitconfig"
+bgp deny "redirect into .git/config denied"                           'printf "[core]\\n" >> .git/config'
+bgp ""   "listing the shims allowed"                                  'ls -l ~/.config/kit/git-hooks'
+bgp ""   "reading ~/.gitconfig allowed"                               'cat ~/.gitconfig'
+bgp ""   "listing the guard dir with 2>/dev/null allowed"             'ls ~/.local/state/kit/guard 2>/dev/null'
+bgp ""   "PATH= for a test runner allowed"                            'PATH=/tmp/bin:$PATH bash tests/guard-smoke.sh'
 
 # ===========================================================================
 # B-scope - guard-preserve runs in EVERY directory (orchestrator ruling

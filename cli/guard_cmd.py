@@ -52,7 +52,8 @@ def _audit(entry: dict) -> None:
     d = guard_dir()
     d.mkdir(parents=True, exist_ok=True)
     with (d / "audit.jsonl").open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        # compact separators: the bash guard matches these fields textually
+        f.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n")
 
 
 def bypass(reason: str | None) -> int:
@@ -76,7 +77,7 @@ def bypass(reason: str | None) -> int:
     p.write_text(json.dumps({"expires": expires, "reason": reason, "repo": key}) + "\n", encoding="utf-8")
     os.chmod(p, 0o600)
     _audit({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "repo": key, "hook": "kit guard",
-            "rule": "", "path": "", "action": "bypass-armed", "reason": reason})
+            "rule": "", "path": "", "action": "bypass-armed", "reason": reason, "expires": expires})
     print(f"kit guard: bypass armed for {key} — the next BLOCKED commit or push there goes through once "
           f"(expires in {BYPASS_SECONDS // 60} min; commit and push each need their own). Logged to {d / 'audit.jsonl'}")
     return 0

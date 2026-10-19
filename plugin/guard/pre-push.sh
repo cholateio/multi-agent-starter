@@ -1,30 +1,50 @@
 #!/usr/bin/env bash
 # plugin/guard/pre-push.sh — kit v5 local guard, push side: the leak boundary (design §7.2).
-# Run by the global git-hooks shim for EVERY repo. stdin: <lref> <lsha> <rref> <rsha> per ref.
+# Run by the global git-hooks shim for EVERY repo. args: <remote> <url>;
+# stdin: <lref> <lsha> <rref> <rsha> per ref.
 #
 #   R2 forbidden paths in the WHOLE pushed tree (catches long-tracked files) and
 #      in every commit of the pushed range (a path added then deleted still
 #      reaches the remote's history)                                   block
-#   R3–R7 privacy rules on the added lines of EVERY commit in the range,
-#      merge resolutions included (remerge diff)                         block/warn
-#   R1 gitleaks over the range; missing / crashed gitleaks → R8 block
+#   R1 + R3–R7 on the added lines of EVERY commit in the range (merge
+#      resolutions via remerge diff), on commit / annotated-tag messages, on
+#      file names added in the range and on the pushed ref names        block/warn
+#   R8 gitleaks missing / crashed                                      block
 #
-# Range = <lsha> minus what THIS remote already has (its remote-tracking refs and
-# the old remote value when known locally). Commits that only exist on another
-# remote are scanned again: a private remote having them says nothing about
-# this one. Deleting a remote ref is never blocked.
+# Range = <lsha> minus what the push URL ACTUALLY has: `git ls-remote <url>`
+# (objects present locally) plus the old remote value. Remote-tracking refs are
+# never trusted (final review C1): after `remote set-url`, with an extra pushurl
+# (mirror) or for a URL that is not a named remote they describe a different
+# repository. When ls-remote fails, the whole history of the pushed refs is
+# scanned (slower, never weaker). Deleting a remote ref is never blocked.
 # kit.toml (visibility, allow_*) is read from the pushed tree — what the remote gets.
+# Every git call pins its output format explicitly (--no-color, prefixes, --root,
+# --text, --format …): the caller's config cannot blind the scan (final review C2).
 set -uo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-guard.sh"
 guard_init pre-push
-REMOTE="${1:-}"
-SRC="${TOP:-$(git rev-parse --absolute-git-dir 2>/dev/null)}"
+REMOTE="${1:-}"; URL="${2:-${1:-}}"
 T_START=$(date +%s)
-TMPD="$(mktemp -d "${TMPDIR:-/tmp}/kit-guard-pp.XXXXXX")"; trap 'rm -rf "$TMPD"' EXIT
+TMPD="$(mktemp -d "${TMPDIR:-/tmp}/kit-guard-pp.XXXXXX")" || { echo "KIT GUARD BLOCKED [R0 guard-error] mktemp failed" >&2; exit 1; }
+trap 'rm -rf "$TMPD"' EXIT
 guard_load_privacy
 
-scanned=0 gl_ok=1
-GLBIN="$(guard_gitleaks_bin)" || gl_ok=0
+# what the remote has: every advertised object that exists locally
+REMOTE_HAS_OK=0
+: > "$TMPD/remote-has"
+if [[ -n "$URL" ]]; then
+    TO=(); command -v timeout >/dev/null 2>&1 && TO=(timeout 30)
+    if GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false \
+       "${TO[@]}" git ls-remote "$URL" > "$TMPD/ls-remote" 2>/dev/null </dev/null; then
+        REMOTE_HAS_OK=1
+        cut -f1 "$TMPD/ls-remote" | sort -u | git cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null \
+            | awk '$2 != "missing" { print "^" $1 }' > "$TMPD/remote-has"
+    fi
+fi
+[[ $REMOTE_HAS_OK -eq 1 ]] || echo "KIT GUARD: could not list the refs at the push URL — scanning the full history of the pushed refs" >&2
+
+LOGFMT=(-c core.quotePath=false log --root --no-color --no-ext-diff --no-textconv --no-relative --no-show-signature)
+scanned=0 gl_missing=0 n=0
 while read -r lref lsha rref rsha; do
     [[ -n "${lref:-}" && -n "${lsha:-}" ]] || continue
     [[ "$lsha" =~ ^0+$ ]] && continue                                # ref deletion
@@ -32,10 +52,10 @@ while read -r lref lsha rref rsha; do
         guard_add BLOCK "R0 guard-error" "$lref" "pushed object is not a commit — the guard cannot scan it"
         continue
     fi
-    scanned=1
-    excl=(--not)
-    [[ -n "$REMOTE" ]] && excl+=("--remotes=$REMOTE")
-    if [[ -n "${rsha:-}" && ! "$rsha" =~ ^0+$ ]] && git cat-file -e "${rsha}^{commit}" 2>/dev/null; then excl+=("$rsha"); fi
+    scanned=1; n=$((n + 1)); D="$TMPD/r$n"; mkdir -p "$D"
+    { printf '%s\n' "$c"; cat "$TMPD/remote-has"
+      if [[ -n "${rsha:-}" && ! "$rsha" =~ ^0+$ ]] && git cat-file -e "${rsha}^{commit}" 2>/dev/null; then printf '^%s\n' "$rsha"; fi
+    } > "$D/revs"
 
     HAS_KIT=0; KT=""
     if KT="$(git show "$c:kit.toml" 2>/dev/null)"; then HAS_KIT=1
@@ -47,29 +67,37 @@ while read -r lref lsha rref rsha; do
     # R2: whole pushed tree, then every path added inside the range
     while IFS= read -r -d '' p; do
         g="$(guard_r2_match "$HAS_KIT" "$p")" && guard_add BLOCK "R2 forbidden-path" "$p" "tracked in the pushed tree — $g is local-only (design §7.2)"
-    done < <(git -c core.quotePath=false ls-tree -r -z --name-only "$c" 2>/dev/null)
+    done < <(git -c core.quotePath=false ls-tree -r -z --name-only --full-tree "$c" 2>/dev/null)
+    : > "$D/names"
     while IFS= read -r -d '' p; do
-        [[ -n "$p" ]] || continue
-        p="${p#$'\n'}"
+        p="${p#$'\n'}"; [[ -n "$p" ]] || continue
+        printf '%s\n' "$p" >> "$D/names"
         g="$(guard_r2_match "$HAS_KIT" "$p")" && guard_add BLOCK "R2 forbidden-path" "$p" "added inside the pushed range (history keeps it) — $g is local-only"
-    done < <(git -c core.quotePath=false log -z --format= --name-only --no-renames --diff-filter=ACMRT "$c" "${excl[@]}" 2>/dev/null)
+    done < <(git "${LOGFMT[@]}" -z --format= --name-only --no-renames --diff-filter=ACMRT --stdin < "$D/revs" 2>/dev/null)
 
-    # R3–R7: added lines of every commit in the range (merges: remerge diff)
-    logargs=(-c core.quotePath=false log -p -U0 -M --no-color --no-ext-diff --no-textconv
-             --src-prefix=a/ --dst-prefix=b/ --format=$'\x01C %H')
-    if GIT_ATTR_SOURCE="$GUARD_EMPTY_TREE" git "${logargs[@]}" --diff-merges=remerge "$c" "${excl[@]}" > "$TMPD/log" 2>"$TMPD/err" \
-       || GIT_ATTR_SOURCE="$GUARD_EMPTY_TREE" git "${logargs[@]}" --diff-merges=first-parent "$c" "${excl[@]}" > "$TMPD/log" 2>"$TMPD/err"; then
-        guard_diff_stream < "$TMPD/log" | privacy_scan_stream push "$VIS" "$ALLOW_LITS" "$ALLOW_PATHS" > "$TMPD/scan"
-        guard_add_scan < "$TMPD/scan"
+    # R1 + R3–R7 over one stream: added lines (merges: remerge diff), messages, names, ref name
+    if GIT_ATTR_SOURCE="$GUARD_EMPTY_TREE" git "${LOGFMT[@]}" -p -U0 -M --text --src-prefix=a/ --dst-prefix=b/ \
+            --format=$'\x01C %H' --diff-merges=remerge --stdin < "$D/revs" > "$D/log" 2>"$D/err" \
+       || GIT_ATTR_SOURCE="$GUARD_EMPTY_TREE" git "${LOGFMT[@]}" -p -U0 -M --text --src-prefix=a/ --dst-prefix=b/ \
+            --format=$'\x01C %H' --diff-merges=first-parent --stdin < "$D/revs" > "$D/log" 2>"$D/err"; then
+        {
+            guard_diff_stream < "$D/log"
+            git "${LOGFMT[@]}" --format=$'\x01C %H%n%B' --no-patch --stdin < "$D/revs" 2>/dev/null \
+                | tr '\000' '\002' | awk '/^\001C / { tag = substr($0, 4); n = 0; next } { print "(commit message)\t" (++n) "\t" tag "\t" $0 }'
+            guard_text_lines "(file name)" "" < "$D/names"
+            printf '%s\n' "${rref:-}" | guard_text_lines "(ref name)" ""
+            if [[ "$(git cat-file -t "$lsha" 2>/dev/null)" == tag ]]; then
+                git cat-file tag "$lsha" 2>/dev/null | awk 'b { print; next } /^$/ { b = 1 }' | guard_text_lines "(tag message)" ""
+            fi
+        } > "$D/stream"
+        git show "$c:.gitleaksignore" > "$D/gitleaksignore" 2>/dev/null || : > "$D/gitleaksignore"
+        guard_scan "$D/stream" push "$VIS" "$ALLOW_LITS" "$ALLOW_PATHS" "$D/gitleaksignore" || gl_missing=1
     else
-        guard_add BLOCK "R0 guard-error" "$lref" "could not read the pushed range: $(head -c 200 "$TMPD/err")"
+        guard_add BLOCK "R0 guard-error" "$lref" "could not read the pushed range: $(head -c 200 "$D/err")"
     fi
-
-    # R1
-    if [[ $gl_ok -eq 1 ]] && ! guard_run_gitleaks git --log-opts="$c ${excl[*]}" "$SRC"; then gl_ok=0; fi
 done
 
-if [[ $scanned -eq 1 && $gl_ok -eq 0 ]]; then
+if [[ $scanned -eq 1 && $gl_missing -eq 1 ]]; then
     guard_add BLOCK "R8 gitleaks-missing" "(push)" "gitleaks required for push (${GL_STATUS:-gitleaks not in PATH}) — secrets cannot be scanned at the leak boundary"
 fi
 T_SPENT=$(( $(date +%s) - T_START ))

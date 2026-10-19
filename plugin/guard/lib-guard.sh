@@ -31,6 +31,9 @@ guard_init() {
     PRIV_FILE="$CFG_DIR/privacy.local.toml"
     GUARD_EMPTY_TREE="$(git hash-object -t tree /dev/null 2>/dev/null)"
     G_FIND=(); G_WARNED_PRIV=0
+    # caller env that could reshape what the guard reads (final review C2):
+    # git's own output is pinned by explicit flags on every git call below
+    unset GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GREP_OPTIONS GREP_COLOR GREP_COLORS
 }
 
 # R2 forbidden paths (design §7.2; same groups as kit audit A4). Without
@@ -56,34 +59,53 @@ guard_r2_match() {  # $1 has_kit (0/1)  $2 repo-relative path
     esac
 }
 
-guard_gitleaks_bin() {
+guard_gitleaks_bin() {  # the pinned install (kit doctor --install) wins over PATH (final review I4)
     local g
-    g="$(command -v gitleaks 2>/dev/null)" && { echo "$g"; return 0; }
     [[ -x "${HOME:-/nonexistent}/.local/bin/gitleaks" ]] && { echo "$HOME/.local/bin/gitleaks"; return 0; }
+    g="$(command -v gitleaks 2>/dev/null)" && { echo "$g"; return 0; }
     return 1
 }
 
-# guard_run_gitleaks <mode-args...>: runs gitleaks with the kit config, adds R1
-# findings. Return 0 = scanned, 2 = missing / crashed (caller applies R8).
-guard_run_gitleaks() {
-    local gl rep rc
+# guard_gitleaks_stream <stream-file> <gitleaksignore-file|"">
+# R1 over the guard's OWN hardened added-line stream via `gitleaks stdin`
+# (final review C2/I1/M1): no second `git diff` / `git log` that the caller's
+# config (color.ui=always, log.showRoot=false, …) or attributes (-diff in
+# .git/info/attributes / core.attributesFile) could blind; merge resolutions
+# included. Each hit maps back to path:line[@commit] through the stream.
+# .gitleaksignore: only the COMMITTED one counts (index / pushed tree), matched
+# as `path:rule:line` or `commit:path:rule:line` — an untracked file is ignored.
+# Return 0 = scanned, 2 = gitleaks missing / crashed (caller applies R8).
+guard_gitleaks_stream() {
+    local stream="$1" ign="${2:-}" gl rc td
     gl="$(guard_gitleaks_bin)" || { GL_STATUS="gitleaks not in PATH"; return 2; }
-    rep="$(mktemp "${TMPDIR:-/tmp}/kit-guard-gl.XXXXXX")"
-    "$gl" "$@" --config "$GUARD_DIR/gitleaks.toml" --no-banner --redact --log-level error \
-        --exit-code 7 --report-format json --report-path "$rep" >/dev/null 2>&1
+    td="$(mktemp -d "${TMPDIR:-/tmp}/kit-guard-gl.XXXXXX")" || { GL_STATUS="mktemp failed"; return 2; }
+    mkdir -p "$td/noignore"
+    awk -v M="$td/meta" -v C="$td/content" '{
+        p1 = index($0, "\t"); r1 = substr($0, p1 + 1); p2 = index(r1, "\t"); r2 = substr(r1, p2 + 1); p3 = index(r2, "\t")
+        if (!p1 || !p2 || !p3) next
+        print substr($0, 1, p1 - 1) "\t" substr(r1, 1, p2 - 1) "\t" substr(r2, 1, p3 - 1) > M
+        print substr(r2, p3 + 1) > C }' "$stream"
+    : >> "$td/content"; : >> "$td/meta"
+    "$gl" stdin --config "$GUARD_DIR/gitleaks.toml" --gitleaks-ignore-path "$td/noignore" --no-banner --redact \
+        --log-level error --exit-code 7 --report-format json --report-path "$td/rep" < "$td/content" >/dev/null 2>&1
     rc=$?
-    if [[ $rc -eq 0 ]]; then rm -f "$rep"; return 0; fi
-    if [[ $rc -ne 7 ]]; then rm -f "$rep"; GL_STATUS="gitleaks failed (exit $rc)"; return 2; fi
-    local file line rule commit n=0
-    if command -v jq >/dev/null 2>&1; then
-        while IFS=$'\x1f' read -r file line rule commit; do
-            n=$((n + 1))
-            local where="$file:$line"; [[ -n "$commit" ]] && where+=" @${commit:0:7}"
-            guard_add BLOCK "R1 secret" "$where" "gitleaks rule $rule (value redacted)"
-        done < <(jq -r '.[] | [.File, (.StartLine|tostring), .RuleID, (.Commit // "")] | join("\u001f")' "$rep" 2>/dev/null)
+    if [[ $rc -ne 0 && $rc -ne 7 ]]; then rm -rf "$td"; GL_STATUS="gitleaks failed (exit $rc)"; return 2; fi
+    if [[ $rc -eq 7 ]]; then
+        local n=0 line rule path lno tag where
+        if command -v jq >/dev/null 2>&1; then
+            while IFS=$'\x1f' read -r line rule; do
+                IFS=$'\t' read -r path lno tag <<< "$(sed -n "${line}p" "$td/meta")"
+                n=$((n + 1))
+                if [[ -n "$ign" && -s "$ign" ]] && grep -qxF -e "$path:$rule:$lno" -e "$tag:$path:$rule:$lno" "$ign" 2>/dev/null; then
+                    continue
+                fi
+                where="$path:$lno"; [[ -n "$tag" ]] && where+=" @${tag:0:7}"
+                guard_add BLOCK "R1 secret" "$where" "gitleaks rule $rule (value redacted)"
+            done < <(jq -r '.[] | [(.StartLine|tostring), .RuleID] | join("\u001f")' "$td/rep" 2>/dev/null)
+        fi
+        [[ $n -gt 0 ]] || guard_add BLOCK "R1 secret" "(see gitleaks)" "gitleaks reported a secret (report unreadable)"
     fi
-    [[ $n -gt 0 ]] || guard_add BLOCK "R1 secret" "(see gitleaks)" "gitleaks reported a secret (report unreadable)"
-    rm -f "$rep"
+    rm -rf "$td"
     return 0
 }
 
@@ -122,7 +144,7 @@ guard_audit() {  # <rule> <path> <action> [reason]
 # bypass (design §7.4): ~/.local/state/kit/guard/bypass-<repo-id> = {"expires": epoch, "reason": "..."}
 # consumed by the first BLOCKED run of either hook; expired files are removed.
 guard_bypass_consume() {
-    local f="$STATE_DIR/guard/bypass-$REPO_ID" exp reason now
+    local f="$STATE_DIR/guard/bypass-$REPO_ID" exp reason now armed
     [[ -f "$f" ]] || return 1
     exp="$(sed -nE 's/.*"expires"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' "$f" | head -n 1)"
     if command -v jq >/dev/null 2>&1; then reason="$(jq -r '.reason // ""' "$f" 2>/dev/null)"
@@ -131,6 +153,15 @@ guard_bypass_consume() {
     rm -f "$f"
     if [[ -z "$exp" || "$exp" -le "$now" ]]; then
         echo "KIT GUARD: expired bypass for this repo removed (bypasses last 10 minutes)" >&2
+        return 1
+    fi
+    # final review I4: only `kit guard bypass` arms a bypass — it never sets an
+    # expiry beyond 10 minutes and always logs a matching bypass-armed entry
+    armed="$(tail -n 500 "$STATE_DIR/guard/audit.jsonl" 2>/dev/null | grep -F '"action":"bypass-armed"' \
+             | grep -F "\"repo\":$(_guard_json_str "$REPO_LABEL")" | grep -F "\"expires\":$exp" | tail -n 1)"
+    if [[ "$exp" -gt $((now + 610)) || -z "$armed" ]]; then
+        echo "KIT GUARD: bypass file rejected — not armed by 'kit guard bypass' (no matching audit entry or expiry beyond 10 min)" >&2
+        guard_audit "bypass" "" "bypass-rejected" "$reason"
         return 1
     fi
     BYPASS_REASON="$reason"
@@ -192,15 +223,36 @@ guard_load_privacy() {
     fi
 }
 
-# added-line stream from a unified diff (-U0, a/ b/ prefixes) on stdin →
-# path<TAB>lineno<TAB>tag<TAB>content. Commit markers "\x01C <sha>" set the tag.
+# added-line stream from a unified diff (-U0, -a, a/ b/ prefixes) on stdin →
+# path<TAB>lineno<TAB>tag<TAB>content. Commit markers "\x01C <sha>" set the tag
+# (full sha). The diff is produced with --text so attributes cannot hide a file;
+# a file section whose lines carry a NUL byte is binary and dropped (design:
+# binaries skip the content rules) — NULs are mapped to \002 first so every awk
+# sees them. git appends a TAB to "+++ b/<path>" when the path has a space.
 guard_diff_stream() {
-    awk '
-        /^\001C / { tag = substr($0, 4, 7); inh = 0; next }
-        /^diff --git / { inh = 0; path = ""; next }
-        !inh && /^\+\+\+ / { p = substr($0, 5); if (p == "/dev/null") path = ""; else {
-                              if (p ~ /^"/) { p = substr(p, 2, length(p) - 2) } sub(/^b\//, "", p); path = p }; next }
-        /^@@/ { inh = 1; s = $0; sub(/^@@ -[0-9,]+ \+/, "", s); split(s, a, /[ ,]/); ln = a[1] + 0; next }
-        inh && /^\+/ { if (path != "") print path "\t" ln "\t" tag "\t" substr($0, 2); ln++; next }
-        inh && /^[ ]/ { ln++; next }'
+    tr '\000' '\002' | awk '
+        function flush() { if (!bin) for (i = 1; i <= nb; i++) print buf[i]; nb = 0; bin = 0 }
+        /^\001C / { flush(); tag = substr($0, 4); inh = 0; next }
+        /^diff --git / { flush(); inh = 0; path = ""; next }
+        !inh && /^\+\+\+ / { p = substr($0, 5); sub(/\t$/, "", p)
+                              if (p == "/dev/null") path = ""; else {
+                              if (p ~ /^".*"$/) p = substr(p, 2, length(p) - 2); sub(/^b\//, "", p); path = p }; next }
+        /^@@/ { inh = 1; s = $0; sub(/^@@@* -[0-9,]+ (-[0-9,]+ )*\+/, "", s); split(s, a, /[ ,]/); ln = a[1] + 0; next }
+        inh && /^\+/ { if (path != "" && !bin) { if (index($0, "\002")) { bin = 1; nb = 0 } else buf[++nb] = path "\t" ln "\t" tag "\t" substr($0, 2) }; ln++; next }
+        inh && /^-/ { if (index($0, "\002")) { bin = 1; nb = 0 }; next }
+        inh && /^[ ]/ { ln++; next }
+        END { flush() }'
+}
+
+# guard_text_lines <pseudo-path> <tag>: stdin text → stream lines (messages, names)
+guard_text_lines() {
+    tr '\000' '\002' | awk -v P="$1" -v T="$2" '{ print P "\t" NR "\t" T "\t" $0 }'
+}
+
+# guard_scan <stream-file> <mode> <vis> <allow_lits> <allow_paths> <gitleaksignore-file|"">
+# privacy rules + R1 over one stream; return 2 when gitleaks is missing / crashed
+guard_scan() {
+    privacy_scan_stream "$2" "$3" "$4" "$5" < "$1" > "$1.scan"
+    guard_add_scan < "$1.scan"
+    guard_gitleaks_stream "$1" "${6:-}"
 }
