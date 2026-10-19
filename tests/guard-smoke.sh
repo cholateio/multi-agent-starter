@@ -833,6 +833,27 @@ has  "G-O9: …R3" "$CO" "[R3 local-path] b.txt:1"
 printf 'kit = 5\nvisibility = "public"\n\n[privacy]\nallow_paths = ["b.txt"]\n' > "$G7/kit.toml"; git -C "$G7" add kit.toml b.txt; cmt "$G7"
 eq   "G-O9: the kit.toml allow_paths route still works for block-level rules" "$CC" "0"
 
+# F8: per-rule cap keeps a pathological warn-only file fast; ls-remote cannot stall a push
+G8="$W/g8"; newrepo "$G8" none noproj
+seq 1 200000 | sed 's/.*/user&@corp-mail.test,row &/' > "$G8/big.csv"; git -C "$G8" add big.csv
+T0=$(date +%s%N); cmt "$G8"; MS=$(( ($(date +%s%N) - T0) / 1000000 ))
+eq   "G-F8: 200k-line email CSV commits (warn only)" "$CC" "0"
+[ "$MS" -lt 6000 ] && pass "G-F8: …in < 6s (${MS}ms)" || fail "G-F8: 200k R6 hits < 6s" "${MS}ms"
+has  "G-F8: …the rest is counted, not listed" "$CO" "more line(s)"
+printf 'p '"$HP"'/testuser/a\n%.0s' $(seq 1 120) > "$G8/many.txt"; git -C "$G8" add many.txt; cmt "$G8"
+eq   "G-F8: capped block-level rule still blocks" "$CC" "1"
+git -C "$G8" reset -q many.txt; git -C "$G8" reset -q big.csv
+mkdir -p "$W/slowssh"; printf '#!/bin/sh\nsleep 30\n' > "$W/slowssh/ssh"; chmod +x "$W/slowssh/ssh"
+G9="$W/g9"; newrepo "$G9" none noproj
+SHA="$(git -C "$G9" rev-parse HEAD)"
+T0=$(date +%s%N)
+PO="$(cd "$G9" && printf 'refs/heads/main %s refs/heads/main %s\n' "$SHA" 0000000000000000000000000000000000000000 \
+      | PATH="$GL_PATH" GIT_SSH_COMMAND="$W/slowssh/ssh" bash "$GUARD/pre-push.sh" origin ssh://kit.invalid/x.git 2>&1)"; PC=$?
+MS=$(( ($(date +%s%N) - T0) / 1000000 ))
+[ "$MS" -lt 9000 ] && pass "G-F8: unreachable push URL gives up quickly (${MS}ms)" || fail "G-F8: ls-remote timeout" "${MS}ms"
+has  "G-F8: …and says it falls back to a full-history scan" "$PO" "scanning the full history"
+eq   "G-F8: …clean history still passes" "$PC" "0"
+
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1

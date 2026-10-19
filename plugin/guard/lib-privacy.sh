@@ -29,6 +29,9 @@
 # kit audit A2/A3 treats them.
 
 PRIV_MIN_LEN=4
+# findings listed per rule id (and for all literal hits together); the rest is counted
+# in one "(+N more line(s))" line — a 200k-line warn-only file stays fast (review F8)
+PRIV_HIT_CAP=50
 _PRIV_GUARD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---------------------------------------------------------------- local literals
@@ -200,9 +203,16 @@ privacy_scan_stream() {
         printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$disp" "$3"
         [[ "$1" == "BLOCK" ]] && blocked=1
     }
+    local -A nemit=() over=() ovact=() ovtag=()
+    local tot seen
     if [[ -s "$td/pats" ]]; then
         grep -n -a -i -F -f "$td/pats" "$td/content" 2>/dev/null | _priv_join > "$td/lhits"
+        tot=$(wc -l < "$td/lhits"); seen=0
         while IFS=$'\x1f' read -r num path lno tag text; do
+            seen=$((seen + 1))
+            if [[ ${nemit[lit]:-0} -ge $PRIV_HIT_CAP ]]; then
+                over[lit]=$((tot - seen + 1)); ovact[lit]=BLOCK; ovtag[lit]="R4 personal-literal"; break
+            fi
             low="${text,,}"
             _priv_path_allowed "$path" "${allow_paths[@]}" && continue
             marked=""; [[ -n "${allowline[$num]:-}" ]] && marked=" ('kit-privacy: allow' covers warn-level rules only — use kit.toml [privacy] allow_literals / allow_paths)"
@@ -216,8 +226,10 @@ privacy_scan_stream() {
                     fi
                 elif [[ "${lt[$i]}" == "public-only" ]]; then
                     _priv_emit BLOCK "R5 public-only-literal" "public-only literal <${ln[$i]}> in a repo treated as public (kit.toml visibility=${vis:-unset})$marked"
+                    nemit[lit]=$(( ${nemit[lit]:-0} + 1 ))
                 else
                     _priv_emit BLOCK "R4 personal-literal" "personal literal <${ln[$i]}>$marked"
+                    nemit[lit]=$(( ${nemit[lit]:-0} + 1 ))
                 fi
             done
         done < "$td/lhits"
@@ -226,7 +238,7 @@ privacy_scan_stream() {
     # shipped regex rules
     _priv_load_rules
     local users; users="$(_priv_users_alt)"
-    local pat flags ex skip last action
+    local pat flags ex skip last action id
     for i in "${!RULE_ID[@]}"; do
         pat="${RULE_PAT[$i]}"
         if [[ "$pat" == *__USER__* ]]; then
@@ -239,12 +251,19 @@ privacy_scan_stream() {
         action="WARN"; [[ "${RULE_ACT[$i]}" == "block" ]] && action="BLOCK"
         # shellcheck disable=SC2086
         grep $flags -e "$pat" "$td/content" 2>/dev/null | _priv_join > "$td/rhits"
+        if [[ -n "${RULE_EXCEPT[$i]}" ]]; then   # -o: text is the match itself; drop excepted ones in one pass
+            KIT_EX="${RULE_EXCEPT[$i]}" awk -F '\037' 'tolower($NF) !~ ENVIRON["KIT_EX"]' "$td/rhits" > "$td/rhits.x" && mv "$td/rhits.x" "$td/rhits"
+        fi
+        id="${RULE_ID[$i]}"; tot=$(wc -l < "$td/rhits"); seen=0
+        if [[ ${nemit[$id]:-0} -ge $PRIV_HIT_CAP ]]; then
+            over[$id]=$(( ${over[$id]:-0} + tot )); continue
+        fi
         last=""
         while IFS=$'\x1f' read -r num path lno tag text; do
+            seen=$((seen + 1))
             [[ "$num" == "$last" ]] && continue
-            if [[ -n "${RULE_EXCEPT[$i]}" ]]; then
-                low="${text,,}"                              # -o: text is the match itself
-                [[ "$low" =~ ${RULE_EXCEPT[$i]} ]] && continue
+            if [[ ${nemit[$id]:-0} -ge $PRIV_HIT_CAP ]]; then
+                over[$id]=$(( ${over[$id]:-0} + tot - seen + 1 )); ovact[$id]="$action"; ovtag[$id]="$id ${RULE_TAG[$i]}"; break
             fi
             _priv_path_allowed "$path" "${allow_paths[@]}" && continue
             skip=0
@@ -253,6 +272,7 @@ privacy_scan_stream() {
             [[ -n "${hitlines[${RULE_ID[$i]}:$num]:-}" ]] && continue   # same id, another pattern
             hitlines[${RULE_ID[$i]}:$num]=1
             last="$num"
+            nemit[$id]=$(( ${nemit[$id]:-0} + 1 ))
             if [[ -n "${allowline[$num]:-}" ]]; then
                 if [[ "$action" == WARN ]]; then
                     _priv_emit WARN "${RULE_ID[$i]} allow-marker" "'kit-privacy: allow' suppressed ${RULE_ID[$i]} ${RULE_TAG[$i]} (logged)"
@@ -263,6 +283,11 @@ privacy_scan_stream() {
             fi
             _priv_emit "$action" "${RULE_ID[$i]} ${RULE_TAG[$i]}" "${RULE_WHY[$i]}"
         done < "$td/rhits"
+    done
+    for id in "${!over[@]}"; do
+        [[ ${over[$id]} -gt 0 && -n "${ovact[$id]:-}" ]] || continue
+        printf '%s\t%s\t%s\t%s\n' "${ovact[$id]}" "${ovtag[$id]}" "(+${over[$id]} more line(s))" \
+            "not listed one by one (first $PRIV_HIT_CAP shown per rule)"
     done
     rm -rf "$td"
     unset -f _priv_join _priv_emit

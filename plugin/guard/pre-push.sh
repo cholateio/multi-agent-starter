@@ -34,16 +34,25 @@ guard_load_privacy
 # what the remote has: every advertised object that exists locally
 REMOTE_HAS_OK=0
 : > "$TMPD/remote-has"
+# short, non-interactive (review F8): 5 s cap, no credential / passphrase prompt (ssh
+# BatchMode, appended to the user's own ssh command); on failure the full history is
+# scanned instead — slower, never weaker
+LS_TIMEOUT="${KIT_GUARD_LS_REMOTE_TIMEOUT:-5}"
 if [[ -n "$URL" ]]; then
-    TO=(); command -v timeout >/dev/null 2>&1 && TO=(timeout 30)
-    if GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false \
+    TO=(); command -v timeout >/dev/null 2>&1 && TO=(timeout -k 2 "$LS_TIMEOUT")
+    SSHC=()
+    if [[ -z "${GIT_SSH:-}" ]]; then
+        sc="${GIT_SSH_COMMAND:-$(git config --get core.sshCommand 2>/dev/null)}"
+        SSHC=(GIT_SSH_COMMAND="${sc:-ssh} -o BatchMode=yes -o ConnectTimeout=$LS_TIMEOUT")
+    fi
+    if env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false "${SSHC[@]}" \
        "${TO[@]}" git ls-remote "$URL" > "$TMPD/ls-remote" 2>/dev/null </dev/null; then
         REMOTE_HAS_OK=1
         cut -f1 "$TMPD/ls-remote" | sort -u | git cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null \
             | awk '$2 != "missing" { print "^" $1 }' > "$TMPD/remote-has"
     fi
 fi
-[[ $REMOTE_HAS_OK -eq 1 ]] || echo "KIT GUARD: could not list the refs at the push URL — scanning the full history of the pushed refs" >&2
+[[ $REMOTE_HAS_OK -eq 1 ]] || echo "KIT GUARD: could not list the refs at the push URL within ${LS_TIMEOUT}s (offline, or it needs a password / passphrase prompt) — scanning the full history of the pushed refs instead" >&2
 
 LOGFMT=(-c core.quotePath=false log --root --no-color --no-ext-diff --no-textconv --no-relative --no-show-signature)
 scanned=0 gl_missing=0 n=0

@@ -224,15 +224,16 @@ guard_finish() {
         IFS=$'\x1f' read -r act tag where why <<< "$f"
         [[ "$act" == BLOCK ]] && { nb=$((nb + 1)); rules[${tag%% *}]=1; }
     done
+    local hidden=0
     for f in "${G_FIND[@]}"; do
         IFS=$'\x1f' read -r act tag where why <<< "$f"
-        if [[ $shown -ge $GUARD_SHOW_MAX ]]; then
-            echo "KIT GUARD: … and $((total - shown)) more finding(s)" >&2; break
-        fi
+        # "(+N more line(s))" summaries of the per-rule cap are always shown
+        if [[ $shown -ge $GUARD_SHOW_MAX && "$where" != "(+"* ]]; then hidden=$((hidden + 1)); continue; fi
         shown=$((shown + 1))
         if [[ "$act" == BLOCK ]]; then echo "KIT GUARD BLOCKED [$tag] $where — $why" >&2
         else echo "KIT GUARD WARN [$tag] $where — $why" >&2; fi
     done
+    [[ $hidden -gt 0 ]] && echo "KIT GUARD: … and $hidden more finding(s)" >&2
     # consumed inline allow markers are never silent (review O9): one audit line each
     local nm=0
     for f in "${G_FIND[@]}"; do
