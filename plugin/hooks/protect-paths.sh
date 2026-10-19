@@ -4,27 +4,30 @@
 #
 # Deterministic no-touch-zone enforcement. Intercepts file-modification
 # tool calls that target:
-#   1. kit-owned harness files (.claude/{rules,hooks,scripts,agents,skills,
-#      docs}, settings.json, kit-version) — escalated to the USER via
-#      permissionDecision "ask": the model may not modify the harness that
-#      governs it on its own (.claude/rules/kit-evolution.md), but a present
-#      user can approve a legitimate edit (update-config flows, permission
-#      tweaks) with one click. Unattended sessions have nobody to approve —
-#      "ask" degrades to a block there, which is exactly the intent. This
-#      default set is SKIPPED inside the kit repo itself (detected by
-#      init.sh + VERSION + templates/ at the root AND no .claude/kit-version
-#      — deployed projects always have kit-version, the kit repo never
-#      does), where editing those files is the whole point.
-#      .claude/protected-paths is deliberately NOT in this set: it is
-#      project-owned and the workflow (CLAUDE.md constraints sync) requires
-#      the model to ADD entries; kit-evolution.md forbids weakening it and
-#      deletions show up in git diff — procedural + audit, not a hard wall.
-#   2. project-declared no-touch zones: .claude/protected-paths, one glob
-#      per line (# comments and blank lines ignored). Patterns match
-#      repo-relative paths; `*` crosses `/` (bash [[ == ]] semantics), so
-#      `src/legacy/*` covers the whole subtree. Target paths are
-#      dot-segment-normalized first — `src/./x` and `src/../.claude/x`
-#      cannot slip past the patterns.
+#   1. kit-owned files (v5): anything under the kit plugin root
+#      ($CLAUDE_PLUGIN_ROOT, plus this hook's own plugin dir as a fallback)
+#      or the kit's machine config (~/.config/kit, and $KIT_CONFIG_HOME when
+#      set: config.toml, privacy.local.toml, git-hooks shims) — escalated
+#      to the USER via permissionDecision "ask": the model may not modify
+#      the harness that governs it on its own (kit-evolution rules), but a
+#      present user can approve a legitimate edit with one click.
+#      Unattended sessions have nobody to approve — "ask" degrades to a
+#      block there, which is exactly the intent. A target that is ALSO
+#      inside the project is exempt: when the kit repo itself is the
+#      project, the plugin lives in it and editing it is the whole point.
+#      (v4's "kit repo = init.sh + VERSION + templates/" detection is gone:
+#      projects no longer carry kit files under .claude/.)
+#      kit.toml is deliberately NOT kit-owned: it is project-owned and the
+#      workflow requires the model to ADD protected entries; loosening it
+#      is caught by the Stop gate (kit.toml is a sensitive path there).
+#   2. project-declared no-touch zones: kit.toml `protected = [...]`, one
+#      quoted glob per line (lib.sh kit_toml_protected; a malformed array
+#      fails OPEN to "no zones" with a stderr diagnosis — kit doctor flags
+#      it). Patterns match repo-relative paths; `*` crosses `/` (bash
+#      [[ == ]] semantics), so `src/legacy/*` covers the whole subtree; a
+#      trailing slash means the subtree. Target paths are
+#      dot-segment-normalized first — `src/./x` and `src/../x` cannot slip
+#      past the patterns.
 #
 # Escape hatch (user-only): launch the session with KIT_PROTECT=off.
 # A model cannot flip this for the running session — hooks inherit the env
@@ -95,33 +98,32 @@ ask() {  # $1 = reason — escalate to the user (kit-owned harness files)
     exit 0
 }
 
-# --- 1. kit-owned harness files (skipped inside the kit repo itself) ---
-IS_KIT_REPO=0
-if [[ -f "$PROJ/init.sh" && -f "$PROJ/VERSION" && -d "$PROJ/templates" && ! -f "$PROJ/.claude/kit-version" ]]; then
-    IS_KIT_REPO=1
-fi
-if [[ "$IS_KIT_REPO" -eq 0 ]]; then
-    case "$REL" in
-        .claude/rules/*|.claude/hooks/*|.claude/scripts/*|.claude/agents/*|.claude/skills/*|.claude/docs/*|.claude/settings.json|.claude/kit-version)
-            ask "kit protect-paths: '$REL' is a kit-owned harness file — the model may not modify the harness that governs it on its own (see .claude/rules/kit-evolution.md). USER: approve ONLY if you explicitly asked for this exact change (e.g. a settings/permissions tweak); otherwise deny and route the change through the kit repo + 'init.sh --update'. Unattended sessions: this stays blocked, as intended."
-            ;;
-    esac
-fi
-
-# --- 2. project-declared no-touch zones ---
-LIST="$PROJ/.claude/protected-paths"
-if [[ -f "$LIST" ]]; then
-    while IFS= read -r pat; do
-        pat="${pat%%#*}"                     # strip trailing comments
-        pat="${pat#"${pat%%[![:space:]]*}"}" # ltrim
-        pat="${pat%"${pat##*[![:space:]]}"}" # rtrim
-        [[ -z "$pat" ]] && continue
-        [[ "$pat" == */ ]] && pat="${pat}*"  # dir/ means the whole subtree
-        # shellcheck disable=SC2053  # unquoted RHS is the point: glob match
-        if [[ "$REL" == $pat ]]; then
-            deny "BLOCKED (kit protect-paths): '$REL' matches protected pattern '$pat' in .claude/protected-paths — a project no-touch zone (see CLAUDE.md 'Project-specific constraints'). Do NOT route around this via Bash; the tool log is audited and that counts as a violation. If this change is genuinely required, STOP and ask the user (judgment-matrix R3.1)."
+# --- 1. kit-owned files: plugin root / kit machine config, outside the project ---
+in_dir() {  # $1 = normalized abs path  $2 = dir (may be empty) -> 0 if $1 is under $2
+    [[ -n "$2" ]] || return 1
+    local d; d="$(norm_path "$2")"
+    [[ "$d" != "/" && "$1" == "$d"/* ]]
+}
+case "$ABS" in
+    "$PROJ"/*) ;;   # inside the project (e.g. the kit repo developing its own plugin)
+    *)
+        SELF_PLUGIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
+        if in_dir "$ABS" "${CLAUDE_PLUGIN_ROOT:-}" || in_dir "$ABS" "$SELF_PLUGIN" \
+           || in_dir "$ABS" "${KIT_CONFIG_HOME:-}" || in_dir "$ABS" "${HOME:+$HOME/.config/kit}"; then
+            ask "kit protect-paths: '$ABS' is a kit-owned file (kit plugin or ~/.config/kit) — the model may not modify the harness that governs it on its own (kit-evolution rules). USER: approve ONLY if you explicitly asked for this exact change; otherwise deny — edit it in the kit repo, then /reload-plugins. Unattended sessions: this stays blocked, as intended."
         fi
-    done < "$LIST"
-fi
+        ;;
+esac
+
+# --- 2. project-declared no-touch zones (kit.toml [protected]) ---
+PROTECTED="$(kit_toml_protected "$PROJ")"   # rc 2 = malformed: fail open, lib.sh diagnosed on stderr
+while IFS= read -r pat; do
+    [[ -z "$pat" ]] && continue
+    [[ "$pat" == */ ]] && pat="${pat}*"  # dir/ means the whole subtree
+    # shellcheck disable=SC2053  # unquoted RHS is the point: glob match
+    if [[ "$REL" == $pat ]]; then
+        deny "BLOCKED (kit protect-paths): '$REL' matches protected pattern '$pat' in kit.toml [protected] — a project no-touch zone (see AGENTS.md 'Constraints'). Do NOT route around this via Bash; the tool log is audited and that counts as a violation. If this change is genuinely required, STOP and ask the user (/kit:judgment R3.1)."
+    fi
+done <<< "$PROTECTED"
 
 exit 0

@@ -166,7 +166,7 @@ act_json() {
   case "$1" in
     session-start.sh) printf '{"session_id":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"startup"}' "$3" "$2" ;;
     classify-task.sh) printf '{"session_id":"%s","cwd":"%s","hook_event_name":"UserPromptSubmit","prompt":"hello there"}' "$3" "$2" ;;
-    protect-paths.sh) printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"%s/.claude/settings.json"}}' "$3" "$2" "$2" ;;
+    protect-paths.sh) printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"%s/hooks/lib.sh"}}' "$3" "$2" "$KIT_ROOT/plugin" ;;
     tool-breaker.sh)  printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"pytest -q | tail && git commit -m x"}}' "$3" "$2" ;;
     verify-final-review.sh) printf '{"session_id":"%s","cwd":"%s","hook_event_name":"Stop","stop_hook_active":false}' "$3" "$2" ;;
   esac
@@ -1092,13 +1092,12 @@ DR_CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // "
 assert_not_contains "h3: no reminder without a defer file" "$DR_CTX" "deferred unreviewed batch"
 
 # ===========================================================================
-# H4 - protect-paths.sh (v4.0 no-touch-zone enforcement)
+# H4 - protect-paths.sh (v4.0 no-touch-zone enforcement; v5: kit.toml
+# [protected] is the zone list, kit-owned = plugin root / ~/.config/kit)
 # ===========================================================================
 PP="$HOOKS/protect-paths.sh"
 R4="$WORK/h4-repo"
 make_repo "$R4"
-# the hook matches paths, it never stats targets — only .claude/ (for the
-# protected-paths list written below) needs to actually exist
 mkdir -p "$R4/.claude"
 
 pp_json() {  # $1 = file_path value  [$2 = tool_input key, default file_path]
@@ -1109,41 +1108,72 @@ pp_json() {  # $1 = file_path value  [$2 = tool_input key, default file_path]
 pp_decision() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision // ""' 2>/dev/null; }
 pp_reason()   { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null; }
 
-# kit-owned defaults (fixture is NOT a kit repo -> default set active).
-# kit-owned files escalate to the USER ("ask"): approvable when present,
-# effectively blocked unattended — NOT a hard deny (that's for user zones).
-run_hook "$PP" "$(pp_json "$R4/.claude/rules/kit-workflow.md")"
-assert_eq "h4: kit-owned rules file escalates to ask" "$(pp_decision)" "ask"
-assert_contains "h4: kit-owned ask cites kit-evolution" "$(pp_reason)" "kit-evolution"
+# v5: the project's .claude/ holds no kit files any more — nothing there is
+# kit-owned; kit.toml is project-owned (the model ADDS protected entries;
+# loosening is caught by the Stop gate's sensitive-path floor, not here)
 run_hook "$PP" "$(pp_json "$R4/.claude/settings.json")"
-assert_eq "h4: settings.json escalates to ask (harness wiring)" "$(pp_decision)" "ask"
-run_hook "$PP" "$(pp_json "$R4/.claude/scripts/helper.sh")"
-assert_eq "h4: scripts dir escalates to ask (kit-owned)" "$(pp_decision)" "ask"
-# protected-paths is PROJECT-owned: the workflow tells the model to ADD
-# entries (CLAUDE.md constraints sync), so it must NOT be hard-denied
-run_hook "$PP" "$(pp_json "$R4/.claude/protected-paths")"
-assert_eq "h4: protected-paths list itself editable (project-owned)" "$OUT" ""
+assert_eq "h4: project .claude/settings.json not kit-owned in v5" "$OUT" ""
+run_hook "$PP" "$(pp_json "$R4/kit.toml")"
+assert_eq "h4: kit.toml itself editable (project-owned)" "$OUT" ""
 run_hook "$PP" "$(pp_json "$R4/src/ok.py")"
 assert_eq "h4: normal file allowed" "$OUT" ""
-# dot-segment smuggling must not slip past normalization
-run_hook "$PP" "$(pp_json "$R4/src/../.claude/settings.json")"
-assert_eq "h4: dot-dot smuggling to kit file still caught" "$(pp_decision)" "ask"
 
-# user-declared zones: trailing-slash subtree, glob, comments, blanks
-cat > "$R4/.claude/protected-paths" <<'EOF'
-# no-touch zones (smoke fixture)
-src/legacy/
+# P-v5-5: kit-owned = files under the plugin root, when the plugin is NOT
+# inside the project (run_hook exports CLAUDE_PLUGIN_ROOT=<kit>/plugin)
+run_hook "$PP" "$(pp_json "$KIT_ROOT/plugin/hooks/lib.sh")"
+assert_eq "p-v5-5: plugin-root file escalates to ask" "$(pp_decision)" "ask"
+assert_contains "p-v5-5: ask routes edits through the kit repo" "$(pp_reason)" "/reload-plugins"
+assert_not_contains "p-v5-5: ask no longer mentions init.sh" "$(pp_reason)" "init.sh"
+run_hook "$PP" "$(pp_json "$KIT_ROOT/plugin/skills/../rules/kit-workflow.md")"
+assert_eq "p-v5-5: dot-dot smuggling into the plugin root still caught" "$(pp_decision)" "ask"
+run_hook "$PP" "$(pp_json "$KIT_ROOT/plugin/hooks/lib.sh")" full CLAUDE_PLUGIN_ROOT=
+assert_eq "p-v5-5: unset CLAUDE_PLUGIN_ROOT falls back to the hook's own plugin dir" "$(pp_decision)" "ask"
+# P-v5-6: plugin inside the project (developing the kit itself) -> allowed
+mkdir -p "$R4/plugin/hooks"
+run_hook "$PP" "$(pp_json "$R4/plugin/hooks/lib.sh")" full CLAUDE_PLUGIN_ROOT="$R4/plugin"
+assert_eq "p-v5-6: plugin inside the project is editable (kit repo dev)" "$OUT" ""
+# P-v5-7: ~/.config/kit (privacy.local.toml, config.toml) is kit-owned
+run_hook "$PP" "$(pp_json "$FAKE_HOME/.config/kit/privacy.local.toml")"
+assert_eq "p-v5-7: ~/.config/kit/privacy.local.toml escalates to ask" "$(pp_decision)" "ask"
+run_hook "$PP" "$(pp_json "$WORK/kcfg/config.toml")" full KIT_CONFIG_HOME="$WORK/kcfg"
+assert_eq "p-v5-7: KIT_CONFIG_HOME location escalates to ask" "$(pp_decision)" "ask"
+run_hook "$PP" "$(pp_json "$FAKE_HOME/.config/kit/config.toml")" full KIT_CONFIG_HOME="$WORK/kcfg"
+assert_eq "p-v5-7: ~/.config/kit stays kit-owned even with KIT_CONFIG_HOME set" "$(pp_decision)" "ask"
+run_hook "$PP" "$(pp_json "$FAKE_HOME/.config/kitchen/x.toml")"
+assert_eq "p-v5-7: sibling dir sharing the prefix is not kit-owned" "$OUT" ""
 
-*.secret
+# P-v5-2: a leftover v4 .claude/protected-paths is no longer read
+echo "src/legacy/" > "$R4/.claude/protected-paths"
+run_hook "$PP" "$(pp_json "$R4/src/legacy/deep/pay.py")"
+assert_eq "p-v5-2: v4 .claude/protected-paths ignored (kit.toml has no entries)" "$OUT" ""
+rm -f "$R4/.claude/protected-paths"
+
+# P-v5-1/3: user-declared zones in kit.toml: trailing-slash subtree, glob,
+# full-line comments and blanks inside the array
+cat > "$R4/kit.toml" <<'EOF'
+kit = 5
+visibility = "public"
+protected = [              # header-line comment is fine
+  # no-touch zones (smoke fixture)
+  "src/legacy/",
+
+  "*.secret",
+  "vendor/lib/*",
+]
 EOF
+run_hook "$PP" "$(pp_json "$R4/vendor/lib/x.py")"
+assert_eq "p-v5-1: kit.toml protected glob denies" "$(pp_decision)" "deny"
+assert_contains "p-v5-1: deny names kit.toml [protected]" "$(pp_reason)" "kit.toml [protected]"
 run_hook "$PP" "$(pp_json "$R4/src/legacy/deep/pay.py")"
 assert_eq "h4: trailing-slash pattern covers subtree" "$(pp_decision)" "deny"
 run_hook "$PP" "$(pp_json "$R4/src/./legacy/./deep/pay.py")"
 assert_eq "h4: single-dot segments normalized before match" "$(pp_decision)" "deny"
+run_hook "$PP" "$(pp_json "$R4/src/x/../legacy/a.py")"
+assert_eq "h4: dot-dot smuggling into a zone still caught" "$(pp_decision)" "deny"
 assert_contains "h4: user-zone deny names the pattern" "$(pp_reason)" "src/legacy/"
 assert_contains "h4: user-zone deny routes to the user" "$(pp_reason)" "ask the user"
 run_hook "$PP" "$(pp_json "$R4/config.secret")"
-assert_eq "h4: glob pattern matches" "$(pp_decision)" "deny"
+assert_eq "p-v5-3: glob after a blank + comment line matches" "$(pp_decision)" "deny"
 run_hook "$PP" "$(pp_json "$R4/src/ok.py")"
 assert_eq "h4: unlisted file still allowed with list present" "$OUT" ""
 run_hook "$PP" "$(pp_json "src/legacy/x.py")"
@@ -1158,17 +1188,21 @@ assert_eq "h4: notebook_path field covered" "$(pp_decision)" "deny"
 run_hook "$PP" "$(pp_json "$R4/src/legacy/deep/pay.py")" full KIT_PROTECT=off
 assert_eq "h4: KIT_PROTECT=off disables enforcement" "$OUT" ""
 
-# kit repo detection: default set off, user list still enforced; a deployed
-# project (has .claude/kit-version) is NEVER treated as the kit repo even if
-# it happens to ship init.sh/VERSION/templates of its own
-touch "$R4/init.sh" "$R4/VERSION"
-mkdir -p "$R4/templates"
-run_hook "$PP" "$(pp_json "$R4/.claude/rules/kit-workflow.md")"
-assert_eq "h4: kit repo may edit kit-owned files" "$OUT" ""
+# P-v5-4: an inline comment on an entry line breaks the D7 contract -> the
+# hook fails OPEN (no protected paths, never crashes) and says why on
+# stderr; kit doctor flags the file
+cat > "$R4/kit.toml" <<'EOF'
+kit = 5
+protected = [
+  "src/legacy/",  # inline comment: not allowed
+]
+EOF
 run_hook "$PP" "$(pp_json "$R4/src/legacy/deep/pay.py")"
-assert_eq "h4: user zones still enforced inside kit repo" "$(pp_decision)" "deny"
-# (v5) a .claude/kit-version now makes every hook yield (section A, act-2)
-rm -f "$R4/init.sh" "$R4/VERSION"; rmdir "$R4/templates"
+assert_eq "p-v5-4: inline comment -> fail open (allow)" "$OUT|$CODE" "|0"
+assert_contains "p-v5-4: inline comment diagnosed on stderr" "$ERR" "kit.toml protected: inline comment"
+run_hook "$PP" "$(pp_json "$KIT_ROOT/plugin/hooks/lib.sh")"
+assert_eq "p-v5-4: malformed protected does not disable the kit-owned ask" "$(pp_decision)" "ask"
+kit_toml_fixture "$R4"
 
 # malformed / empty input -> silent allow
 run_hook "$PP" "{}"
