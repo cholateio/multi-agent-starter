@@ -910,6 +910,69 @@ PO="$(cd "$W" && cd "$H1" && PATH="$NOGL_PATH" git -c core.hooksPath="$TH" push 
 has  "H-R3-1: a RELATIVE gitleaks_path is ignored (R8)" "$PO" "[R8 gitleaks-missing]"
 grep -v '^gitleaks_path' "$KIT_CONFIG_HOME/config.toml" > "$W/c.new"; mv "$W/c.new" "$KIT_CONFIG_HOME/config.toml"
 
+# R3-2: removing kit.toml by NOT having it — (a) an orphan branch whose history never had it
+# (Fable N1), (b) a force-push of unrelated kit-less history over a remote tip that is not
+# present locally (Codex) — must not switch R2 off
+H2="$W/h2"; pushrepo "$H2" public; git -C "$H2" rm -q --cached PROJECT.toml; rm -f "$H2/PROJECT.toml"; nc "$H2"
+git -C "$H2" -c core.hooksPath=/dev/null push -q origin main 2>/dev/null
+git -C "$H2" checkout -q --orphan dump; git -C "$H2" rm -r -q --cached .; rm -f "$H2/kit.toml"
+mkdir -p "$H2/.claude"; echo '{}' > "$H2/.claude/settings.local.json"; printf 'status = "x"\n' > "$H2/PROJECT.toml"
+git -C "$H2" add -f .claude/settings.local.json PROJECT.toml; cmt "$H2"
+eq   "H-R3-2a: orphan-branch commit of .claude/ + PROJECT.toml in a kit repo → blocked" "$CC" "1"
+has  "H-R3-2a: …R2 (kit status from the local branch tips)" "$CO" "[R2 forbidden-path] .claude/settings.local.json"
+nc "$H2" dump
+psh "$H2" "" origin dump
+eq   "H-R3-2a: orphan-branch dump push → blocked" "$PC" "1"
+has  "H-R3-2a: …R2 on PROJECT.toml" "$PO" "[R2 forbidden-path] PROJECT.toml"
+eq   "H-R3-2a: …remote has no dump branch" "$(git -C "$H2.git" rev-parse -q --verify refs/heads/dump)" ""
+git -C "$H2" checkout -q -f main; git -C "$H2" branch -q -D dump
+git -C "$H2" checkout -q --orphan gh-pages; git -C "$H2" rm -r -q --cached .; rm -f "$H2/kit.toml"
+echo '<p>site</p>' > "$H2/index.html"; git -C "$H2" add index.html; cmt "$H2"
+eq   "H-R3-2: legit orphan gh-pages commit in a kit repo passes" "$CC" "0"
+psh "$H2" "" origin gh-pages
+eq   "H-R3-2: …and pushes" "$PC" "0"
+git -C "$H2" checkout -q -f main
+# (b) a fresh clone-less repo force-pushes kit-less history over the remote's unfetched kit tip
+H3="$W/h3"; rm -rf "$H3"; git init -q "$H3"; git -C "$H3" remote add origin "$H2.git"
+mkdir -p "$H3/.claude"; echo '{}' > "$H3/.claude/settings.local.json"; printf 'status = "x"\n' > "$H3/PROJECT.toml"
+git -C "$H3" add -f .claude PROJECT.toml; nc "$H3" unrelated
+psh "$H3" "" -f origin main
+eq   "H-R3-2b: force-push of kit-less history over an UNFETCHED kit remote tip → blocked" "$PC" "1"
+has  "H-R3-2b: …as a kit.toml removal" "$PO" "BLOCKED [R2 kit.toml-removed]"
+has  "H-R3-2b: …and R2 runs" "$PO" "[R2 forbidden-path] .claude/settings.local.json"
+eq   "H-R3-2b: …remote main unchanged" "$(git -C "$H2.git" rev-parse main)" "$(git -C "$H2" rev-parse main)"
+eq   "H-R3-2b: …no temporary refs left behind" "$(git -C "$H3" for-each-ref refs/kit-guard/)" ""
+psh "$H3" "" origin main:refs/heads/side
+eq   "H-R3-2b: new branch of kit-less history to a kit remote (unfetched HEAD) → blocked" "$PC" "1"
+has  "H-R3-2b: …R2" "$PO" "[R2 forbidden-path] PROJECT.toml"
+# fail closed: an advertised tip that cannot be fetched
+H4="$W/h4"; rm -rf "$H4" "$H4.git"; git init -q --bare "$H4.git"; git init -q "$H4"; echo a > "$H4/a"; git -C "$H4" add a; nc "$H4"
+git -C "$H4" -c core.hooksPath=/dev/null push -q "$H4.git" main 2>/dev/null
+H5="$W/h5"; rm -rf "$H5"; git init -q "$H5"; git -C "$H5" remote add origin "$H4.git"; echo b > "$H5/b"; git -C "$H5" add b; nc "$H5"
+# the remote lists its refs but serves no objects (upload-pack's pack step fails); push still works
+git config --file "$GIT_CONFIG_GLOBAL" uploadpack.packObjectsHook false
+psh "$H5" "" -f origin main
+git config --file "$GIT_CONFIG_GLOBAL" --unset uploadpack.packObjectsHook
+eq   "H-R3-2c: an advertised remote tip that cannot be inspected → blocked (fail closed)" "$PC" "1"
+has  "H-R3-2c: …says why" "$PO" "[R2 kit-status-unknown]"
+eq   "H-R3-2c: …remote unchanged" "$(git -C "$H4.git" rev-parse main)" "$(git -C "$H4" rev-parse main)"
+# legit pushes that must still pass
+H6="$W/h6"; pushrepo "$H6" none noproj; git -C "$H6" -c core.hooksPath=/dev/null push -q origin main:refs/heads/other 2>/dev/null
+H7="$W/h7"; rm -rf "$H7"; git init -q "$H7"; git -C "$H7" remote add origin "$H6.git"; echo c > "$H7/c"; git -C "$H7" add c; nc "$H7"
+psh "$H7" "" origin main:refs/heads/fresh
+eq   "H-R3-2: a non-kit repo pushing next to unfetched NON-kit remote branches passes" "$PC" "0"
+eq   "H-R3-2: …no temporary refs left behind" "$(git -C "$H7" for-each-ref refs/kit-guard/)" ""
+psh "$H7" "" -f origin main
+eq   "H-R3-2: force-push in a repo that never had kit.toml passes" "$PC" "0"
+echo more >> "$H2/README.md"; git -C "$H2" add README.md; nc "$H2"; git -C "$H2" checkout -q -b feat2
+psh "$H2" "" origin feat2
+eq   "H-R3-2: new branch in a kit repo passes" "$PC" "0"
+git -C "$H2" commit -q --amend -m amended --no-verify
+psh "$H2" "" -f origin feat2
+eq   "H-R3-2: force-push in a kit repo passes" "$PC" "0"
+rm -rf "$W/h8"; git init -q "$W/h8"; echo n > "$W/h8/n"; git -C "$W/h8" add n; cmt "$W/h8"
+eq   "H-R3-2: first commit in a brand-new non-kit repo passes" "$CC" "0"
+
 echo
 echo "passed $PASS_COUNT, failed $FAIL_COUNT, skipped $SKIP_COUNT"
 [ "$FAIL_COUNT" -eq 0 ] || exit 1

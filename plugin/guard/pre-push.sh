@@ -19,7 +19,11 @@
 # scanned (slower, never weaker). Deleting a remote ref is never blocked.
 # kit.toml (visibility, allow_*) is read from the pushed tree — what the remote gets.
 # A tip WITHOUT kit.toml whose remote old tip / range boundary / range history had one
-# is still a kit push, and the removal is a BLOCK (user bypass only).
+# is still a kit push, and the removal is a BLOCK (user bypass only). A tip without
+# kit.toml is also a kit push when any local branch tip or any advertised remote
+# HEAD / branch / tag has kit.toml (review R3-2: orphan branches, unrelated history);
+# advertised objects missing locally are fetched first (temporary refs, deleted after),
+# and one that cannot be fetched fails closed (BLOCK, user bypass only).
 # Every git call pins its output format explicitly (--no-color, prefixes, --root,
 # --text, --format …): the caller's config cannot blind the scan (final review C2).
 set -uo pipefail
@@ -68,14 +72,31 @@ while read -r lref lsha rref rsha; do
       if [[ -n "${rsha:-}" && ! "$rsha" =~ ^0+$ ]] && git cat-file -e "${rsha}^{commit}" 2>/dev/null; then printf '^%s\n' "$rsha"; fi
     } > "$D/revs"
 
-    HAS_KIT=0; KT=""
+    HAS_KIT=0; KT=""; REMOVED=0
     if KT="$(git show "$c:kit.toml" 2>/dev/null)"; then HAS_KIT=1
-    elif KT="$(guard_kit_toml_before "$D/revs" "${rsha:-}")"; then
-        # the remote's old tip or the pushed history had kit.toml and the tip drops it:
-        # still a kit repo, and the removal itself needs the user's bypass (review O5)
-        HAS_KIT=1
-        guard_add BLOCK "R2 kit.toml-removed" "kit.toml" "the pushed tip drops kit.toml that the remote / the pushed history had — that would switch the local-only path rule (R2) off; if intended, the user runs kit guard bypass"
-    elif [[ -n "$TOP" && -f "$TOP/kit.toml" ]]; then HAS_KIT=1; KT=""; fi
+    else
+        # the tip has no kit.toml: is this still a kit push? (review O5, R3-2)
+        if KT="$(guard_kit_toml_before "$D/revs" "${rsha:-}")"; then REMOVED=1
+        else
+            # objects the remote advertises but this clone never fetched (a force-push over
+            # an unseen tip, a new branch next to an unseen default branch): fetch them once
+            if [[ $REMOTE_HAS_OK -eq 1 && -z "${ADV_FETCHED:-}" ]]; then
+                ADV_FETCHED=1; guard_fetch_advertised "$URL" "$TMPD/ls-remote"
+            fi
+            if KT="$(guard_kit_toml_before "$D/revs" "${rsha:-}")"; then REMOVED=1
+            elif KT="$(guard_kit_toml_elsewhere "$( [[ $REMOTE_HAS_OK -eq 1 ]] && echo "$TMPD/ls-remote")")"; then HAS_KIT=1
+            elif [[ -n "${ADV_MISSING:-}" ]]; then
+                HAS_KIT=1; KT=""      # fail closed: R2 applies, and the push needs the user
+                guard_add BLOCK "R2 kit-status-unknown" "$lref" "the pushed tip has no kit.toml and the remote's ${ADV_MISSING} could not be fetched to check whether this is a kit repo — git fetch the remote and push again; if intended, the user runs kit guard bypass"
+            elif [[ -n "$TOP" && -f "$TOP/kit.toml" ]]; then HAS_KIT=1; KT=""; fi
+        fi
+        if [[ $REMOVED -eq 1 ]]; then
+            # the remote's old tip or the pushed history had kit.toml and the tip drops it:
+            # still a kit repo, and the removal itself needs the user's bypass (review O5)
+            HAS_KIT=1
+            guard_add BLOCK "R2 kit.toml-removed" "kit.toml" "the pushed tip drops kit.toml that the remote / the pushed history had — that would switch the local-only path rule (R2) off; if intended, the user runs kit guard bypass"
+        fi
+    fi
     VIS="$(printf '%s\n' "$KT" | privacy_kt_visibility)"
     ALLOW_LITS="$(printf '%s\n' "$KT" | privacy_kt_privacy_array allow_literals)"
     ALLOW_PATHS="$(printf '%s\n' "$KT" | privacy_kt_privacy_array allow_paths)"

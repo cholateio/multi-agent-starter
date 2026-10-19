@@ -99,6 +99,59 @@ guard_kit_toml_before() {
     return 1
 }
 
+# guard_kit_toml_first: stdin = commit-ish ids (one per line) → print the kit.toml of the
+# first one that carries it; rc 1 when none does. One git process (batch-check).
+guard_kit_toml_first() {
+    local blob
+    blob="$(sed '/^$/d; s/$/:kit.toml/' | git cat-file --batch-check='%(objecttype) %(objectname)' 2>/dev/null \
+            | awk '$1 == "blob" { print $2; exit }')"
+    [[ -n "$blob" ]] && git cat-file blob "$blob" 2>/dev/null
+}
+
+# guard_kit_toml_elsewhere [<ls-remote file>]: the kit.toml of any local branch tip or of
+# any advertised HEAD / refs/heads/* / refs/tags/* object present locally (review R3-2:
+# an orphan branch or unrelated history pushed from a kit repo / to a kit remote is a
+# kit push even though nothing in its own history ever had kit.toml)
+guard_kit_toml_elsewhere() {
+    { git for-each-ref --format='%(objectname)' refs/heads/ 2>/dev/null
+      if [[ -n "${1:-}" && -s "$1" ]]; then guard_adv_refs "$1" | cut -f1; fi
+    } | guard_kit_toml_first
+}
+
+# guard_adv_refs <ls-remote file> → "<sha>\t<ref>" for HEAD, refs/heads/*, refs/tags/*
+# (peeled ^{} lines dropped; refs/pull/* and other review namespaces are not the repo's)
+guard_adv_refs() {
+    awk -F'\t' '$2 == "HEAD" || ($2 ~ /^refs\/(heads|tags)\// && $2 !~ /\^\{\}$/) { print $1 "\t" $2 }' "$1"
+}
+
+# guard_fetch_advertised <url> <ls-remote file>: fetch every advertised HEAD / branch / tag
+# whose object is not present locally into a temporary namespace (refs/kit-guard/tmp/<pid>/),
+# then delete those refs — the objects stay, so a later push does not fetch them again.
+# Sets ADV_MISSING = advertised refs still not inspectable afterwards ("" = all present).
+guard_fetch_advertised() {
+    local url="$1" lsr="$2" sha ref i=0 ns="refs/kit-guard/tmp/$$"
+    local -a specs=() TO=() SSHC=()
+    ADV_MISSING=""
+    while IFS=$'\t' read -r sha ref; do
+        git cat-file -e "$sha" 2>/dev/null && continue
+        i=$((i + 1)); specs+=("+$ref:$ns/$i")
+    done < <(guard_adv_refs "$lsr")
+    [[ ${#specs[@]} -gt 0 ]] || return 0
+    command -v timeout >/dev/null 2>&1 && TO=(timeout -k 2 "${KIT_GUARD_FETCH_TIMEOUT:-30}")
+    if [[ -z "${GIT_SSH:-}" ]]; then
+        local sc="${GIT_SSH_COMMAND:-$(git config --get core.sshCommand 2>/dev/null)}"
+        SSHC=(GIT_SSH_COMMAND="${sc:-ssh} -o BatchMode=yes -o ConnectTimeout=${LS_TIMEOUT:-5}")
+    fi
+    env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false "${SSHC[@]}" "${TO[@]}" \
+        git -c gc.auto=0 -c maintenance.auto=false -c fetch.writeCommitGraph=false fetch -q --no-tags \
+        --no-write-fetch-head --no-recurse-submodules "$url" "${specs[@]}" </dev/null >/dev/null 2>&1
+    git for-each-ref --format='delete %(refname)' "$ns/" 2>/dev/null | git update-ref --stdin 2>/dev/null
+    while IFS=$'\t' read -r sha ref; do
+        git cat-file -e "$sha" 2>/dev/null || ADV_MISSING+="${ADV_MISSING:+, }$ref"
+    done < <(guard_adv_refs "$lsr")
+    return 0
+}
+
 guard_gitleaks_bin() {  # config.toml tools_dir (default ~/.local/bin) or recorded gitleaks_path — never PATH (I4, O3, R3-1)
     kit_tool_path gitleaks "$CFG_DIR"
 }

@@ -8,7 +8,8 @@
 #
 # Deletions always pass (`git rm --cached PROJECT.toml` is the fix, not a leak).
 # kit.toml is read from the index (what is being committed), else HEAD (a commit that
-# drops it is still a kit commit, with a warning), else the work tree.
+# drops it is still a kit commit, with a warning), else the work tree, else any local
+# branch tip (an orphan / unborn branch of a kit repo is still a kit repo; review R3-2).
 # Binary files (NUL bytes) skip the content rules; no .gitattributes (in-tree,
 # .git/info, core.attributesFile) can mark text as binary to hide it (--text).
 # R1 runs gitleaks over the same hardened stream (lib-guard guard_scan).
@@ -22,7 +23,9 @@ elif KT="$(git show HEAD:kit.toml 2>/dev/null)"; then
     # this commit drops kit.toml: it is still a kit repo for THIS commit (review O5)
     HAS_KIT=1
     guard_add WARN "R2 kit.toml-removed" "kit.toml" "this commit removes kit.toml — R2 still applies here, and the push will be BLOCKED unless the user runs kit guard bypass"
-elif [[ -n "$TOP" && -f "$TOP/kit.toml" ]]; then KT="$(cat "$TOP/kit.toml")"; HAS_KIT=1; fi
+elif [[ -n "$TOP" && -f "$TOP/kit.toml" ]]; then KT="$(cat "$TOP/kit.toml")"; HAS_KIT=1
+elif KT="$(guard_kit_toml_elsewhere)"; then HAS_KIT=1   # unborn / orphan branch of a kit repo (review R3-2)
+fi
 VIS=""; ALLOW_LITS=""; ALLOW_PATHS=""
 if [[ $HAS_KIT -eq 1 ]]; then
     VIS="$(printf '%s\n' "$KT" | privacy_kt_visibility)"
