@@ -1,6 +1,6 @@
 {
   "name": "kit",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "multi-agent kit: workflow rules, Stop-gate review, protect-paths, tool breaker",
   "author": { "name": "multi-agent-kit" }
 }
