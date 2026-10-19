@@ -205,11 +205,20 @@ claude 啟動時的環境)。
 
 - 推送範圍 = 本地 sha 減去**推送目標實際已有**的 commit(`git ls-remote <url>` +
   舊值);remote-tracking refs **不採信**(`remote set-url`、多個 pushurl 鏡像、
-  直接推 URL 時它們描述的是別的 repo);ls-remote 失敗就掃推送 ref 的完整歷史。
+  直接推 URL 時它們描述的是別的 repo)。ls-remote 先試 5 秒、失敗再以 15 秒重試一次(v5.0.1);
+  仍失敗時,既有 ref 照樣以舊值(`^rsha`)為界;**新 ref**(零 rsha)沒有界,照樣掃它的完整歷史
+  (不弱化),但掃出的 block 全部收成**一行** `[R0 remote-unreachable] <ref>`——列出各規則的筆數、
+  說明多半是遠端早就有的歷史、原因(離線 / 慢線路、有密碼的 ssh key 沒 agent——hook 用 BatchMode
+  不能跳提示、帳密提示)與解法(`ssh-add` 或恢復連線後再推,guard 就只掃新的部分);**吃 user
+  bypass**(內容都掃過,bypass 等於舊的「整段歷史全 bypass」)。以前這裡是把遠端早有的
+  `.claude/`、PROJECT.toml、本機路徑逐條當成新增 block。完整歷史乾淨時照常放行。
   merge 的衝突解法用 remerge diff 掃。ref 刪除永遠放行。
   **遠端已前進、本地沒 fetch**(v5.0.1):push 傳進來的舊值(非零 rsha)本地沒有——別人或排程
   workflow 在上次 fetch 之後推過——那個 ref **不掃**,只出一行 `[R0 fetch-first]` block:
-  `git fetch` 後 rebase / merge 再推;刻意覆蓋(force push)也先 fetch,guard 才算得出範圍。
+  訊息印一條**照抄就抓得到那個 tip** 的指令 `git fetch <remote> <遠端 ref>`(remote 的 fetch URL
+  不是這次的 push URL——另設 pushurl、多個 push URL、直接推 URL——時改印 push URL 本身,去掉其中的
+  密碼;一律帶 ref:`--single-branch` clone、縮窄的 fetch refspec 用單純的 `git fetch <remote>` 抓不到),
+  然後 `git rebase FETCH_HEAD`(或 merge)再推;刻意覆蓋(force push)也先跑同一條 fetch,guard 才算得出範圍。
   以前這裡會退回掃整段歷史,把遠端早就有的舊 `.claude/`、PROJECT.toml、本機路徑全部當成「這次
   新增」再報一次。這個 block **不吃 bypass**(已 arm 的 bypass 不消耗、留著):放行就等於送出沒掃過的內容。
 - 每個 git 呼叫都明確釘住輸出格式(`--no-color`、前綴、`--root`、`--text`、
@@ -252,7 +261,8 @@ claude 啟動時的環境)。
 - 速度(Phase 4 實測):小 diff pre-commit 中位數 52ms 不含 gitleaks、270ms 含(final-review 修正後重測);
   7-commit push 320ms 含 gitleaks;8,000 行 email CSV(8k 個 R6 warn)< 1s;每條規則只列前 50 筆、
   其餘計數成一行,20 萬行 email CSV 約 1.3s(review F8)。push 時 `git ls-remote` 上限 5 秒、
-  ssh BatchMode、不跳密碼提示;失敗就說原因並改掃完整歷史。
+  失敗再重試一次 15 秒(最壞多等約 20 秒;`KIT_GUARD_LS_REMOTE_TIMEOUT` /
+  `KIT_GUARD_LS_REMOTE_RETRY_TIMEOUT` 可調)、ssh BatchMode、不跳密碼提示;仍失敗就說原因,處理見上。
 - **本機專屬檔案(review F3)**:migrate 後 PROJECT.toml / LESSONS / plans / `.claude/` 已不追蹤,
   但遷移前的每個 commit 仍追蹤它們——`git checkout <舊 ref>` 會蓋掉、切回來會刪掉。git 沒有
   pre-checkout hook,所以 `plugin/guard/localfiles.sh` 把這些檔 **hard link** 進
@@ -267,11 +277,16 @@ claude 啟動時的環境)。
   所以 rebase / `pull --rebase` 把遷移 commit 重放到遷移前的歷史上(git 先 checkout 舊 base 蓋掉、
   再套遷移 commit 刪掉)、cherry-pick / merge 遷移 commit、沒有 hook 的 `reset --hard` 來回,都會
   放回;rebase 進行中(`rebase-merge` / `rebase-apply` 存在)每個 pick 的 post-checkout / post-commit
-  不動作,由結尾的 post-rewrite 收尾;pre-rebase 先快照,rebase 前最後一刻用 rename 存的修改也在。
+  不動作,由結尾的 post-rewrite 收尾;pre-rebase 先快照,rebase 前最後一刻用 rename 存的修改也在——
+  順序是 repo 自己的 pre-rebase hook **先**跑、成功後才快照(它 rename 寫的、刪的就是 store 記下的;
+  它拒絕 → rebase 不開始、不快照、照傳它的結束碼;v5.0.1 review)。
+  `reset --hard`、`stash`、`rebase --abort` **不跑任何 hook**:被拿掉的檔要到下一個快照點才回來,
+  而且回來的是上次快照時的版本(縫與取捨見「已知限制」第 11 條)。
   (pre-merge-commit / pre-applypatch 不用:git 跑它們時工作樹已經改完。)symlink 以 symlink 存、以 symlink 回;
   超過 8 MiB 或第 2000 個之後的檔**不進 store**,列在 `<store>/omitted`,清單變動時、每次
   `kit guard status` 與 `kit migrate` 都印 `NOT protected` 警告(review R3-3);store 根目錄 700。
-  工作樹沒了、HEAD 也不追蹤的 store 檔 = owner 刪的(或 reset / stash / clean 拿掉的)→ 移到
+  工作樹沒了、HEAD 也不追蹤、上次快照後也沒有經過追蹤它的 commit 的 store 檔 = owner 刪的
+  (或 stash / clean 拿掉的)→ 移到
   `<store>/trash/<path>.~<時間戳>~`,**每個路徑保留最近 5 代**、內容相同不重複存(review R4-4);
   checkout 不會再放回(review N2);每個快照呼叫端(post-* hook、`kit migrate`、`kit guard status`、
   session start 的 context)都用一行說搬了什麼;還原訊息附 store 那份的時間(review N4)。
@@ -354,24 +369,29 @@ recorded」。雜湊工具本身只用固定絕對路徑(`/usr/bin/sha256sum`、
 11. **本機專屬檔案保護的縫**(review F3 殘餘):hard link 只保住「就地」修改;用 rename 存檔的
    編輯器(`sed -i`、原子存檔)在上次快照後、下一次破壞性 checkout 前的修改會遺失(回來的是
    較舊的 store 版本);repo 與 `~/.local/state` 不在同一個檔案系統時只能複製,同一個縫。
-   `git reset --hard <舊>` 不觸發 hook,但會留在 HEAD reflog:下一次快照時從 store 放回(v5.0.1);
-   reflog 關掉(`core.logAllRefUpdates=false`)時退回舊行為。`git stash`、`git clean` 不留 reflog——內容在
-   下一次快照時移進
+   **不跑 hook 的操作**(v5.0.1 review):`git reset --hard`、`git stash`、`git rebase --abort` 都不觸發
+   任何 hook——被拿掉的檔在下一個快照點(commit、checkout、`kit guard status`、session start)之前
+   就是不在,這段時間打開 repo 會看到它們消失。`reset --hard <舊>` 與 `rebase --abort` 會留在 HEAD
+   reflog:下一次快照時從 store 放回(reflog 關掉——`core.logAllRefUpdates=false`——時退回舊行為:
+   進 trash);**放回的是上次快照時的 store 版本**——上次快照之後用 rename 原子存檔的修改,在這種
+   來回裡會**遺失**(新內容既不在 `files/` 也不在 `prev/`;就地修改因 hard link 不受影響)。
+   `git stash`、`git clean` 不留 reflog——內容在下一次快照時移進
    `<store>/trash/`(帶時間戳,每個路徑留最近 5 代;第 6 次以上「消失又出現、內容不同」會丟掉最舊那代),
    下一個快照點會用一行說明,`kit guard status` 也會列出來,要自己複製回來。
-   **刪掉的 plan 復活**(review N2):快照時「工作樹沒了、HEAD 不追蹤」的檔移進 trash、不再放回;
-   但刪掉後**沒有任何快照點**(commit、checkout、`kit guard status`、session start)就做了一次經過
-   「仍追蹤它的 commit」的 git 操作(checkout 遷移前的 ref 再回來、rebase / reset 穿過遷移前的歷史),
-   那份 plan 仍會從 store 回來(未追蹤、已 ignore,不會被推)——v5.0.1 起「git 刪的放回」優先。
-   **rename 存檔的縫**(review N4):還原訊息會印 store 那份的時間(`as of …`),比那更晚、用 rename
-   存的修改不在裡面(`<store>/prev/` 留前一版);沒有每個 prompt 都快照(成本)。
+   **刪掉的檔復活**(review N2 / v5.0.1,**刻意取捨**):快照時「工作樹沒了、HEAD 不追蹤」的檔移進
+   trash、不再放回;但 owner 刪掉後**沒有任何快照點**就做了一次經過「仍追蹤它的 commit」的 git 操作
+   (checkout 遷移前的 ref 再回來、rebase / reset 穿過遷移前的歷史),hook 分不出是誰刪的,那份檔會
+   從 store 回來(未追蹤、已 ignore,不會被推)——「放回優先」:復活可以再刪一次,遺失救不回來。
+   **還原訊息帶時間**(review N4):每次放回都印 store 那份的時間(`as of …`),比那更晚、用 rename
+   存的修改不在裡面(`<store>/prev/` 留前一版);沒有每個 prompt 都快照(成本),也沒有包裝
+   `reset` 的指令(git 沒有可掛的 pre-reset hook)。
    超過 8 MiB / 第 2000 個之後的檔不受保護,只有警告(review R3-3)。根治是改寫歷史(design §12 步驟 6)。
 12. guard-preserve 已知誤擋:`chmod` 算寫入(`chmod -x` 會讓 shim 靜默失效),所以模型照 doctor
    建議跑 `chmod 600 privacy.local.toml` 也會被 deny(交給 user);在 kit repo 自己的開發裡,
    `sed -i plugin/guard/*.sh`、`sed -i plugin/hooks/*.sh` 被 deny(那份就是線上的 guard / hook),改用 Edit(轉 ask)。
 13. **合法移除 kit.toml 之後**(review N3):user bypass 放行的那次移除留在歷史裡;之後推到**新的**
-   remote(或 ls-remote 失敗、改掃完整歷史時),範圍含那個移除 commit → 每次都 `[R2 kit.toml-removed]`
-   block,要再 bypass 一次;還留著 kit.toml 的本地分支也讓這個 repo 繼續被當成 kit repo(R2 照套)。
+   remote,範圍含那個移除 commit → 每次都 `[R2 kit.toml-removed]` block(ls-remote 失敗的新 ref
+   則收進 `[R0 remote-unreachable]`),要再 bypass 一次;還留著 kit.toml 的本地分支也讓這個 repo 繼續被當成 kit repo(R2 照套)。
    少見、有 bypass,不另設例外。
 14. **kit 身分判斷的縫**(review R3-2 / R4-2 / R4-3 殘餘):**新 ref**(零 rsha)且 `git ls-remote` 失敗
    (離線、要密碼)時只剩本地訊號(本地分支 tip、範圍、工作樹 kit.toml)——全新 repo 離線推不相干
