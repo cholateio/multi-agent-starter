@@ -217,7 +217,7 @@ guard_preserve_cmd_hit() {  # $1 = raw Bash command → 0 if it bypasses the gua
     guard_preserve_hit "$flat" && return 0
     # a pseudo-terminal wrapper (pty.spawn, unbuffer, expect, script, socat)
     # around `guard … bypass` — kit guard bypass refuses to run without a TTY
-    local bare; bare="$(printf '%s' "$cmd" | tr '\n' ';' | tr -d "\"'\\")"
+    local bare; bare="$(printf '%s' "$cmd" | tr '\n' ';' | tr -d "\"'\\\\")"
     if printf '%s' "$bare" | grep -qE 'guard[^A-Za-z0-9]{1,8}bypass' \
        && printf '%s' "$bare" | grep -qE '(pty|unbuffer|expect|script|socat|python|perl|ruby|node)'; then
         return 0
