@@ -18,7 +18,7 @@ BOOTSTRAP_PROMPT = (
     "Read AGENTS.md and replace every [placeholder]: project goal (one sentence), stack "
     "(with a copy-pasteable test command), file layout, constraints and conventions. Mirror every "
     "path-type constraint into kit.toml [protected] (one entry per line). Then rewrite README.md "
-    "following the kit README recipe and put developer notes in docs/DEVELOPMENT.md. These files "
+    "following the kit README recipe ({recipe}) and put developer notes in docs/DEVELOPMENT.md. These files "
     "are tracked and may be public: no local absolute paths, costs, account ids or personal data. "
     "Show me the diff before committing."
 )
@@ -138,5 +138,5 @@ def run(args) -> int:
     print()
     print(f"bootstrap prompt (paste into `claude` started in {root}):")
     print()
-    print("  " + BOOTSTRAP_PROMPT)
+    print("  " + BOOTSTRAP_PROMPT.format(recipe=tpl / ("README.private.md" if args.private else "README.public.md")))
     return 0

@@ -40,9 +40,14 @@ MIRRORED = ("Path-type constraints above are mirrored in `kit.toml [protected]` 
 TEMPLATE_HEADINGS = ("Project goal", "Stack", "File layout", "Project-specific constraints")
 ROUTE_HEADING_RE = re.compile(r"^## (檔案路由|Multi-agent kit|Kit routing)")
 QUOTE_RE = re.compile(r"^> CLAUDE\.md[（(]kit")
-README_PROMPT = ("Using AGENTS.md and docs/, rewrite README.md with the kit README recipe "
-                 "(public: RepoBox recipe in English; private: short version), move developer content to "
-                 "docs/DEVELOPMENT.md, no local paths / costs / personal data; show me the diff first.")
+
+
+def readme_prompt() -> str:
+    tpl = paths.templates_dir()
+    return ("Using AGENTS.md and docs/, rewrite README.md with the kit README recipe "
+            f"(public repo: {tpl / 'README.public.md'}, in English; private repo: {tpl / 'README.private.md'}), "
+            "move developer content to docs/DEVELOPMENT.md, no local paths / costs / personal data; "
+            "show me the diff first.")
 
 
 # ------------------------------------------------------------------ pure helpers
@@ -671,7 +676,7 @@ def run(args) -> int:
     if pending:
         store = _snapshot_local(root)
         print("\nnext (D18, README is content work — paste into a claude session in this repo):")
-        print("  " + README_PROMPT)
+        print("  " + readme_prompt())
         if gitutil.run_git(root, "log", "-1", "--format=%H", "--", *UNTRACK, check=False).strip():
             print(LOCAL_WARNING.format(store=store))
     else:

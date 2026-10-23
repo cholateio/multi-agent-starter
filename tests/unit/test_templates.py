@@ -277,6 +277,18 @@ class TestRendered(Rendered):
         for f in ("AGENTS.md", "README.md", "docs/DEVELOPMENT.md"):
             self.assertNotRegex((d / f).read_text(), LOCAL_LITERALS, f)
 
+    def test_prompts_name_existing_readme_recipes(self):
+        import contextlib, io
+        from cli import migrate
+        for private, name in ((False, "README.public.md"), (True, "README.private.md")):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(init_cmd.run(Args(dir=str(self.tmp / name), private=private)), 0)
+            recipe = TPL / name
+            self.assertTrue(recipe.is_file())
+            self.assertIn(str(recipe), out.getvalue())
+            self.assertIn(str(recipe), migrate.readme_prompt())
+
 
 if __name__ == "__main__":
     unittest.main()
