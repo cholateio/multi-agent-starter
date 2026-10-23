@@ -1,42 +1,42 @@
 # Multi-Agent Starter Kit
 
-**English** | [繁體中文](README.zh-TW.md)
+**繁體中文** | [English](README.en.md)
 
-You use Claude Code with Superpowers and the Codex plugin, and you end up as the human message router between them. This kit installs once per machine and makes the three agents work in clean roles, with a different model reviewing every change and a git guard that keeps private material out of your commits.
+你用 Claude Code 搭配 Superpowers 和 Codex plugin，結果自己變成在它們之間轉貼訊息的人肉路由器。這套 kit 每台機器只要裝一次，就能讓三個 agent 各守其位：每個改動都由另一個模型審查，還有一道 git guard 把私人資料擋在你的 commit 之外。
 
-![Layered diagram of the kit: install layer (kit CLI, tests, templates), harness layer (hooks, rules, skills), runtime roles (orchestrator, subagents, reviewer) and project state](docs/architecture/overview.svg)
+![kit 的分層圖：安裝層（kit CLI、測試、範本）、harness 層（hooks、rules、skills）、執行期角色（orchestrator、subagents、reviewer）以及專案狀態](docs/architecture/overview.svg)
 
-- **One install**: a single Claude Code plugin per machine; projects carry only `AGENTS.md` and `kit.toml`.
-- **Cross-model review**: a Stop gate holds the turn until a different model has reviewed the change set.
-- **Physical guardrails**: hooks block risky edits, runaway retries and verifier pipes that hide a red test.
-- **Leak guard**: every `git commit` and `git push` on the machine is scanned for secrets, local paths and personal literals.
+- **一次安裝**：每台機器只裝一個 Claude Code plugin；專案裡只放 `AGENTS.md` 和 `kit.toml`。
+- **跨模型審查**：Stop gate 會把這一輪擋住，直到另一個模型審查過這批改動。
+- **實體護欄**：hooks 會擋下高風險的編輯、失控的重試，以及會把失敗測試藏起來的 verifier 管線。
+- **防洩漏**：這台機器上的每一次 `git commit` 和 `git push` 都會被掃描，檢查有沒有密鑰、本機路徑和你的個人字串。
 
-Requires Claude Code, git, Python 3.11 or newer, and (for cross-model review) the Codex CLI.
+需要 Claude Code、git、Python 3.11 以上，以及（跨模型審查用的）Codex CLI。
 
-## How it works
+## 它怎麼運作
 
 ```
-you ── task ──► Claude (orchestrator) ──► Superpowers  (plan + implement)
-                       │            └───► research-scout (read-only research)
-                       └── Stop gate ──► Codex review (a different model)
-git commit / git push (any tool) ──► global hooksPath ──► kit guard
+你 ── 任務 ──► Claude (協調者) ──► Superpowers  (規劃 + 實作)
+                      │      └───► research-scout (唯讀研究)
+                      └── Stop gate ──► Codex 審查 (另一個模型)
+git commit / git push (任何工具) ──► 全域 hooksPath ──► kit guard
 ```
 
-Hooks and rules activate only in directories that contain a `kit.toml`, so the plugin stays silent everywhere else, including your home directory. Details and trade-offs are in [`ARCHITECTURE.md`](ARCHITECTURE.md); the defense inventory is in [`DEFENSES.md`](DEFENSES.md).
+Hooks 和 rules 只在含有 `kit.toml` 的資料夾裡啟用，所以 plugin 在其他地方都不會出聲，包括你的家目錄。細節與取捨寫在 [`ARCHITECTURE.md`](ARCHITECTURE.md)；防線清單在 [`DEFENSES.md`](DEFENSES.md)。
 
-## Install
+## 安裝
 
-You need Claude Code installed and signed in. For the `full` review profile also run `npm i -g @openai/codex && codex login`; without Codex set `export KIT_PROFILE=solo` and review falls back to a fresh-context Claude reviewer.
+你需要已安裝並登入的 Claude Code。要用 `full` 審查 profile，還要執行 `npm i -g @openai/codex && codex login`；沒有 Codex 的話就設定 `export KIT_PROFILE=solo`，審查會退回由 fresh-context 的 Claude reviewer 負責。
 
-1. Clone the kit and keep it: `git clone https://github.com/cholateio/multi-agent-starter ~/.multi-agent-kit`
-2. Run the one-time machine setup: `~/.multi-agent-kit/bin/kit setup` (add `--dry-run` first to see every step).
-3. Check it: `kit doctor` should print only `OK` lines.
+1. 把 kit clone 下來並保留：`git clone https://github.com/cholateio/multi-agent-starter ~/.multi-agent-kit`
+2. 執行一次性的機器設定：`~/.multi-agent-kit/bin/kit setup`（可以先加 `--dry-run` 看每個步驟）。
+3. 檢查：`kit doctor` 應該只印出 `OK` 行。
 
-To install the plugin from GitHub instead of the local checkout, run `claude plugin marketplace add cholateio/multi-agent-starter` and `claude plugin install kit@multi-agent-kit`, or pass `--marketplace github` to `kit setup`.
+如果要從 GitHub 安裝 plugin，而不是用本機的 checkout，執行 `claude plugin marketplace add cholateio/multi-agent-starter` 和 `claude plugin install kit@multi-agent-kit`，或在 `kit setup` 加上 `--marketplace github`。
 
-`kit setup` installs the plugin at user scope, merges a minimal permission baseline into `~/.claude/settings.json`, points git's global `core.hooksPath` at the guard shims, and downloads pinned, checksum-verified `gitleaks` and `osv-scanner` (or records the absolute path of an already-installed copy whose sha256 equals the pin — never one picked by its version output). The guard never looks them up on `PATH` and re-checks the recorded sha256 before every run: a replaced binary blocks the push. `kit setup --uninstall` reverses it.
+`kit setup` 會以 user scope 安裝 plugin、把一份最小的權限基線合併進 `~/.claude/settings.json`、把 git 全域的 `core.hooksPath` 指向 guard shim，並下載釘版且經過 checksum 驗證的 `gitleaks` 和 `osv-scanner`（或記下已安裝那份的絕對路徑，前提是它的 sha256 等於釘選值——絕不憑它輸出的版本號來挑）。guard 從不在 `PATH` 上找這些工具，每次執行前也都會重新檢查記錄的 sha256：二進位檔被換掉，push 就會被擋下。`kit setup --uninstall` 可以把這些全部還原。
 
-## Use it in a project
+## 在專案中使用
 
 ```bash
 kit init ~/projects/my-thing              # new project: AGENTS.md, CLAUDE.md, kit.toml, README, LICENSE, .gitignore
@@ -45,26 +45,26 @@ kit migrate ~/projects/old-v4-project     # dry-run; add --apply --commit to mig
 cd ~/projects/my-thing && claude
 ```
 
-`kit init` prints one bootstrap prompt; paste it into Claude to fill in the placeholders. `kit.toml` is the activation marker and holds the repo's visibility, license and protected paths (zones the AI may not edit without your confirmation). Existing files are never overwritten.
+`kit init` 會印出一段 bootstrap prompt；把它貼給 Claude，讓它把佔位內容填好。`kit.toml` 是啟用標記，記錄這個 repo 的可見度、授權和受保護路徑（沒有你確認，AI 就不能編輯的區域）。既有的檔案絕不會被覆寫。
 
-Day to day you describe a task and approve the plan. Add a modifier to override sizing: `直接做` (just do it), `走完整流程` (full flow), or `請質疑這個設計` (challenge the design). Run `/kit:review` to pass the Stop gate, or `/kit:skip-review` to skip it with an audit trail. Do not enable `/codex:setup --enable-review-gate`; the kit's own gate does the same job without looping.
+平常你只要描述任務、核准計畫。想推翻自動判定的規模，就加上修飾語：`直接做`、`走完整流程` 或 `請質疑這個設計`。執行 `/kit:review` 通過 Stop gate，或用 `/kit:skip-review` 跳過並留下稽核紀錄。不要啟用 `/codex:setup --enable-review-gate`；kit 自己的 gate 做的是同一件事，而且不會陷入迴圈。
 
-## Guard and audit
+## Guard 與稽核
 
-The guard runs on every commit and push on the machine, whether a person or an AI makes it:
+這台機器上的每一次 commit 和 push 都會跑 guard，不管是人還是 AI 做的：
 
-| Check | Result |
+| 檢查 | 結果 |
 |---|---|
-| Secrets (gitleaks plus kit rules) | block |
-| Files that must never be pushed (`.claude/`, `PROJECT.toml`, `*.local.toml`, `.env*`, plans) | block |
-| Local paths and your personal literals from `~/.config/kit/privacy.local.toml` | block |
-| Other home paths, emails, scratch paths | warn |
+| 密鑰（gitleaks 加上 kit 規則） | 擋下 |
+| 絕不能 push 的檔案（`.claude/`、`PROJECT.toml`、`*.local.toml`、`.env*`、plans） | 擋下 |
+| 本機路徑，以及 `~/.config/kit/privacy.local.toml` 裡你的個人字串 | 擋下 |
+| 其他家目錄路徑、email、暫存路徑 | 警告 |
 
-Your personal literals (names of private projects, cloud ids, emails) live only in `~/.config/kit/privacy.local.toml` (mode 600) and are never printed back. A deliberate exception goes in `kit.toml` (`allow_literals` by name, or `allow_paths`); a `kit-privacy: allow` comment on the line only silences warning-level rules (other home paths, emails, scratch paths) and is itself reported and logged. `kit guard status` shows the install state; `kit guard bypass "<reason>"` is a single-use, audited override that only a person at a terminal can run.
+你的個人字串（私人專案名稱、cloud id、email）只存在 `~/.config/kit/privacy.local.toml`（權限 600），而且永遠不會被印出來。刻意的例外寫在 `kit.toml`（以名稱寫進 `allow_literals`，或用 `allow_paths`）；在該行加上 `kit-privacy: allow` 註解，只能讓警告等級的規則（其他家目錄路徑、email、暫存路徑）安靜下來，而且這個註解本身也會被回報並記錄。`kit guard status` 顯示安裝狀態；`kit guard bypass "<reason>"` 是單次、留下稽核紀錄的放行，只有坐在終端機前的人才能執行。
 
-`kit audit` scans every repo under your configured root and GitHub settings: leaked history, personal literals in the tree and in history, tracked forbidden paths, README hygiene, workflow pinning, vulnerable lockfiles. It prints a table and exits non-zero on CRITICAL or HIGH findings. Add `--html` for a report and `--baseline <file>` to see only new findings.
+`kit audit` 會掃描你設定的根目錄底下的每個 repo，以及 GitHub 設定：外洩的歷史、目前檔案與歷史中的個人字串、被追蹤的禁止路徑、README 衛生、workflow 釘版、有漏洞的 lockfile。它會印出一張表，有 CRITICAL 或 HIGH 等級的發現時以非零狀態結束。加 `--html` 產生報告，加 `--baseline <file>` 只看新的發現。
 
-## Development
+## 開發
 
 ```bash
 claude --plugin-dir ./plugin     # run Claude with the working-tree plugin
@@ -72,18 +72,18 @@ bash tests/run-all.sh            # every smoke suite plus the Python unit tests
 claude plugin validate ./plugin --strict
 ```
 
-`tests/guard-smoke.sh` and `tests/audit-smoke.sh` build their fixtures at runtime in temp directories with an isolated `HOME`, so they never touch your real configuration. Release checklist: all suites green, then the rule audit in [`docs/instruction-audit.md`](docs/instruction-audit.md).
+`tests/guard-smoke.sh` 和 `tests/audit-smoke.sh` 會在執行時於暫存資料夾裡建立 fixture，並使用隔離的 `HOME`，所以絕不會動到你真正的設定。發佈檢查清單：所有測試套件全綠，再照 [`docs/instruction-audit.md`](docs/instruction-audit.md) 做規則稽核。
 
-## Documentation
+## 文件
 
-| File | Content |
+| 檔案 | 內容 |
 |---|---|
-| [`DEFENSES.md`](DEFENSES.md) | Prompt, context and harness defenses, and the guard rules (zh-TW) |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Why the kit is shaped this way; version history v1 to v5 (zh-TW) |
-| [`docs/harness-diagnosis.md`](docs/harness-diagnosis.md) | Failure scenarios behind the hook design (zh-TW) |
-| [`docs/instruction-audit.md`](docs/instruction-audit.md) | Rule audit procedure (zh-TW) |
-| [`docs/design-history/`](docs/design-history/) | Historical plans and specs; not living documents |
+| [`DEFENSES.md`](DEFENSES.md) | Prompt、context 與 harness 的防線，以及 guard 規則（繁體中文） |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | kit 為什麼長這樣；v1 到 v5 的版本歷史（繁體中文） |
+| [`docs/harness-diagnosis.md`](docs/harness-diagnosis.md) | hook 設計背後的失敗情境（繁體中文） |
+| [`docs/instruction-audit.md`](docs/instruction-audit.md) | 規則稽核流程（繁體中文） |
+| [`docs/design-history/`](docs/design-history/) | 過去的計畫與規格；不再持續更新 |
 
-## License
+## 授權
 
-[MIT](LICENSE). Built on Claude Code, the Superpowers plugin and the Codex plugin.
+[MIT](LICENSE)。建構於 Claude Code、Superpowers plugin 與 Codex plugin 之上。

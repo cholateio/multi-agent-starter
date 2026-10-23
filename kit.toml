@@ -2,6 +2,6 @@
 kit = 5
 visibility = "public"
 license = "MIT"
-readme_lang = "en"
+readme_lang = "zh-TW"
 protected = [
 ]
