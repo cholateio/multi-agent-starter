@@ -1,5 +1,7 @@
 # Multi-Agent Starter Kit
 
+**English** | [繁體中文](README.zh-TW.md)
+
 You use Claude Code with Superpowers and the Codex plugin, and you end up as the human message router between them. This kit installs once per machine and makes the three agents work in clean roles, with a different model reviewing every change and a git guard that keeps private material out of your commits.
 
 ![Layered diagram of the kit: install layer (kit CLI, tests, templates), harness layer (hooks, rules, skills), runtime roles (orchestrator, subagents, reviewer) and project state](docs/architecture/overview.svg)

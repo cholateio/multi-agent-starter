@@ -28,6 +28,7 @@ kit v5 本身的 repo:Claude Code plugin + `kit` CLI + 本機 git guard,給「�
 
 - 改 hook / rule / guard 後:`bash tests/run-all.sh` 必須全綠;`claude plugin validate ./plugin --strict`。
 - `README.md` 英文;長文件(ARCHITECTURE / DEFENSES / design-history)zh-TW。
+- `README.md` 與 `README.zh-TW.md` 互為鏡像,必須在同一個 commit 一起更新。
 - `claude --plugin-dir ./plugin` 用工作樹的 plugin 跑 session。
 - GitHub Actions: top-level `permissions: contents: read`, raised per job only when needed; pin every `uses:` to a 40-character commit SHA with a trailing `# vX.Y.Z` comment.
 
