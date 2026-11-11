@@ -4,22 +4,18 @@
 > 前提假設：主對話（指揮官）= 當前可用的最強模型；Sonnet/Haiku = 輕量
 > 執行員。review 與 isolation 規則在 kit-workflow.md，本檔不重複。
 
-## 指揮官不下場（context 經濟）
+## 派工是經濟判斷（context 經濟）
 
-主對話 context 是唯一不可再生資源。指揮官**預設**只做五件事：**決策、
-架構、派工、驗收、跟 user 對話**（例外見下：trivial phase inline 做、
-中型閱讀直讀更省）。
+主對話 context 不可再生，但派工也不免費：一個 subagent 約 10-30k tokens、
+只回摘要；直讀 400 行約 5k。**預設自己做。** 值得派工的情況：可平行的獨立
+工作、位置未知的大範圍搜索或全 repo 掃描、會把大量一次性輸出灌進 context
+的工作。
 
-- 硬規則只有一條：**subagent 回報禁貼超過 20 行代碼**——用「路徑:行號 +
-  一句結論」，要細節自己讀那幾行。收到噴代碼的回報要求重報，不照收進 context。
-- 必須派工：**全 repo 掃描、預估碰 >10 檔、或位置未知的搜索**（不知在哪
-  別自己翻）。
-- 其餘算成本：一個 subagent 約 10-30k tokens，直讀 400 行約 5k——中型
-  閱讀直接讀更便宜。**別為了儀式感派工**，也別把 context 當免費資源。
-- **每 phase 派工前重過 sizing 閘**（kit-workflow）：trivial／~≤10 行的
-  phase 指揮官 inline 做或併進相鄰實質 task，不為它開 implementer＋reviewer
-  ——fresh subagent 光重載稅 15-20k，3 行直改約 5k（收據 2026-07-23，
-  evals.md）。
+- **subagent 回報禁貼超過 20 行代碼**——用「路徑:行號 + 一句結論」，要細節
+  自己讀那幾行。收到噴代碼的回報要求重報，不照收進 context。
+- 執行 plan 時每 phase 重新判斷：trivial／~≤10 行的 phase inline 做或併進
+  相鄰 task，不為它開 implementer＋reviewer——fresh subagent 光重載稅
+  15-20k（收據 2026-07-23，evals.md）。
 
 ## 派工三件套（缺一不派）
 
@@ -61,7 +57,7 @@ invoke `/kit:dispatch` skill。
 
 ## 隔離驗收（implementer ≠ verifier）
 
-- 寫 code 的 agent **不得自我宣告完成**——完成與否由驗收方認定。
+- 派出去的 implementer **不得自我宣告完成**——完成與否由驗收方認定（主對話自己做的改動：自己跑驗證，Final review 照常）。
 - 驗收方式（指揮官擇一）：(1) **fresh-context read-back**：重讀檔案實體、
   實跑測試、對照 AC 逐條打勾（常規）；(2) **多樣本評審**：高 stakes 時多個
   獨立 subagent 各評再選優。

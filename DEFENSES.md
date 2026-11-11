@@ -51,24 +51,25 @@ smoke test 把關(cap 20480B,v4.9 起附棘輪公式:瘦身後下修至實際值
   **描述語境濾網**:先遮罩「頻率/進行式標記 + 觸發詞」(一直在走完整
   流程、keeps running the full review)再比對——描述工作流的句子不是
   指令(2026-07-10 實際誤觸收據見 tests/evals.md)。
-- **Workflow sizing 反偏壓**(`kit-workflow.md`)——給小任務可操作判準
-  (≤4 檔不計測試檔、無新依賴、不碰 schema/auth/payment/constraints → 直接做),
-  並依 superpowers 自己承認的優先權(專案指示 > skills)明文解除小任務的
-  brainstorming/TDD 強制觸發。防的是強觸發規則把瑣事拉進全套流程。
-- **主導模型/effort 配置提案**(`kit-workflow.md`,v4.3)——feature 級
-  以上計畫送簽核時必附各 phase「主導模型 + effort + 一句理由 + 卡關
-  升級條件」,phase 交界一行提醒「要切請 /model」。純建議、user 執行
-  ——讓成本可見,把「哪段可以用便宜檔」的決策交回 user 手上。
+- **Workflow sizing 依風險面**(`kit-workflow.md`,v5.1)——預設直接做;只有
+  敏感路徑、新依賴、公開 API/行為契約、不可逆操作、跨模組重設計才先 plan +
+  user 簽核。行數/檔數不再觸發 plan(舊判準 ≤4 檔/≤50 行與 Stop gate 的
+  150 行/8 檔不一致;收據 evals.md 2026-11-11:兩個主模型無規則下 4/4 自行
+  按風險分流)。物理地板不變:Stop gate 仍在累積 150 行/8 檔時要求 review
+  決策,敏感路徑 size-blind。
+- **superpowers 是工具不是閘門**(`kit-workflow.md`,v5.1)——brainstorming/
+  writing-plans/TDD/subagent-driven-development 由模型判斷有幫助或 user 要求
+  時才用,明文覆蓋其 "must invoke" 自動觸發(依 superpowers 自己承認的優先權)。
+  主導模型/effort 配置提案(v4.3)同版移除:主對話固定最高階模型,觸發條件
+  已不存在。
 - **re-review 範圍收斂**(`kit-workflow.md`,v4.5)——round 1 審全集,之後
   只審 fix delta +「fix 改動的下游」(呼叫端=stale-green 的正門)+ findings
   碰過的碼;**不要每輪把 reviewer 指向整條分支**——重掃已審舊碼會挖出新
   角度,輪數自我繁殖(收據:3 個小 UI 需求走成 6 輪 review/87 分鐘,
   2026-07-11)。敏感路徑每輪維持全集。
-- **註解紀律**(`kit-workflow.md` + dispatch 模板 2/3,v4.5)——代碼的讀者
-  是**未來的 AI session**,不是人:它讀 code 比讀散文快,敘述性註解是純
-  噪音。只寫代碼顯示不了的四類(不變量/外部約束、跨檔耦合、非顯然 why、
-  附日期收據),辯護性註解歸 commit message/LESSONS。防的是「每次寫 code
-  都產生大量沒人讀的註解」(user 2026-07-12 逐字回報)。
+- **註解紀律**(`kit-workflow.md` + dispatch 模板 2/3,v4.5;v5.1 壓成三行)
+  ——只寫代碼顯示不了的(不變量/外部約束、跨檔耦合、非顯然 why),敘述性與
+  辯護性註解歸 commit message/LESSONS;代碼內註解一律英文。
 - **規則變更紀律**(`kit-evolution.md`)——改 kit 規則前先查覆蓋(已有條目
   = 規則被無視,不是缺席)、要 RED-GREEN 收據(拿不出失敗證據 = 不知道
   在修什麼,不加)、逐字記藉口(paraphrase 會丟觸發詞)、rules/ 20KB 總量
@@ -91,14 +92,11 @@ smoke test 把關(cap 20480B,v4.9 起附棘輪公式:瘦身後下修至實際值
 API 呼叫都重複攜帶,越肥 → compact 越早 → 迷航越早。這層專打這條惡化鏈的
 上游。
 
-- **指揮官不下場**(`kit-delegation.md`)——主對話只做五件事:決策、架構、
-  派工、驗收、跟 user 對話。硬規則只有一條:**回報禁貼 >20 行代碼**(用
-  「路徑:行號 + 一句結論」)——回報噴代碼是 context 污染的實際來源,
-  收到噴代碼要求重報,而不是照單全收。
-- **強制派工的三種情況**——全 repo 掃描、預估 >10 檔、位置未知的搜索
-  (不知道在哪就別自己翻)。其餘交給經濟判斷:派一個 subagent 約
-  10–30k tokens,直讀 400 行約 5k——**別為儀式感派工,也別把 context
-  當免費資源**。
+- **派工是經濟判斷**(`kit-delegation.md`,v5.1 取代「指揮官不下場」與
+  「>10 檔強制派工」)——預設自己做;可平行的獨立工作、位置未知的大範圍
+  搜索/全 repo 掃描、會灌大量一次性輸出的工作才派。保留的硬規則:**回報
+  禁貼 >20 行代碼**(用「路徑:行號 + 一句結論」)。收據 evals.md
+  2026-11-11:14 檔機械改名,兩個主模型 4/4 選擇自己做並附 grep 複查 + 跑測試。
 - **隔離驗收 = 狀態隔離**(implementer≠verifier)——寫 code 的 agent 不得
   自我宣告完成;驗收由 fresh-context subagent read-back。subagent 的
   verbose 探索留在子對話,不污染指揮官 context(四維隔離之一)。

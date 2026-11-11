@@ -29,48 +29,38 @@ stay USER-only (the skill and the hook enforce the floor).
   / temporary solo review.
 - Profile undeterminable → ask before reviewing.
 
-## Workflow sizing (judge it yourself)
+## Workflow sizing (judge it yourself — by risk, not by size)
 
 A `TASK_CLASSIFICATION` hint appears only for explicit user overrides —
 `explicit_skip` / `explicit_full` — honor it. Otherwise use judgment:
 
-- Small (trivial / mechanical / docs, or a code change meeting ALL of:
-  ≤4 files and roughly ≤50 changed lines — test files count toward neither —
-  no new dependency, no schema/migration, no auth/payment/security surface, no
-  public API or behavior-contract change, nothing in AGENTS.md
-  "Constraints") → just do it, verify yourself (run the tests),
-  brief summary. Do NOT invoke superpowers brainstorming / writing-plans / TDD
-  for these — this section overrides those auto-triggers (superpowers' own
-  precedence: project instructions > skills).
-- Beyond the small criteria (feature-sized or multi-file work) → plan
-  first (superpowers writing-plans), run a review on the plan, get user
-  approval, implement.
-- Large or risky (new deps, refactor, migration, auth/payment, novel arch) →
-  research (research-scout subagent) + brainstorm before planning; adversarial
-  review for the plan.
-- Ambiguous between small and feature-sized → ask the user one sizing question
-  instead of silently running the full flow.
+- **Default → just do it.** Any change with no sensitive path (defined under
+  "Final review" below), no new dependency, no public API or behavior-contract
+  change, nothing irreversible. Line and file counts alone never trigger a
+  plan. Verify yourself (run the tests), brief summary. For multi-step work say
+  the plan in a few lines and proceed — no plan review, no approval wait.
+- **Plan + user approval first** when the change touches a sensitive path,
+  adds a dependency, changes a public API or behavior contract, does something
+  irreversible, or is a cross-module redesign. Write the plan, run a review on
+  it (adversarial for high stakes), get approval, implement. Unfamiliar
+  library or novel architecture → research (research-scout subagent) first.
+- Unsure which side → ask the user one question.
 
-For feature-sized+ plans, the approval plan MUST give, per phase: recommended
-MAIN model (among the tiers the user has available) + reasoning effort + one-line rationale +
-escalation trigger. Novel design / irreversible ops / root-cause debugging →
-strongest model, high effort; spec-locked work behind frozen interfaces → one
-tier down. At each phase boundary remind the user once: "next phase suggests
-<model>/<effort> — /model or continue". Advisory; never block. (Subagent tiers
-= kit-delegation.)
+**Superpowers skills are tools, not gates.** Use brainstorming / writing-plans
+/ TDD / subagent-driven-development when you judge they improve the result or
+the user asks for them — not because a trigger description matches. This
+overrides their "must invoke" auto-trigger (superpowers' own precedence:
+user and project instructions > skills).
 
 If `docs/specs/` or `docs/superpowers/specs/` has a spec: it is the authoritative requirements source —
 skip brainstorming, still derive a codebase-aware plan, still review the spec
 (isolation applies to it too).
 
-## 註解紀律（代碼的讀者是 AI）
+## 註解紀律
 
-機隊代碼主要讀者是未來 AI session。註解只寫代碼顯示不了的四類：
-不變量/外部約束、跨檔耦合、非顯然的 why、附日期收據——其餘零註解。禁止
-敘述性（下一行做什麼）與辯護性（向 reviewer 解釋為何正確）註解，歸 commit
-message／LESSONS。docstring 只給 public API 契約。**代碼內註解一律英文**——
-非 ASCII 會滲進 byte 敏感語境（如 .env 值行，見 LESSONS）；文件／prose／
-commit 用中文。
+只寫代碼顯示不了的：不變量/外部約束、跨檔耦合、非顯然的 why；不寫敘述性或
+辯護性註解（歸 commit message／LESSONS）。**代碼內註解一律英文**，config／
+secret 值行不放非 ASCII（見 LESSONS）；文件／prose／commit 用中文。
 
 ## Reviews that are NOT optional
 
@@ -105,7 +95,7 @@ commit 用中文。
 - A review flags a critical/high issue you can't resolve from context, or
   challenges the plan's premise.
 - Research suggests a meaningfully better approach than the plan assumed.
-- A phase would modify > 100 lines, or delete/rewrite > 30 existing lines
-  the plan did not explicitly forecast (= judgment-matrix R3.2).
+- Executing an approved plan, a phase would delete/rewrite > 30 existing lines
+  the plan did not forecast (= `/kit:judgment` R3.2).
 - The change touches AGENTS.md "Constraints".
 - (full) codex unavailable — ask whether to proceed or wait.
