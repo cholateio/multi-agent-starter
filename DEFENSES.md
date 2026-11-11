@@ -77,6 +77,12 @@ smoke test 把關(cap 20480B,v4.9 起附棘輪公式:瘦身後下修至實際值
 - **判斷檢核表**(`plugin/skills/judgment`,需要時才讀)——換路徑
   信號(R1)、完成判準(R2)、熔斷提問時機(R3)、品味不拍板(R4),
   每條附正例反例。R3/R4 觸發條件明文**優先於** kit-judgment 的「直接做」傾向。
+- **設計前訪談**(`plugin/skills/grill`,v5.1;kit-workflow 一行路由)——新專案、
+  跨模組重設計、或拿到一份 brief/spec 要開始規劃時先問再設計。Round 0 固定問
+  意圖(最終成果、真正的本體、執行時誰決定、硬限制、永遠不做的事),之後每輪問完
+  整個 frontier、每題附建議答案;先讀 `kit.toml`/`AGENTS.md` 與 brief 提到的附件
+  是否存在;外部主張未查證就標 `unverified`;結尾摘要標「user 決定／我的決定」。
+  防的是「brief 只回答被問到的事」——收據 evals.md 2026-11-12。
 - **驗證信號注入**(`plugin/skills/verify-signals`,需要時才讀,v4.2
   起,v4.10 擴至八節)——「迴圈裡缺便宜驗證信號」的高風險領域:UI 沒截圖
   =視覺上未驗證(S1)、schema 每欄要有現存讀取路徑(S2)、bug 連環卡後

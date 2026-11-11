@@ -44,6 +44,9 @@ A `TASK_CLASSIFICATION` hint appears only for explicit user overrides —
   irreversible, or is a cross-module redesign. Write the plan, run a review on
   it (adversarial for high stakes), get approval, implement. Unfamiliar
   library or novel architecture → research (research-scout subagent) first.
+- **New project, cross-module redesign, or a brief / spec handed over to build
+  from → `/kit:grill` first.** Ask before you design: a brief is a first draft
+  and answers only what it is asked (receipt 2026-11-12, evals.md).
 - Unsure which side → ask the user one question.
 
 **Superpowers skills are tools, not gates.** Use brainstorming / writing-plans
