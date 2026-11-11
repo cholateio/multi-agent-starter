@@ -131,7 +131,7 @@ if [[ "$SOURCE" == "compact" || "$SOURCE" == "resume" ]]; then
 
 RE-ANCHOR (context was just ${SOURCE}ed — memory of this session is lossy now). BEFORE the next file modification:
 1. Re-read AGENTS.md (project constraints) and kit.toml [protected] (the no-touch zones).
-2. Re-read the active plan / progress doc if one exists (docs/plans/, docs/specs/, .superpowers/).
+2. Re-read the active plan / progress doc if one exists (docs/plans/, docs/specs/, docs/superpowers/plans/, docs/superpowers/specs/, .superpowers/).
 3. State in ONE sentence which phase you are in and which files are already DONE — completed work is off-limits unless the plan says otherwise.
 Do not rely on your summarized memory for any of the above — re-read the files."
 fi

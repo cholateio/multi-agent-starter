@@ -38,7 +38,7 @@ A `TASK_CLASSIFICATION` hint appears only for explicit user overrides —
   ≤4 files and roughly ≤50 changed lines — test files count toward neither —
   no new dependency, no schema/migration, no auth/payment/security surface, no
   public API or behavior-contract change, nothing in AGENTS.md
-  "Project-specific constraints") → just do it, verify yourself (run the tests),
+  "Constraints") → just do it, verify yourself (run the tests),
   brief summary. Do NOT invoke superpowers brainstorming / writing-plans / TDD
   for these — this section overrides those auto-triggers (superpowers' own
   precedence: project instructions > skills).
@@ -52,14 +52,14 @@ A `TASK_CLASSIFICATION` hint appears only for explicit user overrides —
   instead of silently running the full flow.
 
 For feature-sized+ plans, the approval plan MUST give, per phase: recommended
-MAIN model (Fable 5 vs Opus 4.8) + reasoning effort + one-line rationale +
+MAIN model (among the tiers the user has available) + reasoning effort + one-line rationale +
 escalation trigger. Novel design / irreversible ops / root-cause debugging →
 strongest model, high effort; spec-locked work behind frozen interfaces → one
 tier down. At each phase boundary remind the user once: "next phase suggests
 <model>/<effort> — /model or continue". Advisory; never block. (Subagent tiers
 = kit-delegation.)
 
-If `docs/specs/` has a spec: it is the authoritative requirements source —
+If `docs/specs/` or `docs/superpowers/specs/` has a spec: it is the authoritative requirements source —
 skip brainstorming, still derive a codebase-aware plan, still review the spec
 (isolation applies to it too).
 
@@ -81,9 +81,10 @@ commit 用中文。
   now / defer (feature mid-flight; the gate re-asks each threshold-distance) /
   skip (model-judged for non-sensitive batches, audited; mechanics are in the
   hook's block message). Do not run ceremonial reviews
-  under the threshold, nor slice work to stay under it. Sensitive paths
-  (auth/payment/migration/protected/kit.toml) are size-blind: no defer, no
-  model-skip — review or the user's word only.
+  under the threshold, nor slice work to stay under it. **Sensitive paths** =
+  auth/authz/session, payment, migration/schema, security/secrets, kit.toml and
+  its [protected] paths, AGENTS.md Constraints. They are size-blind: no defer,
+  no model-skip — review or the user's word only.
 - **Re-review scope**: round 1 covers the whole change set; later rounds scope
   to the fix delta, whatever depends on it (callers of touched functions/types —
   stale-green's front door), and the code the findings touched. Do NOT point the
@@ -91,12 +92,11 @@ commit 用中文。
   reviewed code breeds rounds (receipt 2026-07-11, evals.md). It narrows what
   gets RE-read, not what gets read: every line keeps
   its round-1 review; a redesign earns a fresh whole-set round; sensitive paths
-  (auth/payment/migration/protected/kit.toml) stay whole-set every round. Run each
+  (as defined above) stay whole-set every round. Run each
   re-review in a FRESH context fed only the scoped delta + the findings to
   recheck — never resume/replay the original reviewer (receipt 2026-07-23).
 - **Phase-level review** during plan execution is NOT per-task. Fire it only
-  at (a) sensitive paths — auth/authz/session, payment, migration/schema,
-  AGENTS.md constraints (always, size-blind) — and (b) a dependency boundary a
+  at (a) sensitive paths as defined above (always, size-blind) — and (b) a dependency boundary a
   later phase builds on. Ordinary phases batch into the Final review; per-task
   review re-covers it anyway (receipt 2026-07-23, evals.md).
 
